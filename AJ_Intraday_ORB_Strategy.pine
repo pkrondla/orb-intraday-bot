@@ -1,0 +1,2635 @@
+//@version=6
+indicator("AJ Intraday ORB Strategy", overlay=true, max_labels_count=500)
+
+// ============================================================================
+// TIMEFRAME VERIFICATION
+// ============================================================================
+
+// Verify script is running on 3-minute timeframe
+if timeframe.period != "3"
+    runtime.error("⚠️ This strategy is designed for 3-minute timeframe only. Please switch to 3-minute chart.")
+
+// ============================================================================
+// INPUT PARAMETERS
+// ============================================================================
+
+// Stop Loss Settings
+niftyStopLoss = input.float(35, "Nifty Stop Loss (points)", minval=10, maxval=100, group="Stop Loss")
+
+// Visual Settings
+showORLevels = input.bool(true, "Show ORH/ORL Levels", group="Visual")
+showEntrySignals = input.bool(true, "Show Entry Signals", group="Visual")
+showTrapSignals = input.bool(true, "Show Bull/Bear Trap Signals", group="Visual")
+showWhipsawSignals = input.bool(true, "Show Whipsaw Entry Signals", group="Visual")
+showNeutralZone = input.bool(true, "Show Market Zone Labels", group="Visual")
+
+orhColor = input.color(color.red, "ORH Color", group="Visual")
+orlColor = input.color(color.green, "ORL Color", group="Visual")
+
+// Enhanced Label Positioning Settings
+labelDistance = input.float(15.0, "Label Distance from Candles (Points)", minval=5.0, maxval=50.0, step=2.5, tooltip="Fixed distance in points from candle price", group="Label Settings")
+labelSpacing = input.float(25.0, "Label Spacing (Points)", minval=10.0, maxval=100.0, step=5.0, tooltip="Minimum spacing between overlapping labels", group="Label Settings")
+connectionGap = input.float(2.0, "Connection Line Gap (Points)", minval=0.0, maxval=10.0, step=0.5, tooltip="Gap between connection line and candle high/low", group="Label Settings")
+maxLabelProximity = input.int(8, "Label Proximity Range (Bars)", minval=5, maxval=15, tooltip="Consider labels within this many bars for overlap prevention", group="Label Settings")
+smartDistribution = input.bool(true, "Smart Label Distribution", tooltip="Automatically distribute labels to less crowded areas when many overlap", group="Label Settings")
+zoneLabelDistance = input.int(10, "Zone Label Distance (Bars)", minval=1, maxval=50, step=1, tooltip="Distance in bars from current price to display the zone label on x-axis", group="Label Settings")
+
+// Zone-based positioning system
+zoneSpacing = input.float(20.0, "Zone Spacing (Points)", minval=10.0, maxval=50.0, step=5.0, tooltip="Vertical spacing between different signal zones", group="Label Settings")
+enableZoneAllocation = input.bool(false, "Enable Zone Allocation", tooltip="Organize labels by signal type into distinct vertical zones. Disable for labels closer to candles", group="Label Settings")
+
+// Trade Table Settings
+showTradeTable = input.bool(true, "Show Trade Table", tooltip="Display comprehensive trade table above chart", group="Trade Table")
+maxTableRows = input.int(8, "Max Table Rows", minval=3, maxval=15, tooltip="Maximum number of trades to display in table", group="Trade Table")
+showOnlyActive = input.bool(false, "Show Only Active Trades", tooltip="Display only active trades in table", group="Trade Table")
+tablePosition = input.string("top_right", "Table Position", options=["top_center", "top_right", "top_left", "middle_center", "middle_right", "middle_left", "bottom_center", "bottom_right", "bottom_left"], tooltip="Position of trade table on chart", group="Trade Table")
+
+// Historical Data Settings
+historicalDataMode = input.string("All Days", "Historical Data Display", options=["All Days", "Last Day Only", "Recent Days"], tooltip="Control which days' signals are shown: All Days (complete history), Last Day Only (current trading day), Recent Days (last few days)", group="Historical Data")
+recentDaysCount = input.int(3, "Recent Days Count", minval=1, maxval=10, tooltip="Number of recent trading days to show when 'Recent Days' mode is selected", group="Historical Data")
+
+// ============================================================================
+// TRADE DATA ARRAYS (Declared early to avoid undeclared identifier errors)
+// ============================================================================
+
+// Trade data structure - using arrays to store trade information
+var array<string> tradeSignals = array.new<string>()
+var array<string> tradeTimes = array.new<string>()
+var array<string> tradeExitTimes = array.new<string>()
+var array<float> tradeEntries = array.new<float>()
+var array<float> tradeStops = array.new<float>()
+var array<float> tradeTargets = array.new<float>()
+var array<string> tradeStatuses = array.new<string>()
+var array<float> tradePnLs = array.new<float>()
+var array<int> tradeBars = array.new<int>()
+
+// Trade table variable
+var table tradeTable = na
+
+// ============================================================================
+// TIME FUNCTIONS
+// ============================================================================
+
+isMarketOpen() =>
+    not na(time(timeframe.period, "0930-1530", "Asia/Kolkata"))
+
+isORBPeriod() =>
+    not na(time(timeframe.period, "0915-0930", "Asia/Kolkata"))
+
+isTradingSession() =>
+    not na(time(timeframe.period, "0915-1530", "Asia/Kolkata"))
+
+// Determine if signals should be shown based on user settings
+shouldShowSignals() =>
+    switch historicalDataMode
+        "All Days" => true  // Show for all historical days
+        "Last Day Only" => 
+            // Show only for current/last trading day
+            // Use day change detection for better accuracy
+            var bool isCurrentDay = false
+            if ta.change(dayofweek) != 0 or barstate.isfirst
+                isCurrentDay := true
+            else if barstate.islast
+                isCurrentDay := true
+            isCurrentDay or barstate.isrealtime
+        "Recent Days" =>
+            // Show for recent trading days based on user selection
+            // Calculate approximate bars per day (assuming 6.25 hours * 20 bars per hour = 125 bars per day)
+            barsPerDay = 125  // Approximate for 3-minute chart (375 minutes / 3 = 125 bars)
+            recentBarsThreshold = recentDaysCount * barsPerDay
+            bar_index >= last_bar_index - recentBarsThreshold or barstate.isrealtime
+        => true  // Default: show all
+
+// ============================================================================
+// DAILY PIVOT CALCULATION
+// ============================================================================
+
+// Get previous day's OHLC data
+[prevHigh, prevLow, prevClose] = request.security(syminfo.tickerid, "1D", [high[1], low[1], close[1]])
+
+// Calculate pivot points manually
+pivot = (prevHigh + prevLow + prevClose) / 3
+r1 = 2 * pivot - prevLow
+s1 = 2 * pivot - prevHigh
+r2 = pivot + (prevHigh - prevLow)
+s2 = pivot - (prevHigh - prevLow)
+r3 = prevHigh + 2 * (pivot - prevLow)
+s3 = prevLow - 2 * (prevHigh - pivot)
+
+// ============================================================================
+// MARKET ZONE FUNCTIONS
+// ============================================================================
+
+isNeutralZone() =>
+    close >= s1 and close <= r1
+
+isBullishZone() =>
+    close > r1
+
+isBearishZone() =>
+    close < s1
+
+// ============================================================================
+// ORH/ORL DETECTION LOGIC
+// ============================================================================
+
+var float orh = na
+var float orl = na
+var bool orhDetermined = false
+var bool orlDetermined = false
+var int orhBarIndex = 0
+var int orlBarIndex = 0
+var bool orhLabelDrawn = false
+var bool orlLabelDrawn = false
+
+// ORB LONG 3-Phase Tracking Variables
+var bool orhInitialBreakout = false
+var bool orhRetestCompleted = false  
+var float orhRetestLow = 0.0
+var int orhRetestBar = 0
+
+// ORB SHORT 3-Phase Tracking Variables
+var bool orlInitialBreakdown = false
+var bool orlRetestCompleted = false
+var float orlRetestHigh = 0.0
+var int orlRetestBar = 0
+
+// Bear Trap Tracking Variables (similar to Bull Trap)
+var bool bearTrapCandleOccurred = false
+var float bearTrapCandleHigh = 0.0
+var int bearTrapCandleBar = 0
+
+// Additional Whipsaw Tracking for Bear Trap
+var bool bearTrapAdditionalWhipsaw = false
+var int bearTrapWhipsawCount = 0
+var bool bearTrapWhipsawTriggered = false
+
+// Additional Whipsaw Tracking for Bull Trap
+var bool bullTrapAdditionalWhipsaw = false
+var int bullTrapWhipsawCount = 0
+var bool bullTrapWhipsawTriggered = false
+
+// Additional Whipsaw Tracking for ORB Long
+var bool orbLongAdditionalWhipsaw = false
+var int orbLongWhipsawCount = 0
+var bool orbLongWhipsawTriggered = false
+
+// Additional Whipsaw Tracking for ORB Short
+var bool orbShortAdditionalWhipsaw = false
+var int orbShortWhipsawCount = 0
+var bool orbShortWhipsawTriggered = false
+
+// ORB Follow-up Failure Pattern Tracking Variables
+var bool bullTrapCase1 = false  // No confirmation candle - immediate failure
+var bool bullTrapCase2 = false  // Confirmation came but follow-up failed
+var bool bearTrapCase1 = false  // No confirmation candle - immediate failure  
+var bool bearTrapCase2 = false  // Confirmation came but follow-up failed
+var float bullTrapCase1Entry = 0.0
+var float bullTrapCase2Entry = 0.0
+var float bearTrapCase1Entry = 0.0
+var float bearTrapCase2Entry = 0.0
+var float bullTrapCase1Stop = 0.0
+var float bullTrapCase2Stop = 0.0
+var float bearTrapCase1Stop = 0.0
+var float bearTrapCase2Stop = 0.0
+var float bullTrapCase1Target = 0.0
+var float bullTrapCase2Target = 0.0
+var float bearTrapCase1Target = 0.0
+var float bearTrapCase2Target = 0.0
+
+// ORB Entry/Stop/Target Variables
+var float orbLongEntry = 0.0
+var float orbLongStop = 0.0
+var float orbLongTarget = 0.0
+var float orbShortEntry = 0.0
+var float orbShortStop = 0.0
+var float orbShortTarget = 0.0
+
+// Trending Day Detection Variables
+var bool trendingDayBullish = false
+var bool trendingDayBearish = false
+var string trendingDayPattern = ""
+var bool trendingDayLabelShown = false
+var label trendingDayLabel = na
+var string trendingDayTime = ""
+
+// Trending Day Pattern Counters
+var int bullishSetupCount = 0
+var int bearishSetupCount = 0
+var bool hasBullTrap = false
+var bool hasBearTrap = false
+var bool hasFailedBullTrap = false  // Case 1 or Case 2
+var bool hasFailedBearTrap = false  // Case 1 or Case 2
+var bool hasORHBreakout = false     // ORB Long
+var bool hasORLBreakdown = false    // ORB Short
+
+// Pivot Zone Enhancement Variables
+var string currentZone = "neutral"
+var string previousZone = "neutral"
+var bool zoneChanged = false
+var bool isAggressiveBullishZone = false
+var bool isAggressiveBearishZone = false
+var bool mandatoryExitTriggered = false
+var string exitReason = ""
+
+// Multi-Target System Variables
+var array<float> activeLongTargets = array.new<float>()
+var array<float> activeShortTargets = array.new<float>()
+var int currentLongTargetIndex = 0
+var int currentShortTargetIndex = 0
+
+// Dynamic Stop Loss Variables
+var float dynamicOrbLongStop = na
+var float dynamicOrbShortStop = na
+var float dynamicBullTrapStop = na
+var float dynamicBearTrapStop = na
+
+// Enhanced Whipsaw & Minor Price Action Variables
+// ============================================================================
+
+// Enhanced Consolidation Detection Variables
+var float consolidationResistance = na
+var float consolidationSupport = na
+var int consolidationTouches = 0
+var int consolidationStartBar = 0
+var int consolidationDuration = 0
+var bool consolidationActive = false
+var bool consolidationConfirmed = false
+
+// Both Sides Trap Pattern Variables
+var bool bothSidesTrapActive = false
+var int trapPhase = 0  // 0=none, 1=first_counter, 2=consolidation, 3=second_counter, 4=final_move
+var float trapHigh = na
+var float trapLow = na
+var int trapStartBar = 0
+var bool bothSidesTrapTriggered = false
+
+// Perfect Entry Variables (50% Retracement)
+var float perfectEntryLevel = na
+var bool perfectEntryLong = false
+var bool perfectEntryShort = false
+var bool perfectEntryTriggered = false
+
+// Enhanced Fake Breakout Variables
+var bool sustainedBreakout = false
+var int breakoutSustainBars = 0
+var float lastBreakoutLevel = na
+var bool enhancedFakeBreakout = false
+var bool enhancedFakeBreakdown = false
+
+// LL/HH Structure Validation Variables
+var bool validRiseStructure = false
+var bool validFallStructure = false
+var int lastLowerLowBar = 0
+var int lastHigherHighBar = 0
+
+// Reset ORH/ORL at the start of each trading day
+newDay = ta.change(time("1D")) != 0
+if newDay
+    orh := na
+    orl := na
+    orhDetermined := false
+    orlDetermined := false
+    orhBarIndex := 0
+    orlBarIndex := 0
+    orhLabelDrawn := false
+    orlLabelDrawn := false
+    // Reset ORB LONG 3-phase tracking
+    orhInitialBreakout := false
+    orhRetestCompleted := false
+    orhRetestLow := 0.0
+    orhRetestBar := 0
+    // Reset ORB SHORT 3-phase tracking
+    orlInitialBreakdown := false
+    orlRetestCompleted := false
+    orlRetestHigh := 0.0
+    orlRetestBar := 0
+    // Reset Bear Trap tracking
+    bearTrapCandleOccurred := false
+    bearTrapCandleHigh := 0.0
+    bearTrapCandleBar := 0
+    // Reset additional whipsaw tracking for bear trap
+    bearTrapAdditionalWhipsaw := false
+    bearTrapWhipsawCount := 0
+    bearTrapWhipsawTriggered := false
+    // Reset additional whipsaw tracking for bull trap
+    bullTrapAdditionalWhipsaw := false
+    bullTrapWhipsawCount := 0
+    bullTrapWhipsawTriggered := false
+    // Reset additional whipsaw tracking for ORB Long
+    orbLongAdditionalWhipsaw := false
+    orbLongWhipsawCount := 0
+    orbLongWhipsawTriggered := false
+    // Reset additional whipsaw tracking for ORB Short
+    orbShortAdditionalWhipsaw := false
+    orbShortWhipsawCount := 0
+    orbShortWhipsawTriggered := false
+    // Reset ORB Follow-up Failure patterns
+    bullTrapCase1 := false
+    bullTrapCase2 := false
+    bearTrapCase1 := false
+    bearTrapCase2 := false
+    bullTrapCase1Entry := 0.0
+    bullTrapCase2Entry := 0.0
+    bearTrapCase1Entry := 0.0
+    bearTrapCase2Entry := 0.0
+    bullTrapCase1Stop := 0.0
+    bullTrapCase2Stop := 0.0
+    bearTrapCase1Stop := 0.0
+    bearTrapCase2Stop := 0.0
+    bullTrapCase1Target := 0.0
+    bullTrapCase2Target := 0.0
+    bearTrapCase1Target := 0.0
+    bearTrapCase2Target := 0.0
+
+// Track provisional ORH/ORL during trading session
+if isTradingSession()
+    // Initialize ORH/ORL from market open price
+    if na(orh) and na(orl)
+        orh := open  // Start from opening price
+        orl := open  // Start from opening price
+        orhBarIndex := bar_index
+        orlBarIndex := bar_index
+    
+    // Provisional ORH: Track highest point until it stops making higher highs
+    if not orhDetermined
+        if high > orh
+            orh := high  // Update to new high
+            orhBarIndex := bar_index
+    
+    // Provisional ORL: Track lowest point until it stops making lower lows
+    if not orlDetermined
+        if low < orl
+            orl := low   // Update to new low
+            orlBarIndex := bar_index
+
+// ORH finalization: When price stops making higher highs (3-candle confirmation)
+if isTradingSession() and not orhDetermined and bar_index >= 2
+    if high < high[1] and high[1] > high[2]
+        // Price stopped making higher highs - ORH confirmed at the highest point reached
+        orhDetermined := true
+        // ORH value already set to the highest point reached, just mark as final
+
+// ORL finalization: When price stops making lower lows (3-candle confirmation)
+if isTradingSession() and not orlDetermined and bar_index >= 2
+    if low > low[1] and low[1] < low[2]
+        // Price stopped making lower lows - ORL confirmed at the lowest point reached
+        orlDetermined := true
+        // ORL value already set to the lowest point reached, just mark as final
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Helper function to get current time string
+getCurrentTimeString() =>
+    currentHour = hour(time, "Asia/Kolkata")
+    currentMinute = minute(time, "Asia/Kolkata") 
+    str.tostring(currentHour, "00") + ":" + str.tostring(currentMinute, "00")
+
+// Helper function to calculate optimal target based on ORH/ORL range or nearest pivot
+getOptimalTarget(entryPrice, isLong, stopLoss) =>
+    var float targetPrice = 0.0
+    
+    // Option 1: Use ORH/ORL range distance if both are determined
+    if orhDetermined and orlDetermined
+        rangeOR = orh - orl
+        if isLong
+            targetPrice := entryPrice + rangeOR
+        else
+            targetPrice := entryPrice - rangeOR
+    else
+        // Option 2: Use nearest pivot target
+        if isLong
+            // For LONG: Find nearest resistance (R1, R2, etc.) above entry
+            if entryPrice < r1
+                targetPrice := r1
+            else if entryPrice < r2
+                targetPrice := r2
+            else if entryPrice < r3
+                targetPrice := r3
+            else
+                // Fallback: Use ORH if available or 1:1 R:R
+                targetPrice := orhDetermined ? orh : entryPrice + (entryPrice - stopLoss)
+        else
+            // For SHORT: Find nearest support (S1, S2, etc.) below entry
+            if entryPrice > s1
+                targetPrice := s1
+            else if entryPrice > s2
+                targetPrice := s2
+            else if entryPrice > s3
+                targetPrice := s3
+            else
+                // Fallback: Use ORL if available or 1:1 R:R
+                targetPrice := orlDetermined ? orl : entryPrice - (stopLoss - entryPrice)
+    
+    targetPrice
+
+// ============================================================================
+// PIVOT ZONE ENHANCEMENT FUNCTIONS
+// ============================================================================
+
+// Get current market zone based on pivot levels
+getCurrentZone() =>
+    if close > r1
+        "bullish"
+    else if close < s1
+        "bearish"
+    else
+        "neutral"
+
+// Check if signal is valid for current zone
+isValidZoneForSignal(signalType) =>
+    zone = getCurrentZone()
+    result = false
+    
+    if zone == "bullish" // Above R1 - Only bullish trades allowed
+        result := signalType == "ORB_LONG" or signalType == "BEAR_TRAP" or signalType == "BEAR_TRAP_C1" or signalType == "BEAR_TRAP_C2" or signalType == "CONS_LONG" or signalType == "CONS_FAKE_BD"
+    else if zone == "bearish" // Below S1 - Only bearish trades allowed
+        result := signalType == "ORB_SHORT" or signalType == "BULL_TRAP" or signalType == "BULL_TRAP_C1" or signalType == "BULL_TRAP_C2" or signalType == "FAILED_BEAR_TRAP" or signalType == "CONS_SHORT" or signalType == "CONS_FAKE_BO"
+    else if zone == "neutral" // R1-P-S1 - Conservative trades only (Scalp & Run)
+        result := signalType == "ORB_LONG" or signalType == "ORB_SHORT" or signalType == "CONS_FAKE_BD" or signalType == "CONS_FAKE_BO"
+    
+    result
+
+// Get trade emphasis based on zone
+getTradeEmphasis() =>
+    zone = getCurrentZone()
+    result = "Unknown Zone"
+    
+    if zone == "bullish"
+        if close >= r1 and close <= r2
+            result := "🚀 AGGRESSIVE BULLISH - Don't Miss!"
+        else
+            result := "Standard Bullish"
+    else if zone == "bearish"
+        if close <= s1 and close >= s2
+            result := "🚀 AGGRESSIVE BEARISH - Don't Miss!"
+        else
+            result := "Standard Bearish"
+    else if zone == "neutral"
+        result := "📊 SCALP & RUN MODE"
+    
+    result
+
+// Generate sequential targets for multi-target system
+getTargetSequence(entryPrice, isLong) =>
+    targets = array.new<float>()
+    
+    if isLong
+        // Target 1: ORH (if available and above entry)
+        if orhDetermined and orh > entryPrice
+            array.push(targets, orh)
+        
+        // Target 2-4: Pivot progression based on zone
+        zone = getCurrentZone()
+        if zone == "bullish"
+            // Aggressive targeting in bullish zone
+            if entryPrice < r1
+                array.push(targets, r1)
+            if entryPrice < r2
+                array.push(targets, r2)
+            if entryPrice < r3
+                array.push(targets, r3)
+        else
+            // Conservative targeting
+            if entryPrice < r1
+                array.push(targets, r1)
+            if entryPrice < r2
+                array.push(targets, r2)
+    else
+        // Target 1: ORL (if available and below entry)
+        if orlDetermined and orl < entryPrice
+            array.push(targets, orl)
+        
+        // Target 2-4: Pivot progression based on zone
+        zone = getCurrentZone()
+        if zone == "bearish"
+            // Aggressive targeting in bearish zone
+            if entryPrice > s1
+                array.push(targets, s1)
+            if entryPrice > s2
+                array.push(targets, s2)
+            if entryPrice > s3
+                array.push(targets, s3)
+        else
+            // Conservative targeting
+            if entryPrice > s1
+                array.push(targets, s1)
+            if entryPrice > s2
+                array.push(targets, s2)
+    
+    targets
+
+// Check for mandatory exits at critical levels
+checkMandatoryExits() =>
+    exitTriggered = false
+    reason = ""
+    
+    // R2/R3 exits for any long positions (using available pivot levels)
+    if high >= r2 and not na(r2)
+        exitTriggered := true
+        reason := "R2 RESISTANCE HIT"
+    else if high >= r3 and not na(r3)
+        exitTriggered := true
+        reason := "R3 RESISTANCE HIT"
+    
+    // S2/S3 exits for any short positions  
+    if low <= s2 and not na(s2)
+        exitTriggered := true
+        reason := "S2 SUPPORT HIT"
+    else if low <= s3 and not na(s3)
+        exitTriggered := true
+        reason := "S3 SUPPORT HIT"
+    
+    [exitTriggered, reason]
+
+// ============================================================================
+// ENHANCED WHIPSAW & MINOR PRICE ACTION FUNCTIONS
+// ============================================================================
+
+// Enhanced consolidation detection with multiple touches
+// Note: Converted from function to direct execution to allow global variable modification
+
+// Validate LL/HH structure rules - "Every Rise Must Have At Least One Lower Low"
+// Note: Converted from function to direct execution to allow global variable modification
+
+// Enhanced fake breakout validation with sustainability check
+validateBreakout(level, direction, sustainBars) =>
+    isSustained = true
+    
+    if direction == "bullish"
+        // Check if breakout above level sustains
+        for i = 0 to sustainBars
+            if high[i] <= level
+                isSustained := false
+                break
+    else
+        // Check if breakdown below level sustains  
+        for i = 0 to sustainBars
+            if low[i] >= level
+                isSustained := false
+                break
+    
+    isSustained
+
+// Calculate perfect entry level (50% retracement)
+calculatePerfectEntry(highLevel, lowLevel, patternDirection) =>
+    midPoint = (highLevel + lowLevel) / 2
+    entryLevel = 0.0  // Initialize with float type
+    
+    if patternDirection == "bullish_reversal"
+        // Entry above midpoint after fake breakdown
+        entryLevel := lowLevel + (highLevel - lowLevel) * 0.618  // Golden ratio
+    else if patternDirection == "bearish_reversal"
+        // Entry below midpoint after fake breakout
+        entryLevel := highLevel - (highLevel - lowLevel) * 0.618  // Golden ratio
+    
+    entryLevel
+
+// ============================================================================
+// ORB ENTRY CONDITIONS with Enhanced Confirmation
+// ============================================================================
+
+var bool orhBreakoutTriggered = false
+var bool orlBreakoutTriggered = false
+var float orhBreakoutHigh = 0.0
+var int orhBreakoutBar = 0
+
+var float orlBreakoutLow = 0.0
+var int orlBreakoutBar = 0
+
+// ORB conditions
+orbLongCondition = false
+orbShortCondition = false
+
+// ORB LONG: 3-Phase Process as per Setup Instructions
+// Phase 1: Initial Breakout - Candle closes above ORH
+if orhDetermined and close > orh and close[1] <= orh and not orhInitialBreakout and not orbLongCondition
+    orhInitialBreakout := true
+    orhBreakoutTriggered := true  // For ORH BO triangle display
+
+// Phase 2: Retest - Price comes down and retests ORH
+if orhInitialBreakout and not orhRetestCompleted and low <= orh and close > orh
+    orhRetestCompleted := true
+    orhRetestLow := low
+    orhRetestBar := bar_index
+
+// Phase 3: Confirmation - Price makes higher high than previous swing/candle
+if orhRetestCompleted and not orbLongCondition and high > high[1]
+    // ORB LONG Signal: Enter at low of confirmation candle (as per setup instructions)
+    orbLongCondition := true
+    orbLongEntry := low  // Entry at low of confirmation candle
+    // Stop Loss: Either ORH level or 35 points max (as per setup instructions)
+    stopAtORH = orhDetermined ? orh : orbLongEntry - niftyStopLoss
+    stop35Points = orbLongEntry - niftyStopLoss
+    orbLongStop := math.max(stopAtORH, stop35Points)
+    // Use optimal target: ORH/ORL range or nearest pivot
+    orbLongTarget := getOptimalTarget(orbLongEntry, true, orbLongStop)
+    // Track for trending day detection
+    if not hasORHBreakout
+        hasORHBreakout := true
+        bullishSetupCount += 1
+
+// ORB SHORT: 3-Phase Process as per Setup Instructions  
+// Phase 1: Initial Breakdown - Candle closes below ORL
+if orlDetermined and close < orl and close[1] >= orl and not orlInitialBreakdown and not orbShortCondition
+    orlInitialBreakdown := true
+    orlBreakoutTriggered := true  // For ORL BO triangle display
+
+// Phase 2: Retest - Price comes up and retests ORL
+if orlInitialBreakdown and not orlRetestCompleted and high >= orl and close < orl
+    orlRetestCompleted := true
+    orlRetestHigh := high
+    orlRetestBar := bar_index
+
+// Phase 3: Confirmation - Price makes lower low than previous swing/candle
+if orlRetestCompleted and not orbShortCondition and low < low[1]
+    // ORB SHORT Signal: Enter at high of confirmation candle (as per setup instructions)
+    orbShortCondition := true
+    orbShortEntry := high  // Entry at high of confirmation candle
+    // Stop Loss: Either ORL level or 35 points max (as per setup instructions)
+    stopAtORL = orlDetermined ? orl : orbShortEntry + niftyStopLoss
+    stop35Points = orbShortEntry + niftyStopLoss
+    orbShortStop := math.min(stopAtORL, stop35Points)
+    // Use optimal target: ORH/ORL range or nearest pivot
+    orbShortTarget := getOptimalTarget(orbShortEntry, false, orbShortStop)
+    // Track for trending day detection
+    if not hasORLBreakdown
+        hasORLBreakdown := true
+        bearishSetupCount += 1
+
+// ============================================================================
+// ORB FOLLOW-UP FAILURE PATTERNS (Case 1 & Case 2)
+// ============================================================================
+
+// BULL TRAP CASE 1: No Confirmation Candle - ORB breakout without retest becomes trap
+// Immediate failure after ORH breakout without retest phase
+if orhDetermined and orhInitialBreakout and not orhRetestCompleted and not bullTrapCase1 and not orbLongCondition
+    if close < orh  // Price closes back below ORH without completing retest
+        bullTrapCase1 := true
+        bullTrapCase1Entry := close  // Aggressive entry at close below ORH
+        // SL: ORH or 35 points (whichever is closer)
+        slAtORH = orh
+        sl35Points = bullTrapCase1Entry + niftyStopLoss
+        bullTrapCase1Stop := math.min(slAtORH, sl35Points)
+        // Target: ORL as per setup specifications
+        bullTrapCase1Target := orl
+        // Track for trending day detection
+        if not hasFailedBullTrap
+            hasFailedBullTrap := true
+            bearishSetupCount += 1
+
+// BULL TRAP CASE 2: Confirmation Came But Follow-up Failed 
+// Full ORB process completed but momentum died after confirmation
+if orbLongCondition and not bullTrapCase2
+    if close < orh  // Price closes back below ORH after full ORB process
+        bullTrapCase2 := true
+        bullTrapCase2Entry := close  // Aggressive entry at close below ORH
+        // SL: ORH or 35 points (whichever is closer)
+        slAtORH = orh
+        sl35Points = bullTrapCase2Entry + niftyStopLoss
+        bullTrapCase2Stop := math.min(slAtORH, sl35Points)
+        // Target: ORL as per setup specifications
+        bullTrapCase2Target := orl
+        // Track for trending day detection (only count once per day)
+        if not hasFailedBullTrap
+            hasFailedBullTrap := true
+            bearishSetupCount += 1
+
+// BEAR TRAP CASE 1: No Confirmation Candle - ORB breakdown without retest becomes trap
+// Immediate failure after ORL breakdown without retest phase
+if orlDetermined and orlInitialBreakdown and not orlRetestCompleted and not bearTrapCase1 and not orbShortCondition
+    if close > orl  // Price closes back above ORL without completing retest
+        bearTrapCase1 := true
+        bearTrapCase1Entry := close  // Aggressive entry at close above ORL
+        // SL: ORL or 35 points (whichever is closer)
+        slAtORL = orl
+        sl35Points = bearTrapCase1Entry - niftyStopLoss
+        bearTrapCase1Stop := math.max(slAtORL, sl35Points)
+        // Target: ORH as per setup specifications
+        bearTrapCase1Target := orh
+        // Track for trending day detection
+        if not hasFailedBearTrap
+            hasFailedBearTrap := true
+            bullishSetupCount += 1
+
+// BEAR TRAP CASE 2: Confirmation Came But Follow-up Failed
+// Full ORB process completed but momentum died after confirmation
+if orbShortCondition and not bearTrapCase2
+    if close > orl  // Price closes back above ORL after full ORB process
+        bearTrapCase2 := true
+        bearTrapCase2Entry := close  // Aggressive entry at close above ORL
+        // SL: ORL or 35 points (whichever is closer)
+        slAtORL = orl
+        sl35Points = bearTrapCase2Entry - niftyStopLoss
+        bearTrapCase2Stop := math.max(slAtORL, sl35Points)
+        // Target: ORH as per setup specifications
+        bearTrapCase2Target := orh
+        // Track for trending day detection (only count once per day)
+        if not hasFailedBearTrap
+            hasFailedBearTrap := true
+            bullishSetupCount += 1
+
+// ============================================================================
+// BULL/BEAR TRAP DETECTION
+// ============================================================================
+
+// Track Bull Trap sequence: ORH BO → Bull Trap Candle → Confirmation
+var bool bullTrapCandleOccurred = false
+var float bullTrapCandleLow = 0.0
+var int bullTrapCandleBar = 0
+
+bullTrapCondition = false
+var float bullTrapEntry = 0.0
+var float bullTrapStop = 0.0
+var float bullTrapTarget = 0.0
+
+if orhDetermined and orlDetermined and isTradingSession() and not isORBPeriod()
+    // Step 1: Detect Bull Trap Candle (after ORH BO, candle closes below ORH)
+    if orhBreakoutTriggered and close < orh and not bullTrapCandleOccurred
+        bullTrapCandleOccurred := true
+        bullTrapCandleLow := low  // Store the low of bull trap candle
+        bullTrapCandleBar := bar_index
+    
+    // Step 2: Detect Confirmation (candle breaks previous swing low after bull trap candle)
+    if bullTrapCandleOccurred and bar_index > bullTrapCandleBar and low < bullTrapCandleLow
+        bullTrapCondition := true
+        bullTrapEntry := low
+        // SL: ORH or 35 Points (whichever is closer)
+        slAtORH = orh
+        sl35Points = close + niftyStopLoss
+        bullTrapStop := math.min(slAtORH, sl35Points)
+        // Target: ORL as per setup specifications
+        bullTrapTarget := orl
+        // Track for trending day detection
+        if not hasBullTrap
+            hasBullTrap := true
+            bearishSetupCount += 1
+
+// Bear Trap: 2-Step Sequential Process (similar to Bull Trap)
+bearTrapCondition = false
+var float bearTrapEntry = 0.0
+var float bearTrapStop = 0.0
+var float bearTrapTarget = 0.0
+
+if orlDetermined and orhDetermined and isTradingSession() and not isORBPeriod()
+    // Step 1: Detect Bear Trap Candle (after ORL BD, candle closes above ORL)
+    if orlBreakoutTriggered and close > orl and not bearTrapCandleOccurred
+        bearTrapCandleOccurred := true
+        bearTrapCandleHigh := high  // Store the high of bear trap candle
+        bearTrapCandleBar := bar_index
+    
+    // Step 2: Detect Confirmation (candle breaks previous swing high after bear trap candle)
+    if bearTrapCandleOccurred and bar_index > bearTrapCandleBar and high > bearTrapCandleHigh
+        bearTrapCondition := true
+        bearTrapEntry := high
+        // SL: ORL or 35 Points (whichever is closer)
+        slAtORL = orl
+        sl35Points = close - niftyStopLoss
+        bearTrapStop := math.max(slAtORL, sl35Points)
+        // Target: ORH as per setup specifications
+        bearTrapTarget := orh
+        // Track for trending day detection
+        if not hasBearTrap
+            hasBearTrap := true
+            bullishSetupCount += 1
+
+// Additional Whipsaw Detection for Bear Trap (after initial bear trap confirmation)
+if bearTrapCondition and not bearTrapAdditionalWhipsaw
+    // Count additional rejections at ORL after bear trap
+    if low <= orl and close > orl and bearTrapWhipsawCount < 3  // Limit to 3 additional whipsaws
+        bearTrapWhipsawCount := bearTrapWhipsawCount + 1
+        // Trigger additional whipsaw signal after 2nd rejection
+        if bearTrapWhipsawCount >= 2 and not bearTrapWhipsawTriggered
+            bearTrapAdditionalWhipsaw := true
+
+// Additional Whipsaw Detection for Bull Trap (after initial bull trap confirmation)
+if bullTrapCondition and not bullTrapAdditionalWhipsaw
+    // Count additional rejections at ORH after bull trap
+    if high >= orh and close < orh and bullTrapWhipsawCount < 3  // Limit to 3 additional whipsaws
+        bullTrapWhipsawCount := bullTrapWhipsawCount + 1
+        // Trigger additional whipsaw signal after 2nd rejection
+        if bullTrapWhipsawCount >= 2 and not bullTrapWhipsawTriggered
+            bullTrapAdditionalWhipsaw := true
+
+// Additional Whipsaw Detection for ORB Long (after initial ORB Long confirmation)
+if orbLongCondition and not orbLongAdditionalWhipsaw
+    // Count additional retests at ORH that hold as support after ORB Long
+    if low <= orh and close > orh and orbLongWhipsawCount < 3  // Limit to 3 additional whipsaws
+        orbLongWhipsawCount := orbLongWhipsawCount + 1
+        // Trigger additional whipsaw signal after 2nd successful retest
+        if orbLongWhipsawCount >= 2 and not orbLongWhipsawTriggered
+            orbLongAdditionalWhipsaw := true
+
+// Additional Whipsaw Detection for ORB Short (after initial ORB Short confirmation)
+if orbShortCondition and not orbShortAdditionalWhipsaw
+    // Count additional retests at ORL that hold as resistance after ORB Short
+    if high >= orl and close < orl and orbShortWhipsawCount < 3  // Limit to 3 additional whipsaws
+        orbShortWhipsawCount := orbShortWhipsawCount + 1
+        // Trigger additional whipsaw signal after 2nd successful rejection
+        if orbShortWhipsawCount >= 2 and not orbShortWhipsawTriggered
+            orbShortAdditionalWhipsaw := true
+
+// ============================================================================
+// CONSOLIDATION BREAKOUT DETECTION
+// ============================================================================
+
+// Track rejections at ORH/ORL
+var orhRejections = 0
+var orlRejections = 0
+var lastRejectionBar = 0
+
+if orhDetermined and orlDetermined and isTradingSession() and not isORBPeriod()
+    // Count rejections
+    if high >= orh and close < orh
+        orhRejections := orhRejections + 1
+        lastRejectionBar := bar_index
+    
+    if low <= orl and close > orl
+        orlRejections := orlRejections + 1
+        lastRejectionBar := bar_index
+    
+    // Reset rejections if too much time has passed
+    if bar_index - lastRejectionBar > 20  // 1 hour on 3-minute chart
+        orhRejections := 0
+        orlRejections := 0
+
+// ============================================================================
+// ENHANCED WHIPSAW & MINOR PRICE ACTION DETECTION  
+// ============================================================================
+
+// Enhanced consolidation detection
+if isTradingSession() and orhDetermined and orlDetermined
+    // Direct consolidation detection logic (converted from function)
+    tolerance = syminfo.mintick * 5  // 5 tick tolerance for level matching
+    minTouches = 3
+    minDuration = 15
+    
+    // Reset if we're starting fresh
+    if not consolidationActive
+        consolidationStartBar := bar_index
+        consolidationResistance := na
+        consolidationSupport := na
+        consolidationTouches := 0
+    
+    consolidationDuration := bar_index - consolidationStartBar
+    
+    // Look for horizontal levels with multiple touches
+    if consolidationDuration >= minDuration
+        // Check for resistance level touches
+        resistanceTouches = 0
+        supportTouches = 0
+        
+        // Scan recent highs and lows for level formation
+        lookback = math.min(consolidationDuration, 50)
+        
+        for i = 1 to lookback
+            // Count resistance touches
+            if not na(consolidationResistance)
+                if math.abs(high[i] - consolidationResistance) <= tolerance
+                    resistanceTouches += 1
+            else
+                // Establish potential resistance
+                recentHigh = ta.highest(high, 10)
+                if high[i] >= recentHigh * 0.998  // Within 0.2% of recent high
+                    consolidationResistance := recentHigh
+                    resistanceTouches := 1
+            
+            // Count support touches  
+            if not na(consolidationSupport)
+                if math.abs(low[i] - consolidationSupport) <= tolerance
+                    supportTouches += 1
+            else
+                // Establish potential support
+                recentLow = ta.lowest(low, 10)
+                if low[i] <= recentLow * 1.002  // Within 0.2% of recent low
+                    consolidationSupport := recentLow
+                    supportTouches := 1
+        
+        // Confirm consolidation if we have enough touches
+        if resistanceTouches >= minTouches and supportTouches >= minTouches
+            consolidationActive := true
+            consolidationConfirmed := true
+            consolidationTouches := resistanceTouches + supportTouches
+    
+    // Enhanced fake breakout detection with consolidation
+    if consolidationConfirmed and not na(consolidationResistance) and not na(consolidationSupport)
+        
+        // Detect fake breakout above consolidation resistance
+        if high > consolidationResistance and not enhancedFakeBreakout
+            sustainedBreakout := validateBreakout(consolidationResistance, "bullish", 3)
+            
+            if not sustainedBreakout and close <= consolidationResistance
+                enhancedFakeBreakout := true
+                lastBreakoutLevel := consolidationResistance
+                
+                // Calculate perfect entry for short
+                perfectEntryLevel := calculatePerfectEntry(consolidationResistance, consolidationSupport, "bearish_reversal")
+                perfectEntryShort := true
+        
+        // Detect fake breakdown below consolidation support  
+        if low < consolidationSupport and not enhancedFakeBreakdown
+            sustainedBreakdown = validateBreakout(consolidationSupport, "bearish", 3)
+            
+            if not sustainedBreakdown and close >= consolidationSupport
+                enhancedFakeBreakdown := true
+                lastBreakoutLevel := consolidationSupport
+                
+                // Calculate perfect entry for long
+                perfectEntryLevel := calculatePerfectEntry(consolidationResistance, consolidationSupport, "bullish_reversal")
+                perfectEntryLong := true
+
+// Enhanced LL/HH structure validation
+if isTradingSession()
+    // Validate structure for ORB Long signals - only proceed if structure is valid
+    if orbLongCondition
+        // Check if rise has at least one lower low
+        hasLowerLow = false
+        lookbackPeriod = 20
+        priceRising = close > close[lookbackPeriod]
+        
+        if priceRising
+            for i = 1 to lookbackPeriod
+                if low[i] < low[i+1] and low[i] < low[i-1]  // Swing low
+                    hasLowerLow := true
+                    lastLowerLowBar := bar_index - i
+                    break
+        
+        validRiseStructure := hasLowerLow
+    
+    // Validate structure for ORB Short signals
+    if orbShortCondition  
+        // Check if fall has at least one higher high
+        hasHigherHigh = false
+        lookbackPeriod = 20
+        priceFalling = close < close[lookbackPeriod]
+        
+        if priceFalling
+            for i = 1 to lookbackPeriod
+                if high[i] > high[i+1] and high[i] > high[i-1]  // Swing high
+                    hasHigherHigh := true
+                    lastHigherHighBar := bar_index - i
+                    break
+        
+        validFallStructure := hasHigherHigh
+
+// Both Sides Trap Pattern Detection
+if isTradingSession() and orhDetermined and orlDetermined
+    
+    // Phase 1: Detect initial trend with counter-move (first trap)
+    if trapPhase == 0
+        // Look for initial trend direction
+        recentTrend = close > close[10] ? "up" : "down"
+        
+        if recentTrend == "down"
+            // Look for counter-move up (first trap - bulls)
+            if close > ta.highest(high, 5) and close > close[5]
+                trapPhase := 1
+                trapHigh := high
+                trapLow := ta.lowest(low, 10)
+                trapStartBar := bar_index
+        else
+            // Look for counter-move down (first trap - bears)  
+            if close < ta.lowest(low, 5) and close < close[5]
+                trapPhase := 1
+                trapHigh := ta.highest(high, 10)
+                trapLow := low
+                trapStartBar := bar_index
+    
+    // Phase 2: Detect consolidation phase
+    else if trapPhase == 1 and (bar_index - trapStartBar) > 10
+        if consolidationConfirmed
+            trapPhase := 2
+    
+    // Phase 3: Detect second counter-move (second trap)
+    else if trapPhase == 2 and consolidationConfirmed
+        if not na(trapHigh) and not na(trapLow)
+            // Look for second counter-move
+            if close > consolidationResistance * 0.999 or close < consolidationSupport * 1.001
+                trapPhase := 3
+    
+    // Phase 4: Detect final explosive move
+    else if trapPhase == 3
+        rangeSize = trapHigh - trapLow
+        
+        // Look for final move beyond both trap levels
+        if high > trapHigh + rangeSize * 0.5 or low < trapLow - rangeSize * 0.5
+            trapPhase := 4
+            bothSidesTrapActive := true
+
+// Consolidation breakout conditions (only if ORH/ORL determined)
+consolidationBreakoutLong = orhDetermined and orhRejections >= 3 and close > orh
+consolidationBreakoutShort = orlDetermined and orlRejections >= 3 and close < orl
+
+// Consolidation Breakout entry/exit calculations
+var float consBreakoutLongEntry = 0.0
+var float consBreakoutLongStop = 0.0
+var float consBreakoutLongTarget = 0.0
+var float consBreakoutShortEntry = 0.0
+var float consBreakoutShortStop = 0.0
+var float consBreakoutShortTarget = 0.0
+
+if consolidationBreakoutLong
+    consBreakoutLongEntry := high  // Direct entry at high to catch maximum momentum
+    consBreakoutLongStop := math.max((orlDetermined ? orl : consBreakoutLongEntry - niftyStopLoss), consBreakoutLongEntry - niftyStopLoss)
+    // Use ORH/ORL range distance or nearest pivot target as per setup
+    consBreakoutLongTarget := getOptimalTarget(consBreakoutLongEntry, true, consBreakoutLongStop)
+
+if consolidationBreakoutShort
+    consBreakoutShortEntry := close  // Direct entry at close as per setup - NO retest
+    consBreakoutShortStop := math.max((orhDetermined ? orh : consBreakoutShortEntry + niftyStopLoss), consBreakoutShortEntry + niftyStopLoss)
+    // Use ORH/ORL range distance or nearest pivot target as per setup
+    consBreakoutShortTarget := getOptimalTarget(consBreakoutShortEntry, false, consBreakoutShortStop)
+
+// ============================================================================
+// WHIPSAW PATTERN DETECTION
+// ============================================================================
+
+// Track swing highs and lows with enhanced detection
+var swingHigh = 0.0
+var swingLow = 0.0
+var llCount = 0
+var hhCount = 0
+var lastSwingDirection = 0  // 1 for HH, -1 for LL
+var whipsawConfirmationBars = 0
+
+// Enhanced swing tracking for precise whipsaw detection (using pivot-based swing identification)
+if isTradingSession()
+    // Detect swing highs (3-bar pattern: previous bar higher than both current and 2 bars ago)
+    isSwingHigh = high[1] > high and high[1] > high[2] and bar_index > 2
+    
+    // Detect swing lows (3-bar pattern: previous bar lower than both current and 2 bars ago)  
+    isSwingLow = low[1] < low and low[1] < low[2] and bar_index > 2
+    
+    // Track consecutive higher highs (each new swing high is higher than previous)
+    if isSwingHigh
+        currentSwingHigh = high[1]
+        if currentSwingHigh > swingHigh or swingHigh == 0.0
+            swingHigh := currentSwingHigh
+            if lastSwingDirection != 1  // Direction change to HH
+                hhCount := 1
+            else
+                hhCount := hhCount + 1
+            lastSwingDirection := 1
+            llCount := 0  // Reset LL count when we get HH
+            whipsawConfirmationBars := 0
+    
+    // Track consecutive lower lows (each new swing low is lower than previous)
+    if isSwingLow
+        currentSwingLow = low[1] 
+        if currentSwingLow < swingLow or swingLow == 0.0
+            swingLow := currentSwingLow
+            if lastSwingDirection != -1  // Direction change to LL
+                llCount := 1
+            else
+                llCount := llCount + 1
+            lastSwingDirection := -1
+            hhCount := 0  // Reset HH count when we get LL
+            whipsawConfirmationBars := 0
+    
+    // Count bars since last swing formation for confirmation
+    whipsawConfirmationBars := whipsawConfirmationBars + 1
+
+// Whipsaw pattern identification
+twoLL = llCount >= 2
+threeLL = llCount >= 3
+twoHH = hhCount >= 2
+threeHH = hhCount >= 3
+
+// Pattern change detection for circle indicators (fixed logic)
+twoLLNew = twoLL and not twoLL[1]
+threeLLNew = threeLL and not threeLL[1] and not twoLLNew  // Show 3LL only if it's new and 2LL didn't just trigger
+twoHHNew = twoHH and not twoHH[1]  
+threeHHNew = threeHH and not threeHH[1] and not twoHHNew  // Show 3HH only if it's new and 2HH didn't just trigger
+
+// ============================================================================
+// FAKE BREAKOUT/BREAKDOWN DETECTION
+// ============================================================================
+
+// Track fake breakouts at key levels
+var fakeBreakoutAboveORH = false
+var fakeBreakdownBelowORL = false
+var consolidationPhase = false
+
+// Detect fake breakouts (breakout followed by immediate reversal)
+if orhDetermined and orlDetermined and isTradingSession()
+    // Check for consolidation phase (multiple rejections)
+    consolidationPhase := orhRejections >= 2 or orlRejections >= 2
+    
+    // Fake breakout above ORH (goes above then immediately reverses)
+    if high > orh and close < orh and high[1] <= orh
+        fakeBreakoutAboveORH := true
+    
+    // Fake breakdown below ORL (goes below then immediately reverses)  
+    if low < orl and close > orl and low[1] >= orl
+        fakeBreakdownBelowORL := true
+
+// ============================================================================
+// WHIPSAW-BASED ENTRY CONDITIONS
+// ============================================================================
+
+// Whipsaw Long Entry (after 2LL/3LL pattern)
+whipsawLongCondition = false
+whipsawLongEntry = 0.0
+whipsawLongStop = 0.0
+whipsawLongTarget = 0.0
+
+if isTradingSession() and not isORBPeriod()
+    // Entry after 2LL or 3LL when price breaks above recent swing high
+    if (twoLL or threeLL) and close > swingHigh and whipsawConfirmationBars >= 2
+        whipsawLongCondition := true
+        whipsawLongEntry := high
+        whipsawLongStop := math.max(swingLow, close - niftyStopLoss)
+        // Use optimal target: ORH/ORL range or nearest pivot
+        whipsawLongTarget := getOptimalTarget(whipsawLongEntry, true, whipsawLongStop)
+
+// Whipsaw Short Entry (after 2HH/3HH pattern)  
+whipsawShortCondition = false
+whipsawShortEntry = 0.0
+whipsawShortStop = 0.0
+whipsawShortTarget = 0.0
+
+if isTradingSession() and not isORBPeriod()
+    // Entry after 2HH or 3HH when price breaks below recent swing low
+    if (twoHH or threeHH) and close < swingLow and whipsawConfirmationBars >= 2
+        whipsawShortCondition := true
+        whipsawShortEntry := low
+        whipsawShortStop := math.min(swingHigh, close + niftyStopLoss)
+        // Use optimal target: ORH/ORL range or nearest pivot
+        whipsawShortTarget := getOptimalTarget(whipsawShortEntry, false, whipsawShortStop)
+
+// Fake Breakout Reversal Long (Consolidation + Fake Breakdown = Sharp Move Up)
+fakeBreakoutLongCondition = false
+var float fakeBreakoutLongEntry = 0.0
+var float fakeBreakoutLongStop = 0.0
+var float fakeBreakoutLongTarget = 0.0
+
+if orlDetermined and consolidationPhase and fakeBreakdownBelowORL
+    // Sharp move up after fake breakdown
+    if close > orl and close > high[1]
+        fakeBreakoutLongCondition := true
+        fakeBreakoutLongEntry := high
+        fakeBreakoutLongStop := orl
+        // Use optimal target: ORH/ORL range or nearest pivot
+        fakeBreakoutLongTarget := getOptimalTarget(fakeBreakoutLongEntry, true, fakeBreakoutLongStop)
+
+// Fake Breakdown Reversal Short (Consolidation + Fake Breakout = Sharp Move Down)
+fakeBreakoutShortCondition = false
+var float fakeBreakoutShortEntry = 0.0  
+var float fakeBreakoutShortStop = 0.0
+var float fakeBreakoutShortTarget = 0.0
+
+if orhDetermined and consolidationPhase and fakeBreakoutAboveORH
+    // Sharp move down after fake breakout
+    if close < orh and close < low[1]
+        fakeBreakoutShortCondition := true
+        fakeBreakoutShortEntry := low
+        fakeBreakoutShortStop := orh
+        // Use optimal target: ORH/ORL range or nearest pivot
+        fakeBreakoutShortTarget := getOptimalTarget(fakeBreakoutShortEntry, false, fakeBreakoutShortStop)
+
+// ============================================================================
+// PIVOT ZONE TRACKING & MANDATORY EXITS
+// ============================================================================
+
+// Update zone tracking every bar
+if isTradingSession()
+    // Update zone tracking (direct execution instead of function)
+    previousZone := currentZone
+    currentZone := getCurrentZone()
+    zoneChanged := currentZone != previousZone
+    
+    // Update aggressive zone flags
+    isAggressiveBullishZone := currentZone == "bullish" and close >= r1 and close <= r2
+    isAggressiveBearishZone := currentZone == "bearish" and close <= s1 and close >= s2
+    
+    // Check for mandatory exits at critical levels
+    [exitTriggered, reason] = checkMandatoryExits()
+    if exitTriggered and not mandatoryExitTriggered
+        mandatoryExitTriggered := true
+        exitReason := reason
+        
+        // Generate alert for mandatory exit
+        alert("🚨 MANDATORY EXIT: " + reason + " - Close all positions immediately!")
+
+// ============================================================================
+// TRENDING DAY DETECTION
+// ============================================================================
+
+// Trending Day Detection Logic based on Setup Instructions
+if isTradingSession() and shouldShowSignals()
+    
+    // BULLISH TRENDING DAY CONDITIONS:
+    // 1. Bear Trap + ORH Breakout (Bear Trap + ORB Long)
+    // 2. Failed Bear Trap + ORH Breakout (Failed Bear Trap + ORB Long)
+    if not trendingDayBullish and bullishSetupCount >= 2
+        if (hasBearTrap and hasORHBreakout) or (hasFailedBearTrap and hasORHBreakout)
+            trendingDayBullish := true
+            if hasBearTrap and hasORHBreakout
+                trendingDayPattern := "BEAR TRAP + ORH BO"
+            else if hasFailedBearTrap and hasORHBreakout
+                trendingDayPattern := "FAILED BEAR TRAP + ORH BO"
+    
+    // BEARISH TRENDING DAY CONDITIONS:
+    // 1. Bull Trap + ORL Breakdown (Bull Trap + ORB Short)
+    // 2. Failed Bull Trap + ORL Breakdown (Failed Bull Trap + ORB Short)
+    if not trendingDayBearish and bearishSetupCount >= 2
+        if (hasBullTrap and hasORLBreakdown) or (hasFailedBullTrap and hasORLBreakdown)
+            trendingDayBearish := true
+            if hasBullTrap and hasORLBreakdown
+                trendingDayPattern := "BULL TRAP + ORL BD"
+            else if hasFailedBullTrap and hasORLBreakdown
+                trendingDayPattern := "FAILED BULL TRAP + ORL BD"
+
+// ============================================================================
+// SIGNAL TRACKING (to prevent overlapping messages)
+// ============================================================================
+
+// Use Pine Script's built-in signal tracking with ta.barssince
+var orbLongTriggered = false
+var orbShortTriggered = false
+var bullTrapTriggered = false
+var bearTrapTriggered = false
+var consBreakoutLongTriggered = false
+var consBreakoutShortTriggered = false
+var whipsawLongTriggered = false
+var whipsawShortTriggered = false
+var fakeBreakoutLongTriggered = false
+var fakeBreakoutShortTriggered = false
+var bullTrapCase1Triggered = false
+var bullTrapCase2Triggered = false  
+var bearTrapCase1Triggered = false
+var bearTrapCase2Triggered = false
+
+// Enhanced label positioning variables to prevent overlapping
+var float lastLabelY = 0.0
+var int lastLabelBar = 0
+var array<float> recentLabelYs = array.new<float>()
+var array<int> recentLabelBars = array.new<int>()
+var int maxRecentLabels = 20  // Track last 20 labels for better overlap prevention
+
+// Dynamic label tracking variables for real-time updates
+var label orbLongLabel = na
+var label orbShortLabel = na
+var label bullTrapLabel = na
+var label bearTrapLabel = na
+var label consBreakoutLongLabel = na
+var label consBreakoutShortLabel = na
+var label fakeBreakoutLongLabel = na
+var label fakeBreakoutShortLabel = na
+var label whipsawLongLabel = na
+var label whipsawShortLabel = na
+var label bearTrapWhipsawLabel = na
+var label bullTrapWhipsawLabel = na
+var label orbLongWhipsawLabel = na
+var label orbShortWhipsawLabel = na
+var label bullTrapCase1Label = na
+var label bullTrapCase2Label = na
+var label bearTrapCase1Label = na
+var label bearTrapCase2Label = na
+
+// Enhanced whipsaw pattern labels
+var label enhancedFakeBreakoutLabel = na
+var label enhancedFakeBreakdownLabel = na
+var label bothSidesTrapLabel = na
+
+// Final label text storage to prevent values from changing after exit
+var string orbLongFinalLabel = ""
+var string orbShortFinalLabel = ""
+var string bullTrapFinalLabel = ""
+var string bearTrapFinalLabel = ""
+var string consBreakoutLongFinalLabel = ""
+var string consBreakoutShortFinalLabel = ""
+var string fakeBreakoutLongFinalLabel = ""
+var string fakeBreakoutShortFinalLabel = ""
+var string whipsawLongFinalLabel = ""
+var string whipsawShortFinalLabel = ""
+
+// Exit status tracking
+var orbLongExitStatus = ""
+var orbShortExitStatus = ""
+var bullTrapExitStatus = ""
+var bearTrapExitStatus = ""
+var consBreakoutLongExitStatus = ""
+var consBreakoutShortExitStatus = ""
+var fakeBreakoutLongExitStatus = ""
+var fakeBreakoutShortExitStatus = ""
+var whipsawLongExitStatus = ""
+var whipsawShortExitStatus = ""
+
+// Entry time tracking
+var string orbLongEntryTime = ""
+var string orbShortEntryTime = ""
+var string bullTrapEntryTime = ""
+var string bearTrapEntryTime = ""
+var string consBreakoutLongEntryTime = ""
+var string consBreakoutShortEntryTime = ""
+var string fakeBreakoutLongEntryTime = ""
+var string fakeBreakoutShortEntryTime = ""
+var string whipsawLongEntryTime = ""
+var string whipsawShortEntryTime = ""
+var string bullTrapCase1EntryTime = ""
+var string bullTrapCase2EntryTime = ""
+var string bearTrapCase1EntryTime = ""
+var string bearTrapCase2EntryTime = ""
+var string bearTrapWhipsawTime = ""
+var string bullTrapWhipsawTime = ""
+var string orbLongWhipsawTime = ""
+var string orbShortWhipsawTime = ""
+
+// Exit time tracking
+var string orbLongExitTime = ""
+var string orbShortExitTime = ""
+var string bullTrapExitTime = ""
+var string bearTrapExitTime = ""
+var string consBreakoutLongExitTime = ""
+var string consBreakoutShortExitTime = ""
+var string fakeBreakoutLongExitTime = ""
+var string fakeBreakoutShortExitTime = ""
+var string whipsawLongExitTime = ""
+var string whipsawShortExitTime = ""
+
+// Zone tracking variable
+var string lastZoneType = ""
+var label currentZoneLabel = na
+
+// Reset signal tracking at the start of each new day
+if newDay
+    orbLongTriggered := false
+    orbShortTriggered := false
+    bullTrapTriggered := false
+    bearTrapTriggered := false
+    consBreakoutLongTriggered := false
+    consBreakoutShortTriggered := false
+    whipsawLongTriggered := false
+    whipsawShortTriggered := false
+    fakeBreakoutLongTriggered := false
+    fakeBreakoutShortTriggered := false
+    bullTrapCase1Triggered := false
+    bullTrapCase2Triggered := false
+    bearTrapCase1Triggered := false
+    bearTrapCase2Triggered := false
+    // Reset dynamic label tracking
+    orbLongLabel := na
+    orbShortLabel := na
+    bullTrapLabel := na
+    bearTrapLabel := na
+    consBreakoutLongLabel := na
+    consBreakoutShortLabel := na
+    fakeBreakoutLongLabel := na
+    fakeBreakoutShortLabel := na
+    whipsawLongLabel := na
+    whipsawShortLabel := na
+    bearTrapWhipsawLabel := na
+    bullTrapWhipsawLabel := na
+    orbLongWhipsawLabel := na
+    orbShortWhipsawLabel := na
+    bullTrapCase1Label := na
+    bullTrapCase2Label := na
+    bearTrapCase1Label := na
+    bearTrapCase2Label := na
+    // Reset exit status
+    orbLongExitStatus := ""
+    orbShortExitStatus := ""
+    bullTrapExitStatus := ""
+    bearTrapExitStatus := ""
+    consBreakoutLongExitStatus := ""
+    consBreakoutShortExitStatus := ""
+    fakeBreakoutLongExitStatus := ""
+    fakeBreakoutShortExitStatus := ""
+    whipsawLongExitStatus := ""
+    whipsawShortExitStatus := ""
+    // Reset entry times
+    orbLongEntryTime := ""
+    orbShortEntryTime := ""
+    bullTrapEntryTime := ""
+    bearTrapEntryTime := ""
+    consBreakoutLongEntryTime := ""
+    consBreakoutShortEntryTime := ""
+    fakeBreakoutLongEntryTime := ""
+    fakeBreakoutShortEntryTime := ""
+    whipsawLongEntryTime := ""
+    whipsawShortEntryTime := ""
+    bearTrapWhipsawTime := ""
+    bullTrapWhipsawTime := ""
+    orbLongWhipsawTime := ""
+    orbShortWhipsawTime := ""
+    // Reset exit times
+    orbLongExitTime := ""
+    orbShortExitTime := ""
+    bullTrapExitTime := ""
+    bearTrapExitTime := ""
+    consBreakoutLongExitTime := ""
+    consBreakoutShortExitTime := ""
+    fakeBreakoutLongExitTime := ""
+    fakeBreakoutShortExitTime := ""
+    whipsawLongExitTime := ""
+    whipsawShortExitTime := ""
+    // Reset final label texts
+    orbLongFinalLabel := ""
+    orbShortFinalLabel := ""
+    bullTrapFinalLabel := ""
+    bearTrapFinalLabel := ""
+    consBreakoutLongFinalLabel := ""
+    consBreakoutShortFinalLabel := ""
+    fakeBreakoutLongFinalLabel := ""
+    fakeBreakoutShortFinalLabel := ""
+    whipsawLongFinalLabel := ""
+    whipsawShortFinalLabel := ""
+    // Reset entry/stop/target values
+    orbLongEntry := 0.0
+    orbLongStop := 0.0
+    orbLongTarget := 0.0
+    orbShortEntry := 0.0
+    orbShortStop := 0.0
+    orbShortTarget := 0.0
+    bullTrapEntry := 0.0
+    bullTrapStop := 0.0
+    bullTrapTarget := 0.0
+    bearTrapEntry := 0.0
+    bearTrapStop := 0.0
+    bearTrapTarget := 0.0
+    fakeBreakoutLongEntry := 0.0
+    fakeBreakoutLongStop := 0.0
+    fakeBreakoutLongTarget := 0.0
+    consBreakoutLongEntry := 0.0
+    consBreakoutLongStop := 0.0
+    consBreakoutLongTarget := 0.0
+    consBreakoutShortEntry := 0.0
+    consBreakoutShortStop := 0.0
+    consBreakoutShortTarget := 0.0
+    fakeBreakoutShortEntry := 0.0
+    fakeBreakoutShortStop := 0.0
+    fakeBreakoutShortTarget := 0.0
+    lastLabelY := 0.0
+    lastLabelBar := 0
+    array.clear(recentLabelYs)
+    array.clear(recentLabelBars)
+    // Reset ORB breakout tracking
+    orhBreakoutTriggered := false
+    orlBreakoutTriggered := false
+    orhBreakoutHigh := 0.0
+    orhBreakoutBar := 0
+    // Reset whipsaw tracking variables
+    fakeBreakoutAboveORH := false
+    fakeBreakdownBelowORL := false
+    lastSwingDirection := 0
+    whipsawConfirmationBars := 0
+    // Reset breakout flags
+    orhBreakoutTriggered := false
+    orlBreakoutTriggered := false
+    orhBreakoutHigh := 0.0
+    orhBreakoutBar := 0
+    orlBreakoutLow := 0.0
+    orlBreakoutBar := 0
+    // Reset bull trap tracking
+    bullTrapCandleOccurred := false
+    bullTrapCandleLow := 0.0
+    bullTrapCandleBar := 0
+    // Reset bear trap tracking
+    bearTrapCandleOccurred := false
+    bearTrapCandleHigh := 0.0
+    bearTrapCandleBar := 0
+    // Reset additional whipsaw tracking for bear trap
+    bearTrapAdditionalWhipsaw := false
+    bearTrapWhipsawCount := 0
+    bearTrapWhipsawTriggered := false
+    // Reset additional whipsaw tracking for bull trap
+    bullTrapAdditionalWhipsaw := false
+    bullTrapWhipsawCount := 0
+    bullTrapWhipsawTriggered := false
+    // Reset additional whipsaw tracking for ORB Long
+    orbLongAdditionalWhipsaw := false
+    orbLongWhipsawCount := 0
+    orbLongWhipsawTriggered := false
+    // Reset additional whipsaw tracking for ORB Short
+    orbShortAdditionalWhipsaw := false
+    orbShortWhipsawCount := 0
+    orbShortWhipsawTriggered := false
+    // Reset zone tracking
+    lastZoneType := ""
+    if not na(currentZoneLabel)
+        label.delete(currentZoneLabel)
+    currentZoneLabel := na
+    // Reset trending day tracking
+    trendingDayBullish := false
+    trendingDayBearish := false
+    trendingDayPattern := ""
+    trendingDayLabelShown := false
+    if not na(trendingDayLabel)
+        label.delete(trendingDayLabel)
+    trendingDayLabel := na
+    trendingDayTime := ""
+    bullishSetupCount := 0
+    bearishSetupCount := 0
+    hasBullTrap := false
+    hasBearTrap := false
+    hasFailedBullTrap := false
+    hasFailedBearTrap := false
+    hasORHBreakout := false
+    hasORLBreakdown := false
+    // Reset pivot zone variables
+    currentZone := "neutral"
+    previousZone := "neutral"
+    zoneChanged := false
+    isAggressiveBullishZone := false
+    isAggressiveBearishZone := false
+    mandatoryExitTriggered := false
+    exitReason := ""
+    // Reset multi-target arrays
+    array.clear(activeLongTargets)
+    array.clear(activeShortTargets)
+    currentLongTargetIndex := 0
+    currentShortTargetIndex := 0
+    // Reset dynamic stops
+    dynamicOrbLongStop := na
+    dynamicOrbShortStop := na
+    dynamicBullTrapStop := na
+    dynamicBearTrapStop := na
+    
+    // Reset enhanced whipsaw variables
+    consolidationResistance := na
+    consolidationSupport := na
+    consolidationTouches := 0
+    consolidationStartBar := 0
+    consolidationDuration := 0
+    consolidationActive := false
+    consolidationConfirmed := false
+    
+    // Reset both sides trap variables
+    bothSidesTrapActive := false
+    trapPhase := 0
+    trapHigh := na
+    trapLow := na
+    trapStartBar := 0
+    bothSidesTrapTriggered := false
+    
+    // Reset perfect entry variables
+    perfectEntryLevel := na
+    perfectEntryLong := false
+    perfectEntryShort := false
+    perfectEntryTriggered := false
+    
+    // Reset enhanced fake breakout variables
+    sustainedBreakout := false
+    breakoutSustainBars := 0
+    lastBreakoutLevel := na
+    enhancedFakeBreakout := false
+    enhancedFakeBreakdown := false
+    
+    // Reset LL/HH structure variables
+    validRiseStructure := false
+    validFallStructure := false
+    lastLowerLowBar := 0
+    lastHigherHighBar := 0
+    // Reset trade table data
+    array.clear(tradeSignals)
+    array.clear(tradeTimes)
+    array.clear(tradeEntries)
+    array.clear(tradeStops)
+    array.clear(tradeTargets)
+    array.clear(tradeStatuses)
+    array.clear(tradePnLs)
+    array.clear(tradeBars)
+
+// ============================================================================
+// TRADE TABLE MANAGEMENT
+// ============================================================================
+
+
+
+// Function to add trade to table data
+addTradeToTable(signal, entryTime, entry, stop, target, status, pnl, barIndex) =>
+    // Add to arrays
+    array.push(tradeSignals, signal)
+    array.push(tradeTimes, entryTime)
+    array.push(tradeExitTimes, "-")  // Initialize with "-", will be updated when trade exits
+    array.push(tradeEntries, entry)
+    array.push(tradeStops, stop) 
+    array.push(tradeTargets, target)
+    array.push(tradeStatuses, status)
+    array.push(tradePnLs, pnl)
+    array.push(tradeBars, barIndex)
+    
+    // Keep only max rows
+    if array.size(tradeSignals) > maxTableRows
+        array.shift(tradeSignals)
+        array.shift(tradeTimes)
+        array.shift(tradeExitTimes)
+        array.shift(tradeEntries)
+        array.shift(tradeStops)
+        array.shift(tradeTargets)
+        array.shift(tradeStatuses)
+        array.shift(tradePnLs)
+        array.shift(tradeBars)
+
+// Function to update trade status in table
+updateTradeStatus(signal, newStatus, newPnL) =>
+    for i = array.size(tradeSignals) - 1 to 0
+        if array.get(tradeSignals, i) == signal and str.contains(array.get(tradeStatuses, i), "Active")
+            array.set(tradeStatuses, i, newStatus)
+            array.set(tradePnLs, i, newPnL)
+            array.set(tradeExitTimes, i, getCurrentTimeString())  // Set exit time when trade completes
+            break
+
+// Update trade table (not a function - direct execution)
+if showTradeTable and barstate.islast
+    // Delete existing table
+    if not na(tradeTable)
+        table.delete(tradeTable)
+    
+    // Calculate table size
+    tableSize = math.min(array.size(tradeSignals), maxTableRows)
+    
+    // Always create table, even if no trades (to show headers)
+    // Create new table
+    tablePos = switch tablePosition
+        "top_center" => position.top_center
+        "top_right" => position.top_right
+        "top_left" => position.top_left
+        "middle_center" => position.middle_center
+        "middle_right" => position.middle_right
+        "middle_left" => position.middle_left
+        "bottom_center" => position.bottom_center
+        "bottom_right" => position.bottom_right
+        "bottom_left" => position.bottom_left
+        => position.top_right  // Default to top_right
+    
+    // Create table with at least 2 rows (header + 1 data row minimum)
+    tableRows = math.max(tableSize + 1, 2)
+    newTable = table.new(tablePos, 8, tableRows, bgcolor=color.black, border_width=3, border_color=color.yellow)
+    tradeTable := newTable
+    
+    // Header row - High contrast for dark mode
+    table.cell(tradeTable, 0, 0, "Signal", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 1, 0, "Entry Time", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 2, 0, "Exit Time", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 3, 0, "Entry", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 4, 0, "SL", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 5, 0, "Target", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 6, 0, "Status", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    table.cell(tradeTable, 7, 0, "P&L", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
+    
+    // Data rows or show "No Trades" message
+    if tableSize > 0
+        for i = 0 to tableSize - 1
+            if i < array.size(tradeSignals)
+                row = i + 1
+                signal = array.get(tradeSignals, i)
+                entryTime = array.get(tradeTimes, i)
+                exitTime = array.get(tradeExitTimes, i)
+                entry = array.get(tradeEntries, i)
+                stop = array.get(tradeStops, i)
+                target = array.get(tradeTargets, i)
+                status = array.get(tradeStatuses, i)
+                pnl = array.get(tradePnLs, i)
+                
+                // Skip inactive trades if showOnlyActive is enabled
+                if showOnlyActive and not str.contains(status, "Active")
+                    continue
+                
+                // Determine text colors based on status - White background with colored text
+                textColor = str.contains(status, "Target") ? color.green : 
+                           str.contains(status, "SL Hit") ? color.red : 
+                           color.orange
+                
+                // White background for all rows
+                rowColor = color.white
+                pnlColor = pnl > 0 ? color.green : pnl < 0 ? color.red : color.gray
+                
+                table.cell(tradeTable, 0, row, signal, text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 1, row, entryTime, text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 2, row, exitTime, text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 3, row, str.tostring(entry, "#.##"), text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 4, row, str.tostring(stop, "#.##"), text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 5, row, str.tostring(target, "#.##"), text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 6, row, status, text_color=textColor, text_size=size.small, bgcolor=rowColor)
+                table.cell(tradeTable, 7, row, (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##"), text_color=pnlColor, text_size=size.small, bgcolor=rowColor)
+    else
+        // Show "No Trades" message when no trades are available - White background with colored text
+        noTradesBg = color.white
+        table.cell(tradeTable, 0, 1, "No Trades", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 1, 1, "Yet", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 2, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 3, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 4, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 5, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 6, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        table.cell(tradeTable, 7, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+
+// ============================================================================
+// ZONE ALLOCATION SYSTEM
+// ============================================================================
+
+// Define signal zones (from top to bottom)
+getSignalZone(signalType) =>
+    switch signalType
+        "CONS_BREAKOUT" => 5    // Top zone - Consolidation breakouts
+        "ORB" => 4              // Upper zone - ORB signals
+        "ZONE_INFO" => 3        // Middle zone - Zone information  
+        "TRAP" => 2             // Lower zone - Bull/Bear traps
+        "WHIPSAW" => 1          // Bottom zone - Whipsaw/Fake signals
+        => 3                    // Default to middle zone
+
+// Calculate zone-based Y position
+getZoneBasedY(baseY, signalType, isAbove) =>
+    if not enableZoneAllocation
+        // Use original positioning if zone allocation disabled
+        isAbove ? baseY + labelDistance : baseY - labelDistance
+    else
+        // Get zone number (1-5, where 5 is highest)
+        zoneLevel = getSignalZone(signalType)
+        
+        // Calculate base position from price level
+        if isAbove
+            // Position above price with zone-based offset
+            baseY + labelDistance + (zoneLevel - 3) * zoneSpacing
+        else
+            // Position below price with zone-based offset  
+            baseY - labelDistance - (zoneLevel - 3) * zoneSpacing
+
+// Enhanced function to calculate label Y position with zone allocation and overlap prevention
+getLabelY(baseY, isAbove, signalType = "DEFAULT") =>
+    float newY = baseY
+    float spacing = labelSpacing  // User-configurable spacing between labels
+    float baseOffset = labelDistance  // Fixed distance in points from candle
+    float proximityRange = maxLabelProximity  // Consider labels within this many bars as potentially overlapping
+    bool currentDirection = isAbove  // Local copy that can be modified
+    
+    // Use zone-based positioning if enabled, otherwise use original method
+    if enableZoneAllocation
+        newY := getZoneBasedY(baseY, signalType, currentDirection)
+    else
+        // Original positioning method
+        if currentDirection
+            newY := baseY + baseOffset
+        else
+            newY := baseY - baseOffset
+    
+    // Enhanced overlap prevention - check multiple passes for better spacing
+    maxIterations = 8  // More iterations for better resolution
+    iteration = 0
+    overlapFound = true
+    
+    while overlapFound and iteration < maxIterations
+        overlapFound := false
+        iteration := iteration + 1
+        
+        // Smart distribution: count labels above/below to decide optimal direction
+        labelsAbove = 0
+        labelsBelow = 0
+        if smartDistribution and array.size(recentLabelBars) > 0
+            for j = 0 to array.size(recentLabelBars) - 1
+                recentBarJ = array.get(recentLabelBars, j)
+                recentYJ = array.get(recentLabelYs, j)
+                if math.abs(bar_index - recentBarJ) <= proximityRange
+                    if recentYJ > baseY
+                        labelsAbove := labelsAbove + 1
+                    else
+                        labelsBelow := labelsBelow + 1
+        
+        // If too many labels in original direction, consider switching
+        if smartDistribution and iteration > 2 and ((currentDirection and labelsAbove > labelsBelow + 2) or (not currentDirection and labelsBelow > labelsAbove + 2))
+            currentDirection := not currentDirection
+            newY := currentDirection ? baseY + baseOffset : baseY - baseOffset
+        
+        if array.size(recentLabelBars) > 0
+            for i = 0 to array.size(recentLabelBars) - 1
+                recentBar = array.get(recentLabelBars, i)
+                recentY = array.get(recentLabelYs, i)
+                
+                // Check if this label is close enough to potentially overlap
+                barDistance = math.abs(bar_index - recentBar)
+                if barDistance <= proximityRange
+                    // Enhanced spacing calculation - moderate increase for same-bar labels
+                    proximityFactor = 1.0 - (barDistance / proximityRange)
+                    baseSpacing = barDistance == 0 ? spacing * 2.0 : spacing  // 2x spacing for same bar
+                    requiredSpacing = baseSpacing * (1.0 + proximityFactor * 1.2)  // 100% to 220% spacing
+                    
+                    // More aggressive overlap detection and adjustment
+                    yDistance = math.abs(newY - recentY)
+                    if yDistance < requiredSpacing
+                        overlapFound := true
+                        
+                        // Smart positioning: stack labels efficiently with directional distribution
+                        if currentDirection
+                            if newY <= recentY
+                                newY := recentY + requiredSpacing
+                            else
+                                // If we're above but too close, move even higher
+                                newY := newY + (requiredSpacing - yDistance) * 1.2  // Extra buffer
+                        else
+                            if newY >= recentY
+                                newY := recentY - requiredSpacing
+                            else
+                                // If we're below but too close, move even lower  
+                                newY := newY - (requiredSpacing - yDistance) * 1.2  // Extra buffer
+    
+    // Store this label's position for future overlap checks
+    array.push(recentLabelYs, newY)
+    array.push(recentLabelBars, bar_index)
+    
+    // Keep only recent labels (prevent memory buildup)
+    if array.size(recentLabelBars) > maxRecentLabels
+        array.shift(recentLabelYs)
+        array.shift(recentLabelBars)
+    
+    newY
+
+// Centralized function for all visual representations with tooltip
+drawSignalLabel(barIndex, price, labelText, labelColor, isAbove, tooltip = "", signalType = "DEFAULT") =>
+    labelY = getLabelY(price, isAbove, signalType)
+    // Use label_up style for green labels, label_down for others
+    labelStyle = labelColor == color.green ? label.style_label_up : label.style_label_down
+    label.new(barIndex, labelY, labelText, color=labelColor, style=labelStyle, textcolor=color.white, size=size.small, tooltip=tooltip)
+    
+    // Enhanced connection line from label to trigger price with gap
+    // Add user-configurable gap from the actual high/low
+    connectionEndPoint = isAbove ? price + connectionGap : price - connectionGap
+    line.new(barIndex, labelY, barIndex, connectionEndPoint, color=labelColor, width=1, style=line.style_dashed)
+    
+    labelY
+
+// ============================================================================
+// EXIT DETECTION LOGIC (Target Achievement)
+// ============================================================================
+
+// Helper function to get current time string
+
+
+// Dynamic label update for LONG trades
+if isTradingSession()
+    // ORB LONG dynamic updates
+    if orbLongTriggered and orbLongExitStatus == ""
+        if high >= orbLongTarget
+            orbLongExitStatus := "Exit: Target Hit"
+            orbLongExitTime := getCurrentTimeString()
+        else if low <= orbLongStop
+            orbLongExitStatus := "Exit: SL Hit"
+            orbLongExitTime := getCurrentTimeString()
+    
+    // Bear Trap dynamic updates
+    if bearTrapTriggered and bearTrapExitStatus == ""
+        if high >= bearTrapTarget
+            bearTrapExitStatus := "Exit: Target Hit"
+            bearTrapExitTime := getCurrentTimeString()
+        else if low <= bearTrapStop
+            bearTrapExitStatus := "Exit: SL Hit"
+            bearTrapExitTime := getCurrentTimeString()
+    
+    // Consolidation Breakout LONG dynamic updates
+    if consBreakoutLongTriggered and consBreakoutLongExitStatus == ""
+        if high >= consBreakoutLongTarget
+            consBreakoutLongExitStatus := "Exit: Target Hit"
+            consBreakoutLongExitTime := getCurrentTimeString()
+        else if low <= consBreakoutLongStop
+            consBreakoutLongExitStatus := "Exit: SL Hit"
+            consBreakoutLongExitTime := getCurrentTimeString()
+    
+    // Fake Breakout LONG dynamic updates
+    if fakeBreakoutLongTriggered and fakeBreakoutLongExitStatus == ""
+        if high >= fakeBreakoutLongTarget
+            fakeBreakoutLongExitStatus := "Exit: Target Hit"
+            fakeBreakoutLongExitTime := getCurrentTimeString()
+        else if low <= fakeBreakoutLongStop
+            fakeBreakoutLongExitStatus := "Exit: SL Hit"
+            fakeBreakoutLongExitTime := getCurrentTimeString()
+
+// Dynamic label update for SHORT trades
+if isTradingSession()
+    // ORB SHORT dynamic updates
+    if orbShortTriggered and orbShortExitStatus == ""
+        if low <= orbShortTarget
+            orbShortExitStatus := "Exit: Target Hit"
+            orbShortExitTime := getCurrentTimeString()
+        else if high >= orbShortStop
+            orbShortExitStatus := "Exit: SL Hit"
+            orbShortExitTime := getCurrentTimeString()
+    
+    // Bull Trap dynamic updates
+    if bullTrapTriggered and bullTrapExitStatus == ""
+        if low <= bullTrapTarget
+            bullTrapExitStatus := "Exit: Target Hit"
+            bullTrapExitTime := getCurrentTimeString()
+        else if high >= bullTrapStop
+            bullTrapExitStatus := "Exit: SL Hit"
+            bullTrapExitTime := getCurrentTimeString()
+    
+    // Consolidation Breakout SHORT dynamic updates
+    if consBreakoutShortTriggered and consBreakoutShortExitStatus == ""
+        if low <= consBreakoutShortTarget
+            consBreakoutShortExitStatus := "Exit: Target Hit"
+            consBreakoutShortExitTime := getCurrentTimeString()
+        else if high >= consBreakoutShortStop
+            consBreakoutShortExitStatus := "Exit: SL Hit"
+            consBreakoutShortExitTime := getCurrentTimeString()
+    
+    // Fake Breakout SHORT dynamic updates
+    if fakeBreakoutShortTriggered and fakeBreakoutShortExitStatus == ""
+        if low <= fakeBreakoutShortTarget
+            fakeBreakoutShortExitStatus := "Exit: Target Hit"
+            fakeBreakoutShortExitTime := getCurrentTimeString()
+        else if high >= fakeBreakoutShortStop
+            fakeBreakoutShortExitStatus := "Exit: SL Hit"
+            fakeBreakoutShortExitTime := getCurrentTimeString()
+    
+    // Whipsaw LONG dynamic updates
+    if whipsawLongTriggered and whipsawLongExitStatus == ""
+        if high >= whipsawLongTarget
+            whipsawLongExitStatus := "Exit: Target Hit"
+            whipsawLongExitTime := getCurrentTimeString()
+        else if low <= whipsawLongStop
+            whipsawLongExitStatus := "Exit: SL Hit"
+            whipsawLongExitTime := getCurrentTimeString()
+    
+    // Whipsaw SHORT dynamic updates
+    if whipsawShortTriggered and whipsawShortExitStatus == ""
+        if low <= whipsawShortTarget
+            whipsawShortExitStatus := "Exit: Target Hit"
+            whipsawShortExitTime := getCurrentTimeString()
+        else if high >= whipsawShortStop
+            whipsawShortExitStatus := "Exit: SL Hit"
+            whipsawShortExitTime := getCurrentTimeString()
+
+// ============================================================================
+// DYNAMIC LABEL UPDATES (Real-time price and exit status)
+// ============================================================================
+
+// Dynamic label updates using stored final texts
+
+if isTradingSession()
+    // ORB LONG exit label update (store final text once)
+    if not na(orbLongLabel) and orbLongTriggered and orbLongExitStatus != "" and orbLongFinalLabel == ""
+        // Store the final label text permanently
+        orbLongFinalLabel := "ORB LONG\n" + orbLongExitStatus
+        label.set_text(orbLongLabel, orbLongFinalLabel)
+    else if not na(orbLongLabel) and orbLongFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(orbLongLabel, orbLongFinalLabel)
+    
+    // ORB SHORT exit label update (store final text once)
+    if not na(orbShortLabel) and orbShortTriggered and orbShortExitStatus != "" and orbShortFinalLabel == ""
+        // Store the final label text permanently
+        orbShortFinalLabel := "ORB SHORT\n" + orbShortExitStatus
+        label.set_text(orbShortLabel, orbShortFinalLabel)
+    else if not na(orbShortLabel) and orbShortFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(orbShortLabel, orbShortFinalLabel)
+    
+    // Bull Trap exit label update (store final text once)
+    if not na(bullTrapLabel) and bullTrapTriggered and bullTrapExitStatus != "" and bullTrapFinalLabel == ""
+        // Store the final label text permanently
+        bullTrapFinalLabel := "BULL TRAP\n" + bullTrapExitStatus
+        label.set_text(bullTrapLabel, bullTrapFinalLabel)
+    else if not na(bullTrapLabel) and bullTrapFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(bullTrapLabel, bullTrapFinalLabel)
+    
+    // Bear Trap exit label update (store final text once)
+    if not na(bearTrapLabel) and bearTrapTriggered and bearTrapExitStatus != "" and bearTrapFinalLabel == ""
+        // Store the final label text permanently
+        bearTrapFinalLabel := "BEAR TRAP\n" + bearTrapExitStatus
+        label.set_text(bearTrapLabel, bearTrapFinalLabel)
+    else if not na(bearTrapLabel) and bearTrapFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(bearTrapLabel, bearTrapFinalLabel)
+    
+    // Consolidation Breakout Long exit label update (store final text once)
+    if not na(consBreakoutLongLabel) and consBreakoutLongTriggered and consBreakoutLongExitStatus != "" and consBreakoutLongFinalLabel == ""
+        // Store the final label text permanently
+        consBreakoutLongFinalLabel := "CONS LONG\n" + consBreakoutLongExitStatus
+        label.set_text(consBreakoutLongLabel, consBreakoutLongFinalLabel)
+    else if not na(consBreakoutLongLabel) and consBreakoutLongFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(consBreakoutLongLabel, consBreakoutLongFinalLabel)
+    
+    // Consolidation Breakout Short exit label update (store final text once)
+    if not na(consBreakoutShortLabel) and consBreakoutShortTriggered and consBreakoutShortExitStatus != "" and consBreakoutShortFinalLabel == ""
+        // Store the final label text permanently
+        consBreakoutShortFinalLabel := "CONS SHORT\n" + consBreakoutShortExitStatus
+        label.set_text(consBreakoutShortLabel, consBreakoutShortFinalLabel)
+    else if not na(consBreakoutShortLabel) and consBreakoutShortFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(consBreakoutShortLabel, consBreakoutShortFinalLabel)
+    
+    // Fake Breakdown Long exit label update (store final text once)
+    if not na(fakeBreakoutLongLabel) and fakeBreakoutLongTriggered and fakeBreakoutLongExitStatus != "" and fakeBreakoutLongFinalLabel == ""
+        // Store the final label text permanently
+        fakeBreakoutLongFinalLabel := "FAKE BREAKDOWN LONG\n" + fakeBreakoutLongExitStatus
+        label.set_text(fakeBreakoutLongLabel, fakeBreakoutLongFinalLabel)
+    else if not na(fakeBreakoutLongLabel) and fakeBreakoutLongFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(fakeBreakoutLongLabel, fakeBreakoutLongFinalLabel)
+    
+    // Fake Breakout Short exit label update (store final text once)
+    if not na(fakeBreakoutShortLabel) and fakeBreakoutShortTriggered and fakeBreakoutShortExitStatus != "" and fakeBreakoutShortFinalLabel == ""
+        // Store the final label text permanently
+        fakeBreakoutShortFinalLabel := "FAKE BREAKOUT SHORT\n" + fakeBreakoutShortExitStatus
+        label.set_text(fakeBreakoutShortLabel, fakeBreakoutShortFinalLabel)
+    else if not na(fakeBreakoutShortLabel) and fakeBreakoutShortFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(fakeBreakoutShortLabel, fakeBreakoutShortFinalLabel)
+    
+    // Whipsaw Long exit label update (store final text once)
+    if not na(whipsawLongLabel) and whipsawLongTriggered and whipsawLongExitStatus != "" and whipsawLongFinalLabel == ""
+        // Store the final label text permanently
+        whipsawText = threeLL ? "3LL REVERSAL LONG" : "2LL REVERSAL LONG"
+        whipsawLongFinalLabel := whipsawText + "\n" + whipsawLongExitStatus
+        label.set_text(whipsawLongLabel, whipsawLongFinalLabel)
+    else if not na(whipsawLongLabel) and whipsawLongFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(whipsawLongLabel, whipsawLongFinalLabel)
+    
+    // Whipsaw Short exit label update (store final text once)
+    if not na(whipsawShortLabel) and whipsawShortTriggered and whipsawShortExitStatus != "" and whipsawShortFinalLabel == ""
+        // Store the final label text permanently
+        whipsawText = threeHH ? "3HH REVERSAL SHORT" : "2HH REVERSAL SHORT"
+        whipsawShortFinalLabel := whipsawText + "\n" + whipsawShortExitStatus
+        label.set_text(whipsawShortLabel, whipsawShortFinalLabel)
+    else if not na(whipsawShortLabel) and whipsawShortFinalLabel != ""
+        // Use stored final text (prevents values from changing)
+        label.set_text(whipsawShortLabel, whipsawShortFinalLabel)
+
+// ============================================================================
+// VISUAL INDICATORS
+// ============================================================================
+
+// Market Zone Labels based on current price (always on top of ORH)
+currentZoneType = isNeutralZone() ? "NEUTRAL" : isBullishZone() ? "BULLISH" : "BEARISH"
+
+// Function to get active trades P&L summary
+getActiveTradesPnL() =>
+    activeTrades = 0
+    totalPnL = 0.0
+    tradeDetails = ""
+    
+    // Check ORB LONG
+    if orbLongTriggered and orbLongExitStatus == ""
+        pnl = close - orbLongEntry
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "ORB LONG: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check ORB SHORT
+    if orbShortTriggered and orbShortExitStatus == ""
+        pnl = orbShortEntry - close
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "ORB SHORT: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check BULL TRAP
+    if bullTrapTriggered and bullTrapExitStatus == ""
+        pnl = bullTrapEntry - close
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "BULL TRAP: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check BEAR TRAP
+    if bearTrapTriggered and bearTrapExitStatus == ""
+        pnl = close - bearTrapEntry
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "BEAR TRAP: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check CONS BREAKOUT LONG
+    if consBreakoutLongTriggered and consBreakoutLongExitStatus == ""
+        pnl = close - consBreakoutLongEntry
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "CONS BO LONG: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check CONS BREAKOUT SHORT
+    if consBreakoutShortTriggered and consBreakoutShortExitStatus == ""
+        pnl = consBreakoutShortEntry - close
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "CONS BO SHORT: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check FAKE BREAKOUT LONG
+    if fakeBreakoutLongTriggered and fakeBreakoutLongExitStatus == ""
+        pnl = close - fakeBreakoutLongEntry
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "FAKE BD LONG: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    // Check FAKE BREAKOUT SHORT
+    if fakeBreakoutShortTriggered and fakeBreakoutShortExitStatus == ""
+        pnl = fakeBreakoutShortEntry - close
+        activeTrades := activeTrades + 1
+        totalPnL := totalPnL + pnl
+        tradeDetails := tradeDetails + "FAKE BO SHORT: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
+    
+    [activeTrades, totalPnL, tradeDetails]
+
+
+
+// Display zone label continuously during trading session, positioned at user-defined distance
+// Only show for current day and when signals should be displayed
+if showNeutralZone and shouldShowSignals() and isTradingSession() and not na(orh)
+    // Delete previous zone label if it exists
+    if not na(currentZoneLabel)
+        label.delete(currentZoneLabel)
+        currentZoneLabel := na
+    
+    // Position zone label using zone allocation system
+    zoneY = getZoneBasedY(orh, "ZONE_INFO", true)
+    
+    // Build clean zone text without trade information
+    zoneText = ""
+    zoneColor = color.yellow
+    textColor = color.black
+    
+    if currentZoneType == "NEUTRAL"
+        zoneText := "NEUTRAL ZONE"
+        zoneColor := color.yellow
+        textColor := color.black
+    else if currentZoneType == "BULLISH"
+        zoneText := "BULLISH ZONE"
+        zoneColor := color.green
+        textColor := color.white
+    else if currentZoneType == "BEARISH"
+        zoneText := "BEARISH ZONE"
+        zoneColor := color.red
+        textColor := color.white
+    
+    // Create clean tooltip with zone information only
+    tooltipText = ""
+    if currentZoneType == "NEUTRAL"
+        tooltipText := "Neutral Zone: Price between S1 (" + str.tostring(s1, "#.##") + ") and R1 (" + str.tostring(r1, "#.##") + "). Avoid aggressive trading, focus on scalping with ORB setups only."
+    else if currentZoneType == "BULLISH"
+        tooltipText := "Bullish Zone: Price above R1 (" + str.tostring(r1, "#.##") + "). High probability of reaching R2. Only bullish trades allowed: ORH Breakout and Bear Trap. NO SHORTS!"
+    else if currentZoneType == "BEARISH"
+        tooltipText := "Bearish Zone: Price below S1 (" + str.tostring(s1, "#.##") + "). High probability of reaching S2. Only bearish trades allowed: ORL Breakdown and Bull Trap. NO LONGS!"
+    
+    // Calculate horizontal position based on user setting (distance from current bar)
+    zoneX = bar_index + zoneLabelDistance
+    currentZoneLabel := label.new(zoneX, zoneY, zoneText, color=zoneColor, style=label.style_label_down, textcolor=textColor, size=size.tiny, tooltip=tooltipText)
+else
+    // Clean up zone label when not showing signals or outside trading session
+    if not na(currentZoneLabel)
+        label.delete(currentZoneLabel)
+        currentZoneLabel := na
+
+// ORH/ORL Detection and Labeling - Combined approach
+
+// Draw ORH label when finalized and not yet drawn
+if showORLevels and shouldShowSignals() and orhDetermined and not orhLabelDrawn and orhBarIndex > 0
+    // Draw finalized ORH label
+    labelY = drawSignalLabel(orhBarIndex, orh, "ORH (FINAL)\n" + str.tostring(orh, "#.##"), orhColor, true, "Opening Range High: Finalized when price stopped making higher highs using 3-candle pattern (current candle lower high than previous, previous higher than candle before)")
+    lastLabelY := labelY
+    lastLabelBar := orhBarIndex
+    orhLabelDrawn := true
+
+// Draw ORL label when finalized and not yet drawn
+if showORLevels and shouldShowSignals() and orlDetermined and not orlLabelDrawn and orlBarIndex > 0
+    // Draw finalized ORL label
+    labelY = drawSignalLabel(orlBarIndex, orl, "ORL (FINAL)\n" + str.tostring(orl, "#.##"), color.green, false, "Opening Range Low: Finalized when price stopped making lower lows using 3-candle pattern (current candle higher low than previous, previous lower than candle before)")
+    lastLabelY := labelY
+    lastLabelBar := orlBarIndex
+    orlLabelDrawn := true
+
+// Show provisional ORH/ORL on current candle (when not finalized)
+if showORLevels and shouldShowSignals() and barstate.islast and isTradingSession()
+    if not na(orh) and not orhDetermined
+        label.new(bar_index, orh, "ORH (PROVISIONAL)\n" + str.tostring(orh, "#.##"), color=color.new(orhColor, 50), style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Provisional ORH: Current session high, will be finalized when 3-candle pattern confirms")
+    
+    if not na(orl) and not orlDetermined  
+        label.new(bar_index, orl, "ORL (PROVISIONAL)\n" + str.tostring(orl, "#.##"), color=color.new(color.green, 50), style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Provisional ORL: Current session low, will be finalized when 3-candle pattern confirms")
+
+// Entry Signals - Only show when conditions are met (once per day)
+// ORB LONG signal - Create minimal label and add to table (with zone filtering)
+if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLongTriggered and isValidZoneForSignal("ORB_LONG")
+    orbLongEntryTime := getCurrentTimeString()
+    // Enhanced chart label with zone context
+    zoneEmphasis = getTradeEmphasis()
+    labelText = "ORB LONG"
+    labelY = getLabelY(low, false, "ORB")
+    labelColor = isAggressiveBullishZone ? color.new(color.green, 0) : color.green
+    tooltipText = "ORB LONG SIGNAL\nEntry Time: " + orbLongEntryTime + "\nEntry: " + str.tostring(orbLongEntry, "#.##") + "\nStop Loss: " + str.tostring(orbLongStop, "#.##") + "\nTarget: " + str.tostring(orbLongTarget, "#.##") + "\nZone: " + getCurrentZone() + "\nEmphasis: " + zoneEmphasis
+    orbLongLabel := label.new(bar_index, labelY, labelText, color=labelColor, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    // Add to trade table
+    addTradeToTable("ORB LONG", orbLongEntryTime, orbLongEntry, orbLongStop, orbLongTarget, "Active", 0.0, bar_index)
+    orbLongTriggered := true
+
+// ORB SHORT signal - Create minimal label and add to table (with zone filtering)
+if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbShortTriggered and isValidZoneForSignal("ORB_SHORT")
+    orbShortEntryTime := getCurrentTimeString()
+    // Minimal chart label
+    labelText = "ORB SHORT"
+    labelY = getLabelY(high, true, "ORB")
+    tooltipText = "ORB SHORT SIGNAL\nEntry Time: " + orbShortEntryTime + "\nEntry: " + str.tostring(orbShortEntry, "#.##") + "\nStop Loss: " + str.tostring(orbShortStop, "#.##") + "\nTarget: " + str.tostring(orbShortTarget, "#.##") + "\nZone: " + getCurrentZone()
+    orbShortLabel := label.new(bar_index, labelY, labelText, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
+    // Add to trade table
+    addTradeToTable("ORB SHORT", orbShortEntryTime, orbShortEntry, orbShortStop, orbShortTarget, "Active", 0.0, bar_index)
+    orbShortTriggered := true
+
+// Trap Signals - Only show when conditions are met (once per day) (with zone filtering)
+if showTrapSignals and shouldShowSignals() and bullTrapCondition and not bullTrapTriggered and isValidZoneForSignal("BULL_TRAP")
+    bullTrapEntryTime := getCurrentTimeString()
+    // Minimal chart label
+    labelText = "BULL TRAP"
+    labelY = getLabelY(high, true, "TRAP")
+    tooltipText = "BULL TRAP SIGNAL\nEntry Time: " + bullTrapEntryTime + "\nEntry: " + str.tostring(bullTrapEntry, "#.##") + "\nStop Loss: " + str.tostring(bullTrapStop, "#.##") + "\nTarget: " + str.tostring(bullTrapTarget, "#.##") + "\nStrategy: After ORH breakout, candle closed below ORH. Confirmation at swing low break."
+    bullTrapLabel := label.new(bar_index, labelY, labelText, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
+    // Add to trade table
+    addTradeToTable("BULL TRAP", bullTrapEntryTime, bullTrapEntry, bullTrapStop, bullTrapTarget, "Active", 0.0, bar_index)
+    bullTrapTriggered := true
+
+if showTrapSignals and shouldShowSignals() and bearTrapCondition and not bearTrapTriggered and isValidZoneForSignal("BEAR_TRAP")
+    bearTrapEntryTime := getCurrentTimeString()
+    // Minimal chart label
+    labelText = "BEAR TRAP"
+    labelY = getLabelY(low, false, "TRAP")
+    tooltipText = "BEAR TRAP SIGNAL\nEntry Time: " + bearTrapEntryTime + "\nEntry: " + str.tostring(bearTrapEntry, "#.##") + "\nStop Loss: " + str.tostring(bearTrapStop, "#.##") + "\nTarget: " + str.tostring(bearTrapTarget, "#.##") + "\nStrategy: After ORL breakdown, candle closed above ORL. Confirmation at swing high break."
+    bearTrapLabel := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    // Add to trade table
+    addTradeToTable("BEAR TRAP", bearTrapEntryTime, bearTrapEntry, bearTrapStop, bearTrapTarget, "Active", 0.0, bar_index)
+    bearTrapTriggered := true
+
+// ORB Follow-up Failure Signals - Case 1 & Case 2
+
+// BULL TRAP CASE 1 - No Confirmation (Higher retest probability, less trapped participants)
+if showTrapSignals and shouldShowSignals() and bullTrapCase1 and not bullTrapCase1Triggered and isValidZoneForSignal("BULL_TRAP_C1")
+    bullTrapCase1EntryTime := getCurrentTimeString()
+    // Enhanced label with case-specific information
+    labelText = "BULL TRAP C1"
+    labelY = getLabelY(high, true, "BULL TRAP C1")
+    tooltipText = "BULL TRAP CASE 1\nEntry Time: " + bullTrapCase1EntryTime + "\nEntry: " + str.tostring(bullTrapCase1Entry, "#.##") + "\nStop Loss: " + str.tostring(bullTrapCase1Stop, "#.##") + "\nTarget: " + str.tostring(bullTrapCase1Target, "#.##") + "\nCase: No confirmation candle - immediate failure.\nPsychology: Higher chance of retest, less trapped participants."
+    bullTrapCase1Label := label.new(bar_index, labelY, labelText, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
+    addTradeToTable("BULL TRAP C1", bullTrapCase1EntryTime, bullTrapCase1Entry, bullTrapCase1Stop, bullTrapCase1Target, "Active", 0.0, bar_index)
+    bullTrapCase1Triggered := true
+
+// BULL TRAP CASE 2 - Confirmation Failed (No reverse retest expected, higher momentum)
+if showTrapSignals and shouldShowSignals() and bullTrapCase2 and not bullTrapCase2Triggered and isValidZoneForSignal("BULL_TRAP_C2")
+    bullTrapCase2EntryTime := getCurrentTimeString()
+    // Enhanced label with case-specific information
+    labelText = "BULL TRAP C2"
+    labelY = getLabelY(high, true, "BULL TRAP C2")
+    tooltipText = "BULL TRAP CASE 2\nEntry Time: " + bullTrapCase2EntryTime + "\nEntry: " + str.tostring(bullTrapCase2Entry, "#.##") + "\nStop Loss: " + str.tostring(bullTrapCase2Stop, "#.##") + "\nTarget: " + str.tostring(bullTrapCase2Target, "#.##") + "\nCase: Confirmation came but follow-up failed.\nPsychology: More trapped participants, no reverse retest expected, higher momentum."
+    bullTrapCase2Label := label.new(bar_index, labelY, labelText, color=color.maroon, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.maroon, width=1, style=line.style_dashed)
+    addTradeToTable("BULL TRAP C2", bullTrapCase2EntryTime, bullTrapCase2Entry, bullTrapCase2Stop, bullTrapCase2Target, "Active", 0.0, bar_index)
+    bullTrapCase2Triggered := true
+
+// BEAR TRAP CASE 1 - No Confirmation (Higher retest probability, less trapped participants)
+if showTrapSignals and shouldShowSignals() and bearTrapCase1 and not bearTrapCase1Triggered and isValidZoneForSignal("BEAR_TRAP_C1")
+    bearTrapCase1EntryTime := getCurrentTimeString()
+    // Enhanced label with case-specific information
+    labelText = "BEAR TRAP C1"
+    labelY = getLabelY(low, false, "BEAR TRAP C1")
+    tooltipText = "BEAR TRAP CASE 1\nEntry Time: " + bearTrapCase1EntryTime + "\nEntry: " + str.tostring(bearTrapCase1Entry, "#.##") + "\nStop Loss: " + str.tostring(bearTrapCase1Stop, "#.##") + "\nTarget: " + str.tostring(bearTrapCase1Target, "#.##") + "\nCase: No confirmation candle - immediate failure.\nPsychology: Higher chance of retest, less trapped participants."
+    bearTrapCase1Label := label.new(bar_index, labelY, labelText, color=color.lime, style=label.style_label_up, textcolor=color.black, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.lime, width=1, style=line.style_dashed)
+    addTradeToTable("BEAR TRAP C1", bearTrapCase1EntryTime, bearTrapCase1Entry, bearTrapCase1Stop, bearTrapCase1Target, "Active", 0.0, bar_index)
+    bearTrapCase1Triggered := true
+
+// BEAR TRAP CASE 2 - Confirmation Failed (No reverse retest expected, higher momentum)
+if showTrapSignals and shouldShowSignals() and bearTrapCase2 and not bearTrapCase2Triggered and isValidZoneForSignal("BEAR_TRAP_C2")
+    bearTrapCase2EntryTime := getCurrentTimeString()
+    // Enhanced label with case-specific information
+    labelText = "BEAR TRAP C2"
+    labelY = getLabelY(low, false, "BEAR TRAP C2")
+    tooltipText = "BEAR TRAP CASE 2\nEntry Time: " + bearTrapCase2EntryTime + "\nEntry: " + str.tostring(bearTrapCase2Entry, "#.##") + "\nStop Loss: " + str.tostring(bearTrapCase2Stop, "#.##") + "\nTarget: " + str.tostring(bearTrapCase2Target, "#.##") + "\nCase: Confirmation came but follow-up failed.\nPsychology: More trapped participants, no reverse retest expected, higher momentum."
+    bearTrapCase2Label := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    addTradeToTable("BEAR TRAP C2", bearTrapCase2EntryTime, bearTrapCase2Entry, bearTrapCase2Stop, bearTrapCase2Target, "Active", 0.0, bar_index)
+    bearTrapCase2Triggered := true
+
+// Additional Whipsaw for Bear Trap - Show enhanced label
+if showTrapSignals and shouldShowSignals() and bearTrapAdditionalWhipsaw and not bearTrapWhipsawTriggered
+    bearTrapWhipsawTime := getCurrentTimeString()
+    // Enhanced whipsaw label
+    labelText = "WHIPSAW"
+    labelY = getLabelY(low, false, "WHIPSAW")
+    bearTrapWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for Bear Trap - Momentum will come after whipsaw. Higher probability signal with more trapped participants.")
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.orange, width=1, style=line.style_dashed)
+    bearTrapWhipsawTriggered := true
+
+// Additional Whipsaw for Bull Trap - Show enhanced label
+if showTrapSignals and shouldShowSignals() and bullTrapAdditionalWhipsaw and not bullTrapWhipsawTriggered
+    bullTrapWhipsawTime := getCurrentTimeString()
+    // Enhanced whipsaw label
+    labelText = "WHIPSAW"
+    labelY = getLabelY(high, true, "WHIPSAW")
+    bullTrapWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for Bull Trap - Momentum will come after whipsaw. Higher probability signal with more trapped participants.")
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
+    bullTrapWhipsawTriggered := true
+
+// Additional Whipsaw for ORB Long - Show enhanced label
+if showEntrySignals and shouldShowSignals() and orbLongAdditionalWhipsaw and not orbLongWhipsawTriggered
+    orbLongWhipsawTime := getCurrentTimeString()
+    // Enhanced whipsaw label
+    labelText = "WHIPSAW"
+    labelY = getLabelY(low, false, "WHIPSAW")
+    orbLongWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for ORB Long - ORH holding as support. SL will not hit. Higher probability signal.")
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.orange, width=1, style=line.style_dashed)
+    orbLongWhipsawTriggered := true
+
+// Additional Whipsaw for ORB Short - Show enhanced label
+if showEntrySignals and shouldShowSignals() and orbShortAdditionalWhipsaw and not orbShortWhipsawTriggered
+    orbShortWhipsawTime := getCurrentTimeString()
+    // Enhanced whipsaw label
+    labelText = "WHIPSAW"
+    labelY = getLabelY(high, true, "WHIPSAW")
+    orbShortWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for ORB Short - ORL holding as resistance. SL will not hit. Higher probability signal.")
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
+    orbShortWhipsawTriggered := true
+
+// Consolidation Breakout Signals - Only show when conditions are met (once per day) (with zone filtering)
+if shouldShowSignals() and consolidationBreakoutLong and not consBreakoutLongTriggered and isValidZoneForSignal("CONS_LONG")
+    consBreakoutLongEntryTime := getCurrentTimeString()
+    // Minimal chart label
+    labelText = "CONS LONG"
+    labelY = getLabelY(low, false, "CONS_BREAKOUT")
+    tooltipText = "CONSOLIDATION BREAKOUT LONG\nEntry Time: " + consBreakoutLongEntryTime + "\nEntry: " + str.tostring(consBreakoutLongEntry, "#.##") + "\nStop Loss: " + str.tostring(consBreakoutLongStop, "#.##") + "\nTarget: " + str.tostring(consBreakoutLongTarget, "#.##") + "\nStrategy: Multiple rejections at ORH for 45+ minutes, direct breakout entry without retest."
+    consBreakoutLongLabel := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    // Add to trade table
+    addTradeToTable("CONS LONG", consBreakoutLongEntryTime, consBreakoutLongEntry, consBreakoutLongStop, consBreakoutLongTarget, "Active", 0.0, bar_index)
+    consBreakoutLongTriggered := true
+
+if shouldShowSignals() and consolidationBreakoutShort and not consBreakoutShortTriggered and isValidZoneForSignal("CONS_SHORT")
+    consBreakoutShortEntryTime := getCurrentTimeString()
+    // Minimal chart label
+    labelText = "CONS SHORT"
+    labelY = getLabelY(high, true, "CONS_BREAKOUT")
+    tooltipText = "CONSOLIDATION BREAKOUT SHORT\nEntry Time: " + consBreakoutShortEntryTime + "\nEntry: " + str.tostring(consBreakoutShortEntry, "#.##") + "\nStop Loss: " + str.tostring(consBreakoutShortStop, "#.##") + "\nTarget: " + str.tostring(consBreakoutShortTarget, "#.##") + "\nStrategy: Multiple rejections at ORL for 45+ minutes, direct breakdown entry without retest."
+    consBreakoutShortLabel := label.new(bar_index, labelY, labelText, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
+    // Add to trade table
+    addTradeToTable("CONS SHORT", consBreakoutShortEntryTime, consBreakoutShortEntry, consBreakoutShortStop, consBreakoutShortTarget, "Active", 0.0, bar_index)
+    consBreakoutShortTriggered := true
+
+// ============================================================================
+// ENHANCED WHIPSAW SIGNAL GENERATION
+// ============================================================================
+
+// Declare shared variables for enhanced whipsaw signals
+var string enhancedEntryTime = na
+
+// Enhanced Consolidation + Fake Breakout Short
+if showWhipsawSignals and shouldShowSignals() and enhancedFakeBreakout and perfectEntryShort and not perfectEntryTriggered and isValidZoneForSignal("CONS_FAKE_BO")
+    enhancedEntryTime := getCurrentTimeString()
+    fakeBoLabelText = "CONS FAKE BO"
+    fakeBoLabelY = getLabelY(high, true, "ENHANCED_WHIPSAW")
+    fakeBoTooltipText = "CONSOLIDATION FAKE BREAKOUT\nEntry Time: " + enhancedEntryTime + "\nEntry: " + str.tostring(perfectEntryLevel, "#.##") + "\nResistance: " + str.tostring(consolidationResistance, "#.##") + "\nSupport: " + str.tostring(consolidationSupport, "#.##") + "\nPattern: Consolidation (" + str.tostring(consolidationTouches) + " touches) + Fake breakout above resistance + Sharp reversal down"
+    enhancedFakeBreakoutLabel := label.new(bar_index, fakeBoLabelY, fakeBoLabelText, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=fakeBoTooltipText)
+    line.new(bar_index, fakeBoLabelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
+    
+    // Add to trade table
+    addTradeToTable("CONS FAKE BO", enhancedEntryTime, perfectEntryLevel, consolidationResistance + (niftyStopLoss * syminfo.mintick), consolidationSupport, "Active", 0.0, bar_index)
+    perfectEntryTriggered := true
+
+// Enhanced Consolidation + Fake Breakdown Long  
+if showWhipsawSignals and shouldShowSignals() and enhancedFakeBreakdown and perfectEntryLong and not perfectEntryTriggered and isValidZoneForSignal("CONS_FAKE_BD")
+    enhancedEntryTime := getCurrentTimeString()
+    fakeBdLabelText = "CONS FAKE BD"
+    fakeBdLabelY = getLabelY(low, false, "ENHANCED_WHIPSAW")
+    fakeBdTooltipText = "CONSOLIDATION FAKE BREAKDOWN\nEntry Time: " + enhancedEntryTime + "\nEntry: " + str.tostring(perfectEntryLevel, "#.##") + "\nResistance: " + str.tostring(consolidationResistance, "#.##") + "\nSupport: " + str.tostring(consolidationSupport, "#.##") + "\nPattern: Consolidation (" + str.tostring(consolidationTouches) + " touches) + Fake breakdown below support + Sharp reversal up"
+    enhancedFakeBreakdownLabel := label.new(bar_index, fakeBdLabelY, fakeBdLabelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=fakeBdTooltipText)
+    line.new(bar_index, fakeBdLabelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    
+    // Add to trade table  
+    addTradeToTable("CONS FAKE BD", enhancedEntryTime, perfectEntryLevel, consolidationSupport - (niftyStopLoss * syminfo.mintick), consolidationResistance, "Active", 0.0, bar_index)
+    perfectEntryTriggered := true
+
+// Both Sides Trap Pattern
+if showWhipsawSignals and shouldShowSignals() and bothSidesTrapActive and not bothSidesTrapTriggered
+    enhancedEntryTime := getCurrentTimeString()
+    bothTrapLabelText = "BOTH SIDES TRAP"
+    
+    // Determine direction based on final move
+    isBullishTrap = high > trapHigh + (trapHigh - trapLow) * 0.5
+    
+    // Declare variables for both conditions
+    bothTrapLabelY = 0.0
+    bothTrapColor = color.white
+    bothTrapLabelStyle = label.style_label_up
+    bothTrapEntryLevel = 0.0
+    bothTrapStopLevel = 0.0
+    bothTrapTargetLevel = 0.0
+    
+    if isBullishTrap
+        bothTrapLabelY := getLabelY(low, false, "BOTH_SIDES_TRAP")
+        bothTrapColor := color.new(color.green, 20)
+        bothTrapLabelStyle := label.style_label_up
+        bothTrapEntryLevel := perfectEntryLevel > 0 ? perfectEntryLevel : close
+        bothTrapStopLevel := trapLow
+        bothTrapTargetLevel := trapHigh + (trapHigh - trapLow) * 1.5
+    else
+        bothTrapLabelY := getLabelY(high, true, "BOTH_SIDES_TRAP") 
+        bothTrapColor := color.new(color.red, 20)
+        bothTrapLabelStyle := label.style_label_down
+        bothTrapEntryLevel := perfectEntryLevel > 0 ? perfectEntryLevel : close
+        bothTrapStopLevel := trapHigh
+        bothTrapTargetLevel := trapLow - (trapHigh - trapLow) * 1.5
+    
+    bothTrapTooltipText = "BOTH SIDES TRAP PATTERN\nEntry Time: " + enhancedEntryTime + "\nEntry: " + str.tostring(bothTrapEntryLevel, "#.##") + "\nTrap High: " + str.tostring(trapHigh, "#.##") + "\nTrap Low: " + str.tostring(trapLow, "#.##") + "\nPattern: Multiple counter-moves trap both bulls and bears before explosive " + (isBullishTrap ? "upward" : "downward") + " move"
+    bothSidesTrapLabel := label.new(bar_index, bothTrapLabelY, bothTrapLabelText, color=bothTrapColor, style=bothTrapLabelStyle, textcolor=color.white, size=size.small, tooltip=bothTrapTooltipText)
+    line.new(bar_index, bothTrapLabelY, bar_index, isBullishTrap ? low + connectionGap : high - connectionGap, color=bothTrapColor, width=2, style=line.style_solid)
+    
+    // Add to trade table
+    direction = isBullishTrap ? "LONG" : "SHORT"
+    addTradeToTable("BOTH SIDES TRAP " + direction, enhancedEntryTime, bothTrapEntryLevel, bothTrapStopLevel, bothTrapTargetLevel, "Active", 0.0, bar_index)
+    bothSidesTrapTriggered := true
+
+// ============================================================================
+// TRENDING DAY LABELS
+// ============================================================================
+
+// Display Trending Day Label when conditions are met
+if shouldShowSignals() and not trendingDayLabelShown and (trendingDayBullish or trendingDayBearish)
+    trendingDayTime := getCurrentTimeString()
+    
+    // Use existing variables for label properties (avoid shadowing)
+    trendLabelText = ""
+    trendLabelColor = color.white
+    trendLabelStyle = label.style_label_up
+    trendLabelY = 0.0
+    trendTooltipText = ""
+    
+    // Determine label properties based on trending day type
+    if trendingDayBullish
+        trendLabelText := "📈 BULLISH TRENDING DAY\n" + trendingDayPattern
+        trendLabelColor := color.new(color.green, 0)
+        trendLabelStyle := label.style_label_up
+        trendLabelY := getLabelY(low, false, "TRENDING_DAY")
+        trendTooltipText := "Bullish Trending Day Detected: " + trendingDayPattern + ". Two or more bullish setups in same direction indicate strong upward momentum. Expect continuation to higher levels."
+    else if trendingDayBearish
+        trendLabelText := "📉 BEARISH TRENDING DAY\n" + trendingDayPattern
+        trendLabelColor := color.new(color.red, 0)
+        trendLabelStyle := label.style_label_down
+        trendLabelY := getLabelY(high, true, "TRENDING_DAY")
+        trendTooltipText := "Bearish Trending Day Detected: " + trendingDayPattern + ". Two or more bearish setups in same direction indicate strong downward momentum. Expect continuation to lower levels."
+    
+    // Create trending day label
+    trendingDayLabel := label.new(bar_index, trendLabelY, trendLabelText, color=trendLabelColor, style=trendLabelStyle, textcolor=color.white, size=size.normal, tooltip=trendTooltipText)
+    line.new(bar_index, trendLabelY, bar_index, trendingDayBullish ? low + connectionGap : high - connectionGap, color=trendLabelColor, width=2, style=line.style_solid)
+    
+    trendingDayLabelShown := true
+
+// ============================================================================
+// ZONE CHANGE ALERTS & STATUS
+// ============================================================================
+
+// Zone change alerts
+if zoneChanged and shouldShowSignals()
+    alertMessage = "📍 ZONE CHANGE: " + previousZone + " → " + currentZone + " | " + getTradeEmphasis()
+    alert(alertMessage)
+
+// Aggressive opportunity alerts  
+if shouldShowSignals() and (isAggressiveBullishZone or isAggressiveBearishZone)
+    if isAggressiveBullishZone and not na(ta.barssince(not isAggressiveBullishZone)) and ta.barssince(not isAggressiveBullishZone) == 0
+        alert("🚀 AGGRESSIVE BULLISH ZONE: R1-R2 Range - Don't Miss Bullish Setups!")
+    if isAggressiveBearishZone and not na(ta.barssince(not isAggressiveBearishZone)) and ta.barssince(not isAggressiveBearishZone) == 0
+        alert("🚀 AGGRESSIVE BEARISH ZONE: S1-S2 Range - Don't Miss Bearish Setups!")
+
+// ============================================================================
+// WHIPSAW ENTRY SIGNALS
+// ============================================================================
+
+// Whipsaw Long Signals (2LL/3LL reversal)
+if showWhipsawSignals and shouldShowSignals() and whipsawLongCondition and not whipsawLongTriggered
+    whipsawLongEntryTime := getCurrentTimeString()
+    whipsawText = threeLL ? "3LL REVERSAL LONG" : "2LL REVERSAL LONG"
+    tooltipText = (threeLL ? "Three" : "Two") + " consecutive lower lows detected. Price broke above recent swing high, indicating potential reversal from oversold condition. Entry: Close at reversal candle. SL: max(SwingLow, Entry-35pts). Target: ORH/ORL range distance or nearest R1/R2/R3 pivot above entry."
+    labelText = whipsawText
+    labelY = getLabelY(low, false, "WHIPSAW")
+    whipsawLongLabel := label.new(bar_index, labelY, labelText, color=color.lime, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.lime, width=1, style=line.style_dashed)
+    whipsawLongTriggered := true
+
+// Whipsaw Short Signals (2HH/3HH reversal)
+if showWhipsawSignals and shouldShowSignals() and whipsawShortCondition and not whipsawShortTriggered
+    whipsawShortEntryTime := getCurrentTimeString()
+    whipsawText = threeHH ? "3HH REVERSAL SHORT" : "2HH REVERSAL SHORT"
+    tooltipText = (threeHH ? "Three" : "Two") + " consecutive higher highs detected. Price broke below recent swing low, indicating potential reversal from overbought condition. Entry: Close at reversal candle. SL: min(SwingHigh, Entry+35pts). Target: ORH/ORL range distance or nearest S1/S2/S3 pivot below entry."
+    labelText = whipsawText
+    labelY = getLabelY(high, true, "WHIPSAW")
+    whipsawShortLabel := label.new(bar_index, labelY, labelText, color=color.maroon, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.maroon, width=1, style=line.style_dashed)
+    whipsawShortTriggered := true
+
+// Fake Breakout Long Signals (Consolidation + Fake Breakdown = Sharp Move Up)
+if showWhipsawSignals and shouldShowSignals() and fakeBreakoutLongCondition and not fakeBreakoutLongTriggered
+    fakeBreakoutLongEntryTime := getCurrentTimeString()
+    labelText = "FAKE BREAKDOWN LONG"
+    labelY = getLabelY(low, false, "WHIPSAW")
+    fakeBreakoutLongLabel := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Fake Breakdown: After consolidation and multiple rejections, price faked breakdown below ORL then reversed sharply upward, trapping bears. Entry: Close at reversal candle. SL: Always ORL level (fake breakdown reversal point). Target: ORH/ORL range distance or nearest R1/R2/R3 pivot above entry.")
+    line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    fakeBreakoutLongTriggered := true
+
+// Fake Breakout Short Signals (Consolidation + Fake Breakout = Sharp Move Down)
+if showWhipsawSignals and shouldShowSignals() and fakeBreakoutShortCondition and not fakeBreakoutShortTriggered
+    fakeBreakoutShortEntryTime := getCurrentTimeString()
+    labelText = "FAKE BREAKOUT SHORT"
+    labelY = getLabelY(high, true, "WHIPSAW")
+    fakeBreakoutShortLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Fake Breakout Short: After consolidation and multiple rejections, price faked breakout above ORH then reversed sharply downward, trapping bulls. Entry: Close at reversal candle. SL: Always ORH level (fake breakout reversal point). Target: ORH/ORL range distance or nearest S1/S2/S3 pivot below entry.")
+    line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
+    fakeBreakoutShortTriggered := true
+
+// Trade table is updated directly above (not as function call)
+
+// Update trade statuses when exits occur
+if isTradingSession()
+    // ORB LONG exit updates
+    if orbLongTriggered and orbLongExitStatus != ""
+        pnl = orbLongExitStatus == "Exit: Target Hit" ? (orbLongTarget - orbLongEntry) : (orbLongEntry - orbLongStop) * -1
+        updateTradeStatus("ORB LONG", orbLongExitStatus, pnl)
+    
+    // ORB SHORT exit updates  
+    if orbShortTriggered and orbShortExitStatus != ""
+        pnl = orbShortExitStatus == "Exit: Target Hit" ? (orbShortEntry - orbShortTarget) : (orbShortStop - orbShortEntry) * -1
+        updateTradeStatus("ORB SHORT", orbShortExitStatus, pnl)
+    
+    // Bull Trap exit updates
+    if bullTrapTriggered and bullTrapExitStatus != ""
+        pnl = bullTrapExitStatus == "Exit: Target Hit" ? (bullTrapEntry - bullTrapTarget) : (bullTrapStop - bullTrapEntry) * -1
+        updateTradeStatus("BULL TRAP", bullTrapExitStatus, pnl)
+    
+    // Bear Trap exit updates
+    if bearTrapTriggered and bearTrapExitStatus != ""
+        pnl = bearTrapExitStatus == "Exit: Target Hit" ? (bearTrapTarget - bearTrapEntry) : (bearTrapEntry - bearTrapStop) * -1
+        updateTradeStatus("BEAR TRAP", bearTrapExitStatus, pnl)
+    
+    // Consolidation exit updates
+    if consBreakoutLongTriggered and consBreakoutLongExitStatus != ""
+        pnl = consBreakoutLongExitStatus == "Exit: Target Hit" ? (consBreakoutLongTarget - consBreakoutLongEntry) : (consBreakoutLongEntry - consBreakoutLongStop) * -1
+        updateTradeStatus("CONS LONG", consBreakoutLongExitStatus, pnl)
+    
+    if consBreakoutShortTriggered and consBreakoutShortExitStatus != ""
+        pnl = consBreakoutShortExitStatus == "Exit: Target Hit" ? (consBreakoutShortEntry - consBreakoutShortTarget) : (consBreakoutShortStop - consBreakoutShortEntry) * -1
+        updateTradeStatus("CONS SHORT", consBreakoutShortExitStatus, pnl)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+// ORB Alerts
+alertcondition(orbLongCondition, "ORB Long Entry", "ORB Long Entry Signal - Entry: {{close}}, Stop: {{plot('Stop Loss')}}")
+alertcondition(orbShortCondition, "ORB Short Entry", "ORB Short Entry Signal - Entry: {{close}}, Stop: {{plot('Stop Loss')}}")
+
+// Trap Alerts
+alertcondition(bullTrapCondition, "Bull Trap", "Bull Trap Signal - Entry: {{close}}, Stop: {{plot('Stop Loss')}}")
+alertcondition(bearTrapCondition, "Bear Trap", "Bear Trap Signal - Entry: {{close}}, Stop: {{plot('Stop Loss')}}")
+
+// Consolidation Breakout Alerts
+alertcondition(consolidationBreakoutLong, "Consolidation Breakout Long", "Consolidation Breakout Long Signal")
+alertcondition(consolidationBreakoutShort, "Consolidation Breakout Short", "Consolidation Breakout Short Signal")
+
+// ============================================================================
+// WHIPSAW ALERTS
+// ============================================================================
+
+// Whipsaw Pattern Formation Alerts
+alertcondition(twoLL, "2LL Pattern Formed", "Two Lower Lows Pattern Detected - Potential Reversal Setup")
+alertcondition(threeLL, "3LL Pattern Formed", "Three Lower Lows Pattern Detected - Strong Reversal Setup")
+alertcondition(twoHH, "2HH Pattern Formed", "Two Higher Highs Pattern Detected - Potential Reversal Setup")
+alertcondition(threeHH, "3HH Pattern Formed", "Three Higher Highs Pattern Detected - Strong Reversal Setup")
+
+// Whipsaw Entry Alerts
+alertcondition(whipsawLongCondition, "Whipsaw Long Entry", "Whipsaw Long Entry Signal - LL Pattern Reversal Confirmed")
+alertcondition(whipsawShortCondition, "Whipsaw Short Entry", "Whipsaw Short Entry Signal - HH Pattern Reversal Confirmed")
+
+// Fake Breakout Alerts  
+alertcondition(fakeBreakoutLongCondition, "Fake Breakdown Long", "Fake Breakdown Long Signal - Consolidation Reversal")
+alertcondition(fakeBreakoutShortCondition, "Fake Breakout Short", "Fake Breakout Short Signal - Consolidation Reversal")
+
+// Note: Exit alerts can be added by monitoring the exit status changes in dynamic labels
+
+// Consolidation Phase Alert
+alertcondition(consolidationPhase, "Consolidation Phase", "Consolidation Phase Detected - Multiple Rejections at ORH/ORL")
+
+// Advanced Pattern Alerts
+alertcondition(fakeBreakoutAboveORH, "Fake Breakout Above ORH", "Fake Breakout Above ORH Detected - Potential Sharp Reversal")
+alertcondition(fakeBreakdownBelowORL, "Fake Breakdown Below ORL", "Fake Breakdown Below ORL Detected - Potential Sharp Reversal")
+
+// ORH/ORL Breakout/Breakdown Alerts (as per documentation requirements)
+orhBreakoutAlert = orhDetermined and close > orh and close[1] <= orh
+orlBreakdownAlert = orlDetermined and close < orl and close[1] >= orl
+alertcondition(orhBreakoutAlert, "ORH Breakout", "ORH Breakout - Price broke above Opening Range High")
+alertcondition(orlBreakdownAlert, "ORL Breakdown", "ORL Breakdown - Price broke below Opening Range Low")
+
+
+
+// ============================================================================
+// ESSENTIAL VISUAL MARKERS ONLY
+// ============================================================================
+
+// Only keep essential markers that provide value:
+
+// ORH/ORL Breakout markers (primary signals) - Show EVERY breakout
+plotshape(showEntrySignals and shouldShowSignals() and orhDetermined and close > orh and close[1] <= orh, "ORH Breakout", style=shape.triangleup, location=location.abovebar, color=color.yellow, size=size.small, text="ORH BO")
+plotshape(showEntrySignals and shouldShowSignals() and orlDetermined and close < orl and close[1] >= orl, "ORL Breakout", style=shape.triangledown, location=location.belowbar, color=color.yellow, size=size.small, text="ORL BO")
+
+// Whipsaw Pattern Detection Shapes (small indicators) - Fixed logic
+plotshape(showWhipsawSignals and shouldShowSignals() and twoLLNew, "2LL Pattern", style=shape.circle, location=location.belowbar, color=color.lime, size=size.tiny, text="2LL")
+plotshape(showWhipsawSignals and shouldShowSignals() and threeLLNew, "3LL Pattern", style=shape.circle, location=location.belowbar, color=color.green, size=size.tiny, text="3LL")
+plotshape(showWhipsawSignals and shouldShowSignals() and twoHHNew, "2HH Pattern", style=shape.circle, location=location.abovebar, color=color.orange, size=size.tiny, text="2HH")
+plotshape(showWhipsawSignals and shouldShowSignals() and threeHHNew, "3HH Pattern", style=shape.circle, location=location.abovebar, color=color.red, size=size.tiny, text="3HH")

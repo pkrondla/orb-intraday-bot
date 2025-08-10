@@ -1,0 +1,70 @@
+# Trading Strategy Repository - .gitignore
+
+# Personal trading data and configurations
+*.log
+*.txt
+personal_config.pine
+live_trades.csv
+account_data/
+trading_logs/
+
+# Temporary files
+*.tmp
+*.temp
+~$*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Personal notes (keep setup documentation)
+personal_notes.md
+trade_journal.md
+private_settings.txt
+
+# Sensitive data
+api_keys.txt
+broker_config.txt
+account_info.txt
+
+# Microsoft Office temporary files
+~$*.doc*
+~$*.xls*
+~$*.ppt*
+
+# Pine Script backup files
+*.pine.bak
+*.pine.old
+
+# Trading platform exports
+*.csv
+*.xlsx
+trades_export_*
+portfolio_*
+
+# Personal modifications
+*_personal.pine
+*_custom.pine
+my_*
+
+# Environment files
+.env
+.env.local
+.env.production
