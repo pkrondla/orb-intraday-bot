@@ -24,10 +24,7 @@ riskPerTrade = input.float(1.0, "Risk Per Trade (%)", minval=0.1, maxval=5.0, st
 
 maxPositions = input.int(5, "Max Simultaneous Positions", minval=1, maxval=10, tooltip="Maximum number of positions to hold simultaneously", group="Position Sizing")
 
-// Lot Size Settings
-niftyLotSize = input.int(50, "Nifty Lot Size", minval=25, maxval=75, tooltip="Nifty futures lot size (usually 50)", group="Position Sizing")
-
-bankNiftyLotSize = input.int(15, "Bank Nifty Lot Size", minval=10, maxval=25, tooltip="Bank Nifty futures lot size (usually 15)", group="Position Sizing")
+// Note: Removed lot size settings - using direct optimal quantity calculation
 
 // ATR Settings for Dynamic Stops
 atrLength = input.int(14, "ATR Length", minval=5, maxval=50, tooltip="Period for ATR calculation (3-minute periods)", group="ATR Settings")
@@ -79,9 +76,139 @@ maxTableRows = input.int(8, "Max Table Rows", minval=3, maxval=15, tooltip="Maxi
 showOnlyActive = input.bool(false, "Show Only Active Trades", tooltip="Display only active trades in table", group="Trade Table")
 tablePosition = input.string("top_right", "Table Position", options=["top_center", "top_right", "top_left", "middle_center", "middle_right", "middle_left", "bottom_center", "bottom_right", "bottom_left"], tooltip="Position of trade table on chart", group="Trade Table")
 
+// ============================================================================
+// ON-SCREEN ALERT SETTINGS - PHASE 1
+// ============================================================================
+
+// Core Alert Settings
+enableOnScreenAlerts = input.bool(true, "🔔 Enable On-Screen Alerts", tooltip="Show prominent visual alert notifications on chart for immediate attention", group="📢 On-Screen Alerts")
+alertDuration = input.int(12, "Alert Duration (Bars)", minval=3, maxval=30, tooltip="How many bars to display alerts on screen", group="📢 On-Screen Alerts")
+alertPosition = input.string("top_left", "Alert Position", options=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"], tooltip="Position of alert notifications on chart", group="📢 On-Screen Alerts")
+alertSize = input.string("large", "Alert Text Size", options=["tiny", "small", "normal", "large", "huge"], tooltip="Size of alert text for visibility", group="📢 On-Screen Alerts")
+maxSimultaneousAlerts = input.int(3, "Max Simultaneous Alerts", minval=1, maxval=5, tooltip="Maximum number of alerts to show at once", group="📢 On-Screen Alerts")
+
+// Alert Type Controls
+showEntryAlerts = input.bool(true, "🚀 Entry Signal Alerts", tooltip="Show alerts for ORB, Trap, and Consolidation entry signals", group="Alert Types")
+showExitAlerts = input.bool(true, "🎯 Exit Signal Alerts", tooltip="Show alerts when trades hit Target, Stop Loss, or EOD", group="Alert Types")
+showBlockedAlerts = input.bool(true, "❌ Position Blocked Alerts", tooltip="Show alerts when positions are blocked due to limits", group="Alert Types")
+soundEnabled = input.bool(false, "🔊 Enable Alert Sounds", tooltip="Play sound with alerts (requires TradingView Pro)", group="Alert Types")
+
+// Alert Visual Settings
+enableFlashing = input.bool(true, "✨ Enable Alert Flashing", tooltip="Make alerts flash for first few bars to grab attention", group="Alert Visuals")
+flashDuration = input.int(3, "Flash Duration (Bars)", minval=1, maxval=8, tooltip="How many bars alerts should flash", group="Alert Visuals")
+alertTransparency = input.int(0, "Alert Background Transparency", minval=0, maxval=80, tooltip="Background transparency (0=solid, 80=very transparent)", group="Alert Visuals")
+// Manual Alert Control (Pine Script doesn't support clicking)
+manualDismissMode = input.string("Auto-Expire Only", "Alert Dismissal Mode", options=["Auto-Expire Only", "Quick Dismiss (5 bars)", "Extended Time (20 bars)", "Manual Reset"], tooltip="Control how alerts are dismissed since Pine Script doesn't support clicking", group="Alert Control")
+clearAllAlerts = input.bool(false, "🗑️ Clear All Alerts Now", tooltip="Toggle this ON to immediately clear all current alerts, then toggle back OFF", group="Alert Control")
+priorityOnlyMode = input.bool(false, "⭐ High Priority Only", tooltip="Show only high priority alerts (Target hits, Major entries)", group="Alert Control")
+
 // Historical Data Settings
 historicalDataMode = input.string("All Days", "Historical Data Display", options=["All Days", "Last Day Only", "Recent Days"], tooltip="Control which days' signals are shown: All Days (complete history), Last Day Only (current trading day), Recent Days (last few days)", group="Historical Data")
 recentDaysCount = input.int(3, "Recent Days Count", minval=1, maxval=10, tooltip="Number of recent trading days to show when 'Recent Days' mode is selected", group="Historical Data")
+
+// ============================================================================
+// ON-SCREEN ALERT SYSTEM ARRAYS - PHASE 1 (Declared early)
+// ============================================================================
+
+// Alert data structure for prominent on-screen notifications
+var array<string> alertMessages = array.new<string>()
+var array<string> alertTypes = array.new<string>()
+var array<int> alertBarIndexes = array.new<int>()
+var array<color> alertColors = array.new<color>()
+var array<int> alertPriorities = array.new<int>()    // 1=Low, 2=Medium, 3=High, 4=Critical
+var array<string> alertIcons = array.new<string>()
+var array<bool> alertDismissed = array.new<bool>()   // Track manually dismissed alerts
+var array<int> alertIDs = array.new<int>()           // Unique IDs for each alert
+var alertCounter = 0
+
+// ============================================================================
+// ON-SCREEN ALERT HELPER FUNCTIONS - PHASE 1
+// ============================================================================
+
+// Convert alert size string to Pine Script size
+getAlertTextSize() =>
+    switch alertSize
+        "tiny" => size.tiny
+        "small" => size.small
+        "normal" => size.normal
+        "large" => size.large
+        "huge" => size.huge
+        => size.large
+
+// Convert alert position to table position
+getAlertTablePosition() =>
+    switch alertPosition
+        "top_left" => position.top_left
+        "top_center" => position.top_center
+        "top_right" => position.top_right
+        "middle_left" => position.middle_left
+        "middle_center" => position.middle_center
+        "middle_right" => position.middle_right
+        "bottom_left" => position.bottom_left
+        "bottom_center" => position.bottom_center
+        "bottom_right" => position.bottom_right
+        => position.top_left
+
+// Get alert icon based on type and priority
+getAlertIcon(alertType, priority) =>
+    if alertType == "ENTRY"
+        priority >= 3 ? "🚀" : "📈"
+    else if alertType == "EXIT"
+        priority >= 3 ? "🎯" : "💰"
+    else if alertType == "BLOCKED"
+        "❌"
+    else if alertType == "ZONE"
+        "📍"
+    else if alertType == "PATTERN"
+        "⚡"
+    else if alertType == "MANDATORY"
+        "🚨"
+    else if alertType == "BREAKOUT"
+        "💥"
+    else
+        "🔔"
+
+// Get alert color based on signal type
+getAlertColor(signalType, alertType) =>
+    if alertType == "ENTRY"
+        if str.contains(signalType, "LONG") or str.contains(signalType, "BEAR TRAP")
+            color.green
+        else
+            color.red
+    else if alertType == "EXIT"
+        if str.contains(signalType, "Target")
+            color.green
+        else if str.contains(signalType, "SL")
+            color.red
+        else
+            color.orange  // EOD
+    else if alertType == "BLOCKED"
+        color.orange
+    else
+        color.blue
+
+// Helper functions that don't modify global variables
+getAlertColorForType(signalType, alertType) =>
+    if alertType == "ENTRY"
+        if str.contains(signalType, "LONG") or str.contains(signalType, "BEAR TRAP")
+            color.green
+        else
+            color.red
+    else if alertType == "EXIT"
+        if str.contains(signalType, "Target")
+            color.green
+        else if str.contains(signalType, "SL")
+            color.red
+        else
+            color.orange  // EOD
+    else if alertType == "BLOCKED"
+        color.orange
+    else
+        color.blue
+
+// Function to add alert (returns true if should be added)
+shouldAddAlert(alertType) =>
+    enableOnScreenAlerts and ((alertType == "ENTRY" and showEntryAlerts) or (alertType == "EXIT" and showExitAlerts) or (alertType == "BLOCKED" and showBlockedAlerts))
 
 // ============================================================================
 // TRADE DATA ARRAYS (Declared early to avoid undeclared identifier errors)
@@ -198,15 +325,7 @@ calculateDynamicStop(entryPrice, signalType, isLong, float orbLevel = na) =>
     
     [finalStopLevel, atrStopDistance, atrValue, finalMultiplier]
 
-// Get current instrument type for lot size calculation
-getInstrumentType() =>
-    ticker = syminfo.ticker
-    if str.contains(ticker, "NIFTY") and not str.contains(ticker, "BANK")
-        "NIFTY"
-    else if str.contains(ticker, "BANKNIFTY") or str.contains(ticker, "BANK")
-        "BANKNIFTY"
-    else
-        "NIFTY"  // Default to NIFTY
+// Note: Removed getInstrumentType function - no longer needed without lot sizing
 
 // Calculate optimal position size based on capital, risk, and ATR
 calculatePositionSize(entryPrice, stopPrice, signalType) =>
@@ -231,26 +350,21 @@ calculatePositionSize(entryPrice, stopPrice, signalType) =>
     // Adjust risk amount based on pattern
     adjustedRiskAmount = riskAmount * patternRiskMultiplier
     
-    // Determine lot size based on instrument
-    instrumentType = getInstrumentType()
-    lotSize = instrumentType == "NIFTY" ? niftyLotSize : bankNiftyLotSize
-    
-    // Calculate optimal quantity
-    [lots, finalQuantity, actualRiskAmount] = if pointsAtRisk > 0
+    // Calculate optimal quantity - simplified approach
+    [finalQuantity, actualRiskAmount] = if pointsAtRisk > 0
         optimalQuantity = adjustedRiskAmount / pointsAtRisk
         
-        // Round to nearest lot size
-        calculatedLots = math.max(math.round(optimalQuantity / lotSize), 1)  // Minimum 1 lot
-        calculatedQuantity = calculatedLots * lotSize
+        // Round UP to next whole number (ceiling), minimum 1 unit
+        calculatedQuantity = math.max(math.ceil(optimalQuantity), 1)
         
         // Calculate actual risk amount
         calculatedRiskAmount = pointsAtRisk * calculatedQuantity
-        [calculatedLots, calculatedQuantity, calculatedRiskAmount]
+        [calculatedQuantity, calculatedRiskAmount]
     else
         // Fallback if stop calculation fails
-        [1, lotSize, riskAmount]
+        [1, riskAmount]
     
-    [finalQuantity, lots, actualRiskAmount, instrumentType]
+    [finalQuantity, actualRiskAmount]
 
 // Check if new position is allowed based on limits
 isPositionAllowed(newRiskAmount) =>
@@ -2508,7 +2622,7 @@ if showNeutralZone and shouldShowSignals() and isTradingSession() and not na(orh
     
     // Calculate horizontal position based on user setting (distance from current bar)
     zoneX = bar_index + zoneLabelDistance
-    currentZoneLabel := label.new(zoneX, zoneY, zoneText, color=zoneColor, style=label.style_label_down, textcolor=textColor, size=size.tiny, tooltip=tooltipText)
+    currentZoneLabel := label.new(zoneX, zoneY, zoneText, color=zoneColor, style=label.style_label_down, textcolor=textColor, size=size.small, tooltip=tooltipText)
 else
     // Clean up zone label when not showing signals or outside trading session
     if not na(currentZoneLabel)
@@ -2551,13 +2665,13 @@ if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLong
     labelY = getLabelY(low, false, "ORB")
     labelColor = isAggressiveBullishZone ? color.new(color.green, 0) : color.green
     // Calculate position sizing first
-    [quantity, lots, riskAmount, instrumentType] = calculatePositionSize(orbLongEntry, orbLongStop, "ORB_LONG")
+    [quantity, riskAmount] = calculatePositionSize(orbLongEntry, orbLongStop, "ORB_LONG")
     
     // Get ATR information for tooltip
     currentATR = getReliableATR()
     [volatilityLevel, volColor] = classifyVolatility(currentATR)
     
-    tooltipText = "ORB LONG SIGNAL\nEntry Time: " + orbLongEntryTime + "\nEntry: " + str.tostring(orbLongEntry, "#.##") + "\nStop Loss: " + str.tostring(orbLongStop, "#.##") + "\nTarget: " + str.tostring(orbLongTarget, "#.##") + "\n\nPOSITION SIZING:\nQuantity: " + str.tostring(quantity) + " (" + str.tostring(lots) + " lots)\nRisk Amount: ₹" + str.tostring(riskAmount, "#") + "\n\nVOLATILITY:\nATR: " + str.tostring(currentATR, "#.#") + " (" + volatilityLevel + ")\nZone: " + getCurrentZone() + "\nEmphasis: " + zoneEmphasis
+    tooltipText = "ORB LONG SIGNAL\nEntry Time: " + orbLongEntryTime + "\nEntry: " + str.tostring(orbLongEntry, "#.##") + "\nStop Loss: " + str.tostring(orbLongStop, "#.##") + "\nTarget: " + str.tostring(orbLongTarget, "#.##") + "\n\nPOSITION SIZING:\nQuantity: " + str.tostring(quantity) + " units\nRisk Amount: ₹" + str.tostring(riskAmount, "#") + "\n\nVOLATILITY:\nATR: " + str.tostring(currentATR, "#.#") + " (" + volatilityLevel + ")\nZone: " + getCurrentZone() + "\nEmphasis: " + zoneEmphasis
     orbLongLabel := label.new(bar_index, labelY, labelText, color=labelColor, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
     
@@ -2570,18 +2684,65 @@ if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLong
         
         // Add to trade table with position sizing
         addTradeToTable("ORB LONG", orbLongEntryTime, orbLongEntry, orbLongStop, orbLongTarget, quantity, riskAmount, "Active", 0.0, bar_index)
+        
+        // 🚀 ON-SCREEN ALERT for ORB LONG ENTRY
+        if showEntryAlerts and enableOnScreenAlerts
+            alertMsg = "ORB LONG ENTRY\nEntry: " + str.tostring(orbLongEntry, "#.##") + "\nSL: " + str.tostring(orbLongStop, "#.##") + " (-" + str.tostring(orbLongEntry - orbLongStop, "#") + " pts)\nTarget: " + str.tostring(orbLongTarget, "#.##") + " (+" + str.tostring(orbLongTarget - orbLongEntry, "#") + " pts)\nQty: " + str.tostring(quantity) + " units\nRisk: ₹" + str.tostring(riskAmount, "#")
+            alertColor = getAlertColorForType("ORB LONG", "ENTRY")
+            alertIcon = getAlertIcon("ENTRY", 3)
+            
+            // Add to arrays directly
+            array.push(alertMessages, alertMsg)
+            array.push(alertTypes, "ENTRY")
+            array.push(alertBarIndexes, bar_index)
+            array.push(alertColors, alertColor)
+            array.push(alertPriorities, 3)
+            array.push(alertIcons, alertIcon)
+            array.push(alertDismissed, false)
+            array.push(alertIDs, alertCounter)
+            alertCounter += 1
+            
+            // Play sound if enabled
+            if soundEnabled
+                alert(alertIcon + " " + alertMsg)
+            
+            // Limit array size
+            while array.size(alertMessages) > maxSimultaneousAlerts * 2
+                array.shift(alertMessages)
+                array.shift(alertTypes)
+                array.shift(alertBarIndexes)
+                array.shift(alertColors)
+                array.shift(alertPriorities)
+                array.shift(alertIcons)
     else
         // Position blocked - create warning label
         warningText = "ORB LONG\n❌ BLOCKED"
         warningTooltip = "Position blocked:\n• Max positions: " + str.tostring(maxPositions) + "\n• Current: " + str.tostring(currentPositions) + "\n• Exposure: ₹" + str.tostring(currentExposure, "#")
         label.new(bar_index, labelY, warningText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=warningTooltip)
+        
+        // ❌ ON-SCREEN ALERT for blocked position
+        if showBlockedAlerts and enableOnScreenAlerts
+            alertMsg = "ORB LONG BLOCKED\nMax positions: " + str.tostring(maxPositions) + "\nCurrent: " + str.tostring(currentPositions) + "\nExposure: ₹" + str.tostring(currentExposure, "#")
+            alertColor = getAlertColorForType("ORB LONG", "BLOCKED")
+            alertIcon = getAlertIcon("BLOCKED", 2)
+            
+            // Add to arrays directly
+            array.push(alertMessages, alertMsg)
+            array.push(alertTypes, "BLOCKED")
+            array.push(alertBarIndexes, bar_index)
+            array.push(alertColors, alertColor)
+            array.push(alertPriorities, 2)
+            array.push(alertIcons, alertIcon)
+            array.push(alertDismissed, false)
+            array.push(alertIDs, alertCounter)
+            alertCounter += 1
     orbLongTriggered := true
 
 // ORB SHORT signal - Create minimal label and add to table (with zone filtering)
 if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbShortTriggered and isValidZoneForSignal("ORB_SHORT")
     orbShortEntryTime := getCurrentTimeString()
     // Calculate position sizing first
-    [quantity, lots, riskAmount, instrumentType] = calculatePositionSize(orbShortEntry, orbShortStop, "ORB_SHORT")
+    [quantity, riskAmount] = calculatePositionSize(orbShortEntry, orbShortStop, "ORB_SHORT")
     
     // Minimal chart label
     labelText = "ORB SHORT"
@@ -2590,7 +2751,7 @@ if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbSho
     currentATR = getReliableATR()
     [volatilityLevel, volColor] = classifyVolatility(currentATR)
     
-    tooltipText = "ORB SHORT SIGNAL\nEntry Time: " + orbShortEntryTime + "\nEntry: " + str.tostring(orbShortEntry, "#.##") + "\nStop Loss: " + str.tostring(orbShortStop, "#.##") + "\nTarget: " + str.tostring(orbShortTarget, "#.##") + "\n\nPOSITION SIZING:\nQuantity: " + str.tostring(quantity) + " (" + str.tostring(lots) + " lots)\nRisk Amount: ₹" + str.tostring(riskAmount, "#") + "\n\nVOLATILITY:\nATR: " + str.tostring(currentATR, "#.#") + " (" + volatilityLevel + ")\nZone: " + getCurrentZone()
+    tooltipText = "ORB SHORT SIGNAL\nEntry Time: " + orbShortEntryTime + "\nEntry: " + str.tostring(orbShortEntry, "#.##") + "\nStop Loss: " + str.tostring(orbShortStop, "#.##") + "\nTarget: " + str.tostring(orbShortTarget, "#.##") + "\n\nPOSITION SIZING:\nQuantity: " + str.tostring(quantity) + " units\nRisk Amount: ₹" + str.tostring(riskAmount, "#") + "\n\nVOLATILITY:\nATR: " + str.tostring(currentATR, "#.#") + " (" + volatilityLevel + ")\nZone: " + getCurrentZone()
     orbShortLabel := label.new(bar_index, labelY, labelText, color=color.red, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
     
@@ -2603,11 +2764,37 @@ if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbSho
         
         // Add to trade table with position sizing
         addTradeToTable("ORB SHORT", orbShortEntryTime, orbShortEntry, orbShortStop, orbShortTarget, quantity, riskAmount, "Active", 0.0, bar_index)
+        
+        // 🚀 ON-SCREEN ALERT for ORB SHORT ENTRY
+        if showEntryAlerts and enableOnScreenAlerts
+            alertMsg = "ORB SHORT ENTRY\nEntry: " + str.tostring(orbShortEntry, "#.##") + "\nSL: " + str.tostring(orbShortStop, "#.##") + " (+" + str.tostring(orbShortStop - orbShortEntry, "#") + " pts)\nTarget: " + str.tostring(orbShortTarget, "#.##") + " (-" + str.tostring(orbShortEntry - orbShortTarget, "#") + " pts)\nQty: " + str.tostring(quantity) + " units\nRisk: ₹" + str.tostring(riskAmount, "#")
+            array.push(alertMessages, alertMsg)
+            array.push(alertTypes, "ENTRY")
+            array.push(alertBarIndexes, bar_index)
+            array.push(alertColors, color.red)
+            array.push(alertPriorities, 3)
+            array.push(alertIcons, "🚀")
+            array.push(alertDismissed, false)
+            array.push(alertIDs, alertCounter)
+            alertCounter += 1
     else
         // Position blocked - create warning label
         warningText = "ORB SHORT\n❌ BLOCKED"
         warningTooltip = "Position blocked:\n• Max positions: " + str.tostring(maxPositions) + "\n• Current: " + str.tostring(currentPositions) + "\n• Exposure: ₹" + str.tostring(currentExposure, "#")
         label.new(bar_index, labelY, warningText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=warningTooltip)
+        
+        // ❌ ON-SCREEN ALERT for blocked position
+        if showBlockedAlerts and enableOnScreenAlerts
+            alertMsg = "ORB SHORT BLOCKED\nMax positions: " + str.tostring(maxPositions) + "\nCurrent: " + str.tostring(currentPositions) + "\nExposure: ₹" + str.tostring(currentExposure, "#")
+            array.push(alertMessages, alertMsg)
+            array.push(alertTypes, "BLOCKED")
+            array.push(alertBarIndexes, bar_index)
+            array.push(alertColors, color.orange)
+            array.push(alertPriorities, 2)
+            array.push(alertIcons, "❌")
+            array.push(alertDismissed, false)
+            array.push(alertIDs, alertCounter)
+            alertCounter += 1
     orbShortTriggered := true
 
 // Trap Signals - Only show when conditions are met (once per day) (with zone filtering)
@@ -2621,6 +2808,20 @@ if showTrapSignals and shouldShowSignals() and bullTrapCondition and not bullTra
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.red, width=1, style=line.style_dashed)
     // Add to trade table
     addTradeToTable("BULL TRAP", bullTrapEntryTime, bullTrapEntry, bullTrapStop, bullTrapTarget, 50, 2500.0, "Active", 0.0, bar_index)
+    
+    // 🚀 ON-SCREEN ALERT for BULL TRAP ENTRY
+    if showEntryAlerts and enableOnScreenAlerts
+        alertMsg = "BULL TRAP ENTRY\nEntry: " + str.tostring(bullTrapEntry, "#.##") + "\nSL: " + str.tostring(bullTrapStop, "#.##") + "\nTarget: " + str.tostring(bullTrapTarget, "#.##") + "\nStrategy: ORH breakout failed\nConfirmation: Swing low break"
+        array.push(alertMessages, alertMsg)
+        array.push(alertTypes, "ENTRY")
+        array.push(alertBarIndexes, bar_index)
+        array.push(alertColors, color.red)
+        array.push(alertPriorities, 3)
+        array.push(alertIcons, "⚡")
+        array.push(alertDismissed, false)
+        array.push(alertIDs, alertCounter)
+        alertCounter += 1
+    
     bullTrapTriggered := true
 
 if showTrapSignals and shouldShowSignals() and bearTrapCondition and not bearTrapTriggered and isValidZoneForSignal("BEAR_TRAP")
@@ -2633,6 +2834,20 @@ if showTrapSignals and shouldShowSignals() and bearTrapCondition and not bearTra
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
     // Add to trade table
     addTradeToTable("BEAR TRAP", bearTrapEntryTime, bearTrapEntry, bearTrapStop, bearTrapTarget, 50, 2500.0, "Active", 0.0, bar_index)
+    
+    // 🚀 ON-SCREEN ALERT for BEAR TRAP ENTRY
+    if showEntryAlerts and enableOnScreenAlerts
+        alertMsg = "BEAR TRAP ENTRY\nEntry: " + str.tostring(bearTrapEntry, "#.##") + "\nSL: " + str.tostring(bearTrapStop, "#.##") + "\nTarget: " + str.tostring(bearTrapTarget, "#.##") + "\nStrategy: ORL breakdown failed\nConfirmation: Swing high break"
+        array.push(alertMessages, alertMsg)
+        array.push(alertTypes, "ENTRY")
+        array.push(alertBarIndexes, bar_index)
+        array.push(alertColors, color.green)
+        array.push(alertPriorities, 3)
+        array.push(alertIcons, "⚡")
+        array.push(alertDismissed, false)
+        array.push(alertIDs, alertCounter)
+        alertCounter += 1
+    
     bearTrapTriggered := true
 
 // ORB Follow-up Failure Signals - Case 1 & Case 2
@@ -2994,8 +3209,150 @@ if array.size(tradeSignals) > 0 and array.size(tradeStatuses) > 0 and array.size
                     if showExitMarkers
                         // Create exit marker with appropriate styling for EOD vs normal exits
                         createExitMarker(signalType, exitStatus, isShortTrade, target, stop, pnl)
+                    
+                    // 🎯 ON-SCREEN ALERT for EXIT
+                    if showExitAlerts and enableOnScreenAlerts
+                        pnlText = pnl > 0 ? "+" + str.tostring(pnl, "#.#") : str.tostring(pnl, "#.#")
+                        exitIcon = if str.contains(exitStatus, "Target")
+                            "🎯"
+                        else if str.contains(exitStatus, "SL")
+                            "❌"
+                        else
+                            "🌅"
+                        
+                        alertMsg = signalType + " EXIT " + exitIcon + "\n" + exitStatus + "\nExit: " + str.tostring(exitPrice, "#.##") + "\nP&L: " + pnlText + " pts\nTime: " + getCurrentTimeString()
+                        alertPriority = str.contains(exitStatus, "Target") ? 3 : 2
+                        exitColor = str.contains(exitStatus, "Target") ? color.green : (str.contains(exitStatus, "SL") ? color.red : color.orange)
+                        
+                        array.push(alertMessages, alertMsg)
+                        array.push(alertTypes, "EXIT")
+                        array.push(alertBarIndexes, bar_index)
+                        array.push(alertColors, exitColor)
+                        array.push(alertPriorities, alertPriority)
+                        array.push(alertIcons, exitIcon)
+                        array.push(alertDismissed, false)
+                        array.push(alertIDs, alertCounter)
+                        alertCounter += 1
 
     // NOTE: Legacy updateTradeStatus calls removed - all exit tracking now handled by array-based system
+
+// ============================================================================
+// ON-SCREEN ALERT DISPLAY SYSTEM - PHASE 1
+// ============================================================================
+
+// Clear all alerts if toggle is activated
+if clearAllAlerts
+    alertMessages := array.new<string>()
+    alertTypes := array.new<string>()
+    alertBarIndexes := array.new<int>()
+    alertColors := array.new<color>()
+    alertPriorities := array.new<int>()
+    alertIcons := array.new<string>()
+    alertDismissed := array.new<bool>()
+    alertIDs := array.new<int>()
+
+// Clean expired alerts every bar with new dismissal logic
+if enableOnScreenAlerts and array.size(alertMessages) > 0
+    newMessages = array.new<string>()
+    newTypes = array.new<string>()
+    newBarIndexes = array.new<int>()
+    newColors = array.new<color>()
+    newPriorities = array.new<int>()
+    newIcons = array.new<string>()
+    newDismissed = array.new<bool>()
+    newIDs = array.new<int>()
+    
+    // Determine alert duration based on dismissal mode
+    effectiveDuration = switch manualDismissMode
+        "Quick Dismiss (5 bars)" => 5
+        "Extended Time (20 bars)" => 20
+        "Manual Reset" => 999  // Very long duration, user controls
+        => alertDuration  // Default: Auto-Expire Only
+    
+    for i = 0 to array.size(alertMessages) - 1
+        alertBar = array.get(alertBarIndexes, i)
+        alertPriority = array.get(alertPriorities, i)
+        alertType = array.get(alertTypes, i)
+        
+        // Priority filtering
+        shouldShow = true
+        if priorityOnlyMode
+            shouldShow := alertPriority >= 3 or alertType == "EXIT"
+        
+        // Keep alert if not expired and passes filters
+        if (bar_index - alertBar <= effectiveDuration) and shouldShow
+            array.push(newMessages, array.get(alertMessages, i))
+            array.push(newTypes, alertType)
+            array.push(newBarIndexes, alertBar)
+            array.push(newColors, array.get(alertColors, i))
+            array.push(newPriorities, alertPriority)
+            array.push(newIcons, array.get(alertIcons, i))
+            array.push(newDismissed, array.get(alertDismissed, i))
+            array.push(newIDs, array.get(alertIDs, i))
+    
+    alertMessages := newMessages
+    alertTypes := newTypes
+    alertBarIndexes := newBarIndexes
+    alertColors := newColors
+    alertPriorities := newPriorities
+    alertIcons := newIcons
+    alertDismissed := newDismissed
+    alertIDs := newIDs
+
+// Create alert display table
+if enableOnScreenAlerts and array.size(alertMessages) > 0
+    var alertTable = table.new(getAlertTablePosition(), 3, maxSimultaneousAlerts + 1, bgcolor=color.new(color.white, 95), border_width=1)
+    
+    // Clear table
+    table.clear(alertTable, 0, 0, 2, maxSimultaneousAlerts)
+    
+    // Header with control info
+    table.cell(alertTable, 0, 0, "🔔 LIVE ALERTS", text_color=color.black, text_size=getAlertTextSize(), bgcolor=color.new(color.gray, 80))
+    table.cell(alertTable, 1, 0, "(" + str.tostring(array.size(alertMessages)) + ")", text_color=color.black, text_size=size.small, bgcolor=color.new(color.gray, 80))
+    
+    // Control status
+    controlText = switch manualDismissMode
+        "Quick Dismiss (5 bars)" => "⚡ Quick"
+        "Extended Time (20 bars)" => "⏰ Extended"
+        "Manual Reset" => "🔒 Manual"
+        => "⏱️ Auto"
+    
+    if priorityOnlyMode
+        controlText := controlText + " | ⭐ Priority"
+    
+    table.cell(alertTable, 2, 0, controlText, text_color=color.black, text_size=size.tiny, bgcolor=color.new(color.gray, 80), tooltip="Current alert control mode. Use settings to change.")
+    
+    // Display alerts (most recent first, limited by maxSimultaneousAlerts)
+    alertsToShow = math.min(array.size(alertMessages), maxSimultaneousAlerts)
+    
+    for i = 0 to alertsToShow - 1
+        if i < array.size(alertMessages)
+            alertIndex = array.size(alertMessages) - 1 - i  // Newest first
+            
+            alertMsg = array.get(alertMessages, alertIndex)
+            alertColor = array.get(alertColors, alertIndex)
+            alertIcon = array.get(alertIcons, alertIndex)
+            alertBar = array.get(alertBarIndexes, alertIndex)
+            alertAge = bar_index - alertBar
+            alertPriority = array.get(alertPriorities, alertIndex)
+            
+            // Apply flashing effect for new alerts
+            isFlashing = enableFlashing and alertAge <= flashDuration
+            currentColor = isFlashing and (bar_index % 2 == 0) ? color.new(alertColor, 20) : color.new(alertColor, alertTransparency)
+            
+            // Display alert with age indicator
+            table.cell(alertTable, 0, i + 1, alertIcon, text_color=color.white, text_size=getAlertTextSize(), bgcolor=currentColor)
+            
+            // Alert message with age info
+            ageText = str.tostring(alertAge) + " bars ago"
+            priorityText = alertPriority >= 3 ? " ⭐" : ""
+            cellTooltip = "Alert age: " + ageText + priorityText + "\nMode: " + manualDismissMode
+            table.cell(alertTable, 1, i + 1, alertMsg, text_color=color.white, text_size=getAlertTextSize(), bgcolor=currentColor, tooltip=cellTooltip)
+            
+            // Age and priority indicator with matching alert color
+            // Use the same color logic as the main alert cell
+            ageColor = isFlashing and (bar_index % 2 == 0) ? color.new(alertColor, 20) : color.new(alertColor, alertTransparency)
+            table.cell(alertTable, 2, i + 1, ageText + priorityText, text_color=color.white, text_size=size.tiny, bgcolor=ageColor)
 
 // ============================================================================
 // ALERTS
