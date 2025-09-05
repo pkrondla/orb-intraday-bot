@@ -29,46 +29,47 @@ maxPositions = input.int(5, "Max Simultaneous Positions", minval=1, maxval=10, t
 // ATR Settings for Dynamic Stops
 atrLength = input.int(14, "ATR Length", minval=5, maxval=50, tooltip="Period for ATR calculation (3-minute periods)", group="ATR Settings")
 
-baseATRMultiplier = input.float(1.5, "Base ATR Multiplier", minval=1.0, maxval=5.0, step=0.1, tooltip="Base multiplier for ATR stop loss", group="ATR Settings")
+baseATRMultiplier = input.float(2.0, "Base ATR Multiplier", minval=1.0, maxval=5.0, step=0.1, tooltip="Base multiplier for ATR stop loss (default 2.0 for realistic risk)", group="ATR Settings")
 
 // Pattern-Specific ATR Multipliers
-orbATRMultiplier = input.float(1.5, "ORB ATR Multiplier", minval=1.0, maxval=3.0, step=0.1, tooltip="ATR multiplier for ORB signals", group="Pattern ATR")
+orbATRMultiplier = input.float(2.5, "ORB ATR Multiplier", minval=1.0, maxval=3.0, step=0.1, tooltip="ATR multiplier for ORB signals (default 2.5 for realistic stops)", group="Pattern ATR")
 
-trapCase1Multiplier = input.float(1.2, "Trap Case 1 Multiplier", minval=0.8, maxval=2.0, step=0.1, tooltip="ATR multiplier for Trap Case 1 (conservative)", group="Pattern ATR")
+trapCase1Multiplier = input.float(2.0, "Trap Case 1 Multiplier", minval=0.8, maxval=2.5, step=0.1, tooltip="ATR multiplier for Trap Case 1 (retest scenarios need room)", group="Pattern ATR")
 
 trapCase2Multiplier = input.float(2.0, "Trap Case 2 Multiplier", minval=1.5, maxval=3.0, step=0.1, tooltip="ATR multiplier for Trap Case 2 (aggressive)", group="Pattern ATR")
 
-consolidationATRMultiplier = input.float(1.0, "Consolidation ATR Multiplier", minval=0.5, maxval=2.0, step=0.1, tooltip="ATR multiplier for consolidation breakouts (high probability)", group="Pattern ATR")
+consolidationATRMultiplier = input.float(1.5, "Consolidation ATR Multiplier", minval=0.5, maxval=2.5, step=0.1, tooltip="ATR multiplier for consolidation breakouts (breakout volatility)", group="Pattern ATR")
 
-whipsawATRMultiplier = input.float(1.8, "Whipsaw ATR Multiplier", minval=1.0, maxval=3.0, step=0.1, tooltip="ATR multiplier for whipsaw reversal signals", group="Pattern ATR")
+whipsawATRMultiplier = input.float(2.2, "Whipsaw ATR Multiplier", minval=1.0, maxval=3.5, step=0.1, tooltip="ATR multiplier for whipsaw reversal signals (post-whipsaw momentum)", group="Pattern ATR")
 
-fakeBreakoutATRMultiplier = input.float(0.8, "Fake Breakout ATR Multiplier", minval=0.5, maxval=1.5, step=0.1, tooltip="ATR multiplier for fake breakout signals (quick reversals)", group="Pattern ATR")
+fakeBreakoutATRMultiplier = input.float(1.2, "Fake Breakout ATR Multiplier", minval=0.5, maxval=2.0, step=0.1, tooltip="ATR multiplier for fake breakout signals (realistic reversal room)", group="Pattern ATR")
 
 // Legacy Fixed Stop Loss (for fallback)
 niftyStopLoss = input.float(35, "Fallback Stop Loss (points)", minval=10, maxval=100, tooltip="Fixed stop loss used when ATR is not available", group="ATR Settings")
 
-// Visual Settings
-showORLevels = input.bool(true, "Show ORH/ORL Levels", group="Visual")
-showEntrySignals = input.bool(true, "Show Entry Signals", group="Visual")
-showTrapSignals = input.bool(true, "Show Bull/Bear Trap Signals", group="Visual")
-showWhipsawSignals = input.bool(true, "Show Whipsaw Entry Signals", group="Visual")
-showNeutralZone = input.bool(true, "Show Market Zone Labels", group="Visual")
-showExitMarkers = input.bool(true, "Show Exit Markers on Chart", tooltip="Display visual markers (✓/✗) where trades exit", group="Visual")
+// Visual Settings - Hardcoded to always show all signals
+showORLevels = true          // Always show ORH/ORL levels
+showEntrySignals = true      // Always show entry signals
+showTrapSignals = true       // Always show trap signals
+showWhipsawSignals = true    // Always show whipsaw signals
+showNeutralZone = true       // Always show zone labels
+showMarketCondition = true   // Always show market condition analysis
 
-orhColor = input.color(color.red, "ORH Color", group="Visual")
-orlColor = input.color(color.green, "ORL Color", group="Visual")
+// ORH/ORL Colors - Fixed colors
+orhColor = color.red         // ORH color: Red
+orlColor = color.green       // ORL color: Green
 
 // Enhanced Label Positioning Settings
-labelDistance = input.float(15.0, "Label Distance from Candles (Points)", minval=5.0, maxval=50.0, step=2.5, tooltip="Fixed distance in points from candle price", group="Label Settings")
-labelSpacing = input.float(25.0, "Label Spacing (Points)", minval=10.0, maxval=100.0, step=5.0, tooltip="Minimum spacing between overlapping labels", group="Label Settings")
+labelDistance = input.float(30.0, "Label Distance from Candles (Points)", minval=5.0, maxval=80.0, step=2.5, tooltip="Fixed distance in points from candle price (increased for better visibility)", group="Label Settings")
+labelSpacing = input.float(70.0, "Label Spacing (Points)", minval=10.0, maxval=120.0, step=5.0, tooltip="Minimum spacing between overlapping labels (aggressive spacing for whipsaws)", group="Label Settings")
 connectionGap = input.float(2.0, "Connection Line Gap (Points)", minval=0.0, maxval=10.0, step=0.5, tooltip="Gap between connection line and candle high/low", group="Label Settings")
 maxLabelProximity = input.int(8, "Label Proximity Range (Bars)", minval=5, maxval=15, tooltip="Consider labels within this many bars for overlap prevention", group="Label Settings")
 smartDistribution = input.bool(true, "Smart Label Distribution", tooltip="Automatically distribute labels to less crowded areas when many overlap", group="Label Settings")
 zoneLabelDistance = input.int(10, "Zone Label Distance (Bars)", minval=1, maxval=50, step=1, tooltip="Distance in bars from current price to display the zone label on x-axis", group="Label Settings")
 
 // Zone-based positioning system
-zoneSpacing = input.float(20.0, "Zone Spacing (Points)", minval=10.0, maxval=50.0, step=5.0, tooltip="Vertical spacing between different signal zones", group="Label Settings")
-enableZoneAllocation = input.bool(false, "Enable Zone Allocation", tooltip="Organize labels by signal type into distinct vertical zones. Disable for labels closer to candles", group="Label Settings")
+zoneSpacing = input.float(40.0, "Zone Spacing (Points)", minval=10.0, maxval=80.0, step=5.0, tooltip="Vertical spacing between different signal zones (increased for better separation)", group="Label Settings")
+enableZoneAllocation = input.bool(true, "Enable Zone Allocation", tooltip="Organize labels by signal type into distinct vertical zones to prevent overlaps. Disable for labels closer to candles", group="Label Settings")
 
 // Trade Table Settings
 showTradeTable = input.bool(true, "Show Trade Table", tooltip="Display comprehensive trade table above chart", group="Trade Table")
@@ -80,31 +81,33 @@ tablePosition = input.string("top_right", "Table Position", options=["top_center
 // ON-SCREEN ALERT SETTINGS - PHASE 1
 // ============================================================================
 
-// Core Alert Settings
-enableOnScreenAlerts = input.bool(true, "🔔 Enable On-Screen Alerts", tooltip="Show prominent visual alert notifications on chart for immediate attention", group="📢 On-Screen Alerts")
-alertDuration = input.int(12, "Alert Duration (Bars)", minval=3, maxval=30, tooltip="How many bars to display alerts on screen", group="📢 On-Screen Alerts")
-alertPosition = input.string("top_left", "Alert Position", options=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"], tooltip="Position of alert notifications on chart", group="📢 On-Screen Alerts")
-alertSize = input.string("large", "Alert Text Size", options=["tiny", "small", "normal", "large", "huge"], tooltip="Size of alert text for visibility", group="📢 On-Screen Alerts")
-maxSimultaneousAlerts = input.int(3, "Max Simultaneous Alerts", minval=1, maxval=5, tooltip="Maximum number of alerts to show at once", group="📢 On-Screen Alerts")
+// Simplified Alert Settings
+enableOnScreenAlerts = input.bool(true, "🔔 Enable On-Screen Alerts", tooltip="Show alert notifications on chart", group="On-Screen Alerts")
+alertPosition = input.string("top_left", "Alert Position", options=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"], tooltip="Position of alert notifications on chart", group="On-Screen Alerts")
 
-// Alert Type Controls
-showEntryAlerts = input.bool(true, "🚀 Entry Signal Alerts", tooltip="Show alerts for ORB, Trap, and Consolidation entry signals", group="Alert Types")
-showExitAlerts = input.bool(true, "🎯 Exit Signal Alerts", tooltip="Show alerts when trades hit Target, Stop Loss, or EOD", group="Alert Types")
-showBlockedAlerts = input.bool(true, "❌ Position Blocked Alerts", tooltip="Show alerts when positions are blocked due to limits", group="Alert Types")
-soundEnabled = input.bool(false, "🔊 Enable Alert Sounds", tooltip="Play sound with alerts (requires TradingView Pro)", group="Alert Types")
-
-// Alert Visual Settings
-enableFlashing = input.bool(true, "✨ Enable Alert Flashing", tooltip="Make alerts flash for first few bars to grab attention", group="Alert Visuals")
-flashDuration = input.int(3, "Flash Duration (Bars)", minval=1, maxval=8, tooltip="How many bars alerts should flash", group="Alert Visuals")
-alertTransparency = input.int(0, "Alert Background Transparency", minval=0, maxval=80, tooltip="Background transparency (0=solid, 80=very transparent)", group="Alert Visuals")
-// Manual Alert Control (Pine Script doesn't support clicking)
-manualDismissMode = input.string("Auto-Expire Only", "Alert Dismissal Mode", options=["Auto-Expire Only", "Quick Dismiss (5 bars)", "Extended Time (20 bars)", "Manual Reset"], tooltip="Control how alerts are dismissed since Pine Script doesn't support clicking", group="Alert Control")
-clearAllAlerts = input.bool(false, "🗑️ Clear All Alerts Now", tooltip="Toggle this ON to immediately clear all current alerts, then toggle back OFF", group="Alert Control")
-priorityOnlyMode = input.bool(false, "⭐ High Priority Only", tooltip="Show only high priority alerts (Target hits, Major entries)", group="Alert Control")
+// Simplified alert settings (automatic values)
+alertDuration = 8  // Fixed: 8 bars duration
+alertSize = "normal"  // Fixed: Normal text size
+// No max alerts limit - display all alerts
+showEntryAlerts = true  // Always show entry alerts
+showExitAlerts = true  // Always show exit alerts  
+showBlockedAlerts = true  // Always show blocked alerts
+enableFlashing = false  // Disabled: No flashing
+flashDuration = 1  // Not used since flashing disabled
+alertTransparency = 0  // Fixed: Solid background
+dailyAlertReset = true  // Always auto-clear daily
+priorityOnlyMode = false  // Always show all alerts
 
 // Historical Data Settings
 historicalDataMode = input.string("All Days", "Historical Data Display", options=["All Days", "Last Day Only", "Recent Days"], tooltip="Control which days' signals are shown: All Days (complete history), Last Day Only (current trading day), Recent Days (last few days)", group="Historical Data")
 recentDaysCount = input.int(3, "Recent Days Count", minval=1, maxval=10, tooltip="Number of recent trading days to show when 'Recent Days' mode is selected", group="Historical Data")
+
+// Market Condition Display Settings (Educational Purpose Only)
+// Note: These are used for market condition analysis in zone labels, not for signal filtering
+enableMarketFilter = input.bool(false, "🚫 Legacy: Market Filter (Disabled)", tooltip="Legacy setting - now disabled. Market conditions shown in zone labels for education only.", group="Market Analysis")
+minORBRange = input.float(50.0, "ORB Range for Analysis (Points)", minval=20.0, maxval=200.0, step=5.0, tooltip="ORB range threshold for market condition classification (display only)", group="Market Analysis")
+minATRLevel = input.float(15.0, "ATR Level for Analysis", minval=5.0, maxval=50.0, step=2.5, tooltip="ATR threshold for trend/range classification (display only)", group="Market Analysis")
+maxFailureCount = input.int(3, "Failure Count for Analysis", minval=1, maxval=10, tooltip="Used for market condition analysis display (educational only)", group="Market Analysis")
 
 // ============================================================================
 // ON-SCREEN ALERT SYSTEM ARRAYS - PHASE 1 (Declared early)
@@ -114,6 +117,7 @@ recentDaysCount = input.int(3, "Recent Days Count", minval=1, maxval=10, tooltip
 var array<string> alertMessages = array.new<string>()
 var array<string> alertTypes = array.new<string>()
 var array<int> alertBarIndexes = array.new<int>()
+var array<string> alertTimes = array.new<string>()  // Store actual time of alerts
 var array<color> alertColors = array.new<color>()
 var array<int> alertPriorities = array.new<int>()    // 1=Low, 2=Medium, 3=High, 4=Critical
 var array<string> alertIcons = array.new<string>()
@@ -165,6 +169,8 @@ getAlertIcon(alertType, priority) =>
         "🚨"
     else if alertType == "BREAKOUT"
         "💥"
+    else if alertType == "SYSTEM"
+        "🌅"
     else
         "🔔"
 
@@ -184,8 +190,10 @@ getAlertColor(signalType, alertType) =>
             color.orange  // EOD
     else if alertType == "BLOCKED"
         color.orange
-    else
+    else if alertType == "SYSTEM"
         color.blue
+    else
+        color.gray
 
 // Helper functions that don't modify global variables
 getAlertColorForType(signalType, alertType) =>
@@ -203,8 +211,10 @@ getAlertColorForType(signalType, alertType) =>
             color.orange  // EOD
     else if alertType == "BLOCKED"
         color.orange
-    else
+    else if alertType == "SYSTEM"
         color.blue
+    else
+        color.gray
 
 // Function to add alert (returns true if should be added)
 shouldAddAlert(alertType) =>
@@ -233,6 +243,91 @@ var float currentExposure = 0.0
 
 // Trade table variable
 var table tradeTable = na
+
+// ============================================================================
+// ORH/ORL VARIABLES (declared early for use in market control functions)
+// ============================================================================
+
+var float orh = na
+var float orl = na
+var bool orhDetermined = false
+var bool orlDetermined = false
+var int orhBarIndex = 0
+var int orlBarIndex = 0
+var bool orhLabelDrawn = false
+var bool orlLabelDrawn = false
+
+// Session tracking variables for first green/red candle detection
+var float sessionLowestSoFar = na
+var bool foundFirstGreenWithLowest = false
+var int sessionLowestBarIndex = 0
+var float sessionHighestSoFar = na
+var bool foundFirstRedWithHighest = false
+var int sessionHighestBarIndex = 0
+
+// ============================================================================
+// MARKET CONTROL VARIABLES & FUNCTIONS (declared early for use in ATR functions)
+// ============================================================================
+
+// Market Control Variables
+var int marketControl = 0  // 0=none, 1,2=buyers, 3,4=sellers
+var bool orhConfirmedFirst = false
+var bool orlConfirmedFirst = false
+var string controlReason = ""
+var bool marketControlDetermined = false
+var label marketControlLabel = na
+
+// Get market control state as string
+getMarketControlState() =>
+    switch marketControl
+        1 => "BUYERS"
+        2 => "BUYERS"
+        3 => "SELLERS"
+        4 => "SELLERS"
+        => "NEUTRAL"
+
+// Check if signal aligns with market control
+isControlAlignedSignal(signalType) =>
+    if not marketControlDetermined
+        true  // No control determined yet, allow all signals
+    else
+        controlState = getMarketControlState()
+        
+        // Buyers control - favor bullish signals
+        if controlState == "BUYERS"
+            str.contains(signalType, "LONG") or str.contains(signalType, "BEAR_TRAP") or signalType == "CONS_FAKE_BD"
+        // Sellers control - favor bearish signals  
+        else if controlState == "SELLERS"
+            str.contains(signalType, "SHORT") or str.contains(signalType, "BULL_TRAP") or signalType == "CONS_FAKE_BO"
+        else
+            true  // Neutral, allow all
+
+// Market Control Determination Function
+determineMarketControl() =>
+    controlValue = 0
+    reason = ""
+    
+    // Check if both ORH and ORL are determined
+    if orhDetermined and orlDetermined
+        // Case 1: Both confirmed simultaneously (check sentiment)
+        if not orhConfirmedFirst and not orlConfirmedFirst
+            // Look at candle 2 bars ago for sentiment during range formation
+            if bar_index >= 2
+                sentimentCandle = open[2] > close[2]  // true = bearish, false = bullish
+                controlValue := sentimentCandle ? 4 : 1
+                reason := sentimentCandle ? "Simultaneous + Bearish Sentiment" : "Simultaneous + Bullish Sentiment"
+        
+        // Case 2: ORL confirmed first, then ORH (Support found first - Buyers building)
+        else if orlConfirmedFirst and not orhConfirmedFirst
+            controlValue := 2
+            reason := "Support Found First - Buyers Building"
+        
+        // Case 3: ORH confirmed first, then ORL (Resistance found first - Sellers controlling)
+        else if orhConfirmedFirst and not orlConfirmedFirst
+            controlValue := 3
+            reason := "Resistance Found First - Sellers Controlling"
+    
+    [controlValue, reason]
 
 // ============================================================================
 // ATR & VOLATILITY FUNCTIONS
@@ -284,9 +379,9 @@ getVolatilityMultiplier(atrValue) =>
         "EXTREME" => 2.1       // Extra wide for chaotic markets
         => 1.2                 // Default
 
-// Get pattern-specific ATR multiplier
+// Get pattern-specific ATR multiplier with market control adjustment
 getPatternATRMultiplier(signalType) =>
-    switch signalType
+    baseMultiplier = switch signalType
         "ORB_LONG" => orbATRMultiplier
         "ORB_SHORT" => orbATRMultiplier
         "BULL_TRAP" => trapCase2Multiplier          // Standard Bull Trap
@@ -301,6 +396,22 @@ getPatternATRMultiplier(signalType) =>
         "FAKE_BREAKOUT" => fakeBreakoutATRMultiplier // Fake breakout/breakdown
         "BOTH_SIDES_TRAP" => trapCase2Multiplier * 1.5  // Extra wide for explosive moves
         => baseATRMultiplier   // Default multiplier
+    
+    // Market control adjustment
+    controlAdjustment = 1.0
+    
+    if marketControlDetermined
+        controlState = getMarketControlState()
+        isControlAligned = isControlAlignedSignal(signalType)
+        
+        if isControlAligned
+            // Control-aligned trades get tighter stops (higher probability)
+            controlAdjustment := 0.85
+        else
+            // Contrarian trades get wider stops (lower probability, need more room)
+            controlAdjustment := 1.25
+    
+    baseMultiplier * controlAdjustment
 
 // Calculate dynamic stop loss based on ATR and pattern
 calculateDynamicStop(entryPrice, signalType, isLong, float orbLevel = na) =>
@@ -317,8 +428,10 @@ calculateDynamicStop(entryPrice, signalType, isLong, float orbLevel = na) =>
     
     // If ORB level is available, compare with ATR stop
     finalStopLevel = if not na(orbLevel)
-        // Take the more conservative stop (closer to entry for better risk management)
-        isLong ? math.max(orbLevel, atrStopLevel) : math.min(orbLevel, atrStopLevel)
+        // Take the wider stop (further from entry for realistic risk management)
+        // For LONG: Take the LOWER stop level (further below entry)
+        // For SHORT: Take the HIGHER stop level (further above entry)
+        isLong ? math.min(orbLevel, atrStopLevel) : math.max(orbLevel, atrStopLevel)
     else
         // Use pure ATR stop when no ORB level available
         atrStopLevel
@@ -347,8 +460,24 @@ calculatePositionSize(entryPrice, stopPrice, signalType) =>
         "BEAR_TRAP_C2" => 1.1       // Slightly higher risk for aggressive case
         => 1.0                      // Standard risk for other patterns
     
-    // Adjust risk amount based on pattern
-    adjustedRiskAmount = riskAmount * patternRiskMultiplier
+    // Market control risk adjustment
+    controlRiskMultiplier = 1.0
+    
+    if marketControlDetermined
+        isControlAligned = isControlAlignedSignal(signalType)
+        
+        if isControlAligned
+            // Control-aligned trades: increase position size (higher probability)
+            controlRiskMultiplier := 1.15
+        else
+            // Contrarian trades: decrease position size (lower probability)
+            controlRiskMultiplier := 0.75
+    
+    // Combine pattern and control adjustments
+    finalRiskMultiplier = patternRiskMultiplier * controlRiskMultiplier
+    
+    // Adjust risk amount based on pattern and control
+    adjustedRiskAmount = riskAmount * finalRiskMultiplier
     
     // Calculate optimal quantity - simplified approach
     [finalQuantity, actualRiskAmount] = if pointsAtRisk > 0
@@ -404,9 +533,12 @@ isORBPeriod() =>
 isTradingSession() =>
     not na(time(timeframe.period, "0915-1530", "Asia/Kolkata"))
 
-// Determine if signals should be shown based on user settings
+
+
+// Determine if signals should be shown based on user settings AND market conditions
 shouldShowSignals() =>
-    switch historicalDataMode
+    // First check historical data mode
+    historicalFilter = switch historicalDataMode
         "All Days" => true  // Show for all historical days
         "Last Day Only" => 
             // Show only for current/last trading day
@@ -424,6 +556,9 @@ shouldShowSignals() =>
             recentBarsThreshold = recentDaysCount * barsPerDay
             bar_index >= last_bar_index - recentBarsThreshold or barstate.isrealtime
         => true  // Default: show all
+    
+    // Return historical filter only - market condition filter applied separately where needed
+    historicalFilter
 
 // ============================================================================
 // DAILY PIVOT CALCULATION
@@ -457,15 +592,6 @@ isBearishZone() =>
 // ============================================================================
 // ORH/ORL DETECTION LOGIC
 // ============================================================================
-
-var float orh = na
-var float orl = na
-var bool orhDetermined = false
-var bool orlDetermined = false
-var int orhBarIndex = 0
-var int orlBarIndex = 0
-var bool orhLabelDrawn = false
-var bool orlLabelDrawn = false
 
 // ORB LONG 3-Phase Tracking Variables
 var bool orhInitialBreakout = false
@@ -619,6 +745,22 @@ if newDay
     orlBarIndex := 0
     orhLabelDrawn := false
     orlLabelDrawn := false
+    // Reset session tracking variables
+    sessionLowestSoFar := na
+    foundFirstGreenWithLowest := false
+    sessionLowestBarIndex := 0
+    sessionHighestSoFar := na
+    foundFirstRedWithHighest := false
+    sessionHighestBarIndex := 0
+    // Reset Market Control tracking
+    marketControl := 0
+    orhConfirmedFirst := false
+    orlConfirmedFirst := false
+    controlReason := ""
+    marketControlDetermined := false
+    if not na(marketControlLabel)
+        label.delete(marketControlLabel)
+    marketControlLabel := na
     // Reset ORB LONG 3-phase tracking
     orhInitialBreakout := false
     orhRetestCompleted := false
@@ -667,40 +809,46 @@ if newDay
     bearTrapCase1Target := 0.0
     bearTrapCase2Target := 0.0
 
-// Track provisional ORH/ORL during trading session
-if isTradingSession()
-    // Initialize ORH/ORL from market open price
-    if na(orh) and na(orl)
-        orh := open  // Start from opening price
-        orl := open  // Start from opening price
-        orhBarIndex := bar_index
-        orlBarIndex := bar_index
-    
-    // Provisional ORH: Track highest point until it stops making higher highs
-    if not orhDetermined
-        if high > orh
-            orh := high  // Update to new high
-            orhBarIndex := bar_index
-    
-    // Provisional ORL: Track lowest point until it stops making lower lows
-    if not orlDetermined
-        if low < orl
-            orl := low   // Update to new low
-            orlBarIndex := bar_index
+// ORH/ORL Detection: First green/red candle approach
+// ORL = Session's lowest low, determined when first green candle appears
+// ORH = Session's highest high, determined when first red candle appears
 
-// ORH finalization: When price stops making higher highs (3-candle confirmation)
-if isTradingSession() and not orhDetermined and bar_index >= 2
-    if high < high[1] and high[1] > high[2]
-        // Price stopped making higher highs - ORH confirmed at the highest point reached
-        orhDetermined := true
-        // ORH value already set to the highest point reached, just mark as final
-
-// ORL finalization: When price stops making lower lows (3-candle confirmation)
-if isTradingSession() and not orlDetermined and bar_index >= 2
-    if low > low[1] and low[1] < low[2]
-        // Price stopped making lower lows - ORL confirmed at the lowest point reached
+// ORL Detection: First green candle after we've seen the session's lowest low
+if isTradingSession() and not orlDetermined and not foundFirstGreenWithLowest
+    // Track the lowest low seen so far and which bar it occurred on
+    if na(sessionLowestSoFar) or low < sessionLowestSoFar
+        sessionLowestSoFar := low
+        sessionLowestBarIndex := bar_index
+    
+    // If current candle is green and we have a session low, use the session low as ORL
+    if close > open and not na(sessionLowestSoFar)
+        orl := sessionLowestSoFar
+        orlBarIndex := sessionLowestBarIndex  // Use the bar where lowest low actually occurred
         orlDetermined := true
-        // ORL value already set to the lowest point reached, just mark as final
+        foundFirstGreenWithLowest := true
+
+
+// ORH Detection: First red candle after we've seen the session's highest high
+if isTradingSession() and not orhDetermined and not foundFirstRedWithHighest
+    // Track the highest high seen so far and which bar it occurred on
+    if na(sessionHighestSoFar) or high > sessionHighestSoFar
+        sessionHighestSoFar := high
+        sessionHighestBarIndex := bar_index
+    
+    // If current candle is red and we have a session high, use the session high as ORH
+    if close < open and not na(sessionHighestSoFar)
+        orh := sessionHighestSoFar
+        orhBarIndex := sessionHighestBarIndex  // Use the bar where highest high actually occurred
+        orhDetermined := true
+        foundFirstRedWithHighest := true
+
+    
+// Market Control Determination - Execute when both levels are determined
+if orhDetermined and orlDetermined and not marketControlDetermined
+    [controlValue, reason] = determineMarketControl()
+    marketControl := controlValue
+    controlReason := reason
+    marketControlDetermined := true
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -763,19 +911,23 @@ getCurrentZone() =>
     else
         "neutral"
 
-// Check if signal is valid for current zone
+// Enhanced signal validation with market control and zone filtering
 isValidZoneForSignal(signalType) =>
     zone = getCurrentZone()
-    result = false
+    zoneValid = false
     
     if zone == "bullish" // Above R1 - Only bullish trades allowed
-        result := signalType == "ORB_LONG" or signalType == "BEAR_TRAP" or signalType == "BEAR_TRAP_C1" or signalType == "BEAR_TRAP_C2" or signalType == "CONS_LONG" or signalType == "CONS_FAKE_BD"
+        zoneValid := signalType == "ORB_LONG" or signalType == "BEAR_TRAP" or signalType == "BEAR_TRAP_C1" or signalType == "BEAR_TRAP_C2" or signalType == "CONS_LONG" or signalType == "CONS_FAKE_BD"
     else if zone == "bearish" // Below S1 - Only bearish trades allowed
-        result := signalType == "ORB_SHORT" or signalType == "BULL_TRAP" or signalType == "BULL_TRAP_C1" or signalType == "BULL_TRAP_C2" or signalType == "FAILED_BEAR_TRAP" or signalType == "CONS_SHORT" or signalType == "CONS_FAKE_BO"
+        zoneValid := signalType == "ORB_SHORT" or signalType == "BULL_TRAP" or signalType == "BULL_TRAP_C1" or signalType == "BULL_TRAP_C2" or signalType == "FAILED_BEAR_TRAP" or signalType == "CONS_SHORT" or signalType == "CONS_FAKE_BO"
     else if zone == "neutral" // R1-P-S1 - Conservative trades only (Scalp & Run)
-        result := signalType == "ORB_LONG" or signalType == "ORB_SHORT" or signalType == "CONS_FAKE_BD" or signalType == "CONS_FAKE_BO"
+        zoneValid := signalType == "ORB_LONG" or signalType == "ORB_SHORT" or signalType == "CONS_FAKE_BD" or signalType == "CONS_FAKE_BO"
     
-    result
+    // Market control filtering
+    controlValid = isControlAlignedSignal(signalType)
+    
+    // Both zone and control must be valid
+    zoneValid and controlValid
 
 // Get trade emphasis based on zone
 getTradeEmphasis() =>
@@ -1602,10 +1754,7 @@ var array<float> recentLabelYs = array.new<float>()
 var array<int> recentLabelBars = array.new<int>()
 var int maxRecentLabels = 20  // Track last 20 labels for better overlap prevention
 
-// Exit label positioning variables (separate tracking for exit labels)
-var array<float> recentExitLabelYs = array.new<float>()
-var array<int> recentExitLabelBars = array.new<int>()
-var int maxRecentExitLabels = 20  // Track last 20 exit labels for better overlap prevention
+
 
 // Dynamic label tracking variables for real-time updates
 var label orbLongLabel = na
@@ -1691,6 +1840,12 @@ var string whipsawShortExitTime = ""
 // Zone tracking variable
 var string lastZoneType = ""
 var label currentZoneLabel = na
+
+// ============================================================================
+// MARKET CONDITION ANALYSIS - For Display Purposes Only
+// ============================================================================
+// Note: Market condition analysis is now performed inline in the zone display section
+// This provides educational context without blocking signal generation
 
 // Reset signal tracking at the start of each new day
 if newDay
@@ -1804,9 +1959,6 @@ if newDay
     lastLabelBar := 0
     array.clear(recentLabelYs)
     array.clear(recentLabelBars)
-    // Reset exit label tracking arrays
-    array.clear(recentExitLabelYs)
-    array.clear(recentExitLabelBars)
     // Reset ORB breakout tracking
     orhBreakoutTriggered := false
     orlBreakoutTriggered := false
@@ -1940,6 +2092,36 @@ if newDay
     // Reset position tracking for intraday (all trades close at end of day)
     currentPositions := 0
     currentExposure := 0.0
+    
+    // ============================================================================
+    // DAILY ALERT RESET - Clear all previous day alerts
+    // ============================================================================
+    
+    // Clear all alert arrays for fresh start (if enabled)
+    if dailyAlertReset
+        alertMessages := array.new<string>()
+        alertTypes := array.new<string>()
+        alertBarIndexes := array.new<int>()
+        alertTimes := array.new<string>()
+        alertColors := array.new<color>()
+        alertPriorities := array.new<int>()
+        alertIcons := array.new<string>()
+        alertDismissed := array.new<bool>()
+        alertIDs := array.new<int>()
+        alertCounter := 0
+        
+        // Optional: Add a notification that alerts were cleared
+        if enableOnScreenAlerts
+            array.push(alertMessages, "🌅 NEW TRADING DAY\nPrevious day alerts cleared\nFresh start for today's session")
+            array.push(alertTypes, "SYSTEM")
+            array.push(alertBarIndexes, bar_index)
+            array.push(alertTimes, getCurrentTimeString())
+            array.push(alertColors, color.new(color.blue, 30))
+            array.push(alertPriorities, 2)
+            array.push(alertIcons, "🌅")
+            array.push(alertDismissed, false)
+            array.push(alertIDs, alertCounter)
+            alertCounter += 1
 
 // ============================================================================
 // TRADE TABLE MANAGEMENT
@@ -1998,17 +2180,25 @@ updateTradeStatus(signal, newStatus, newPnL) =>
                         array.set(tradeExitTimes, i, getCurrentTimeString())
                         break
 
+// ============================================================================
+// TRADE TABLE DISPLAY - SIMPLIFIED AND ALWAYS VISIBLE
+// ============================================================================
+
 // Update trade table (not a function - direct execution)
+// Update on last bar of the chart
 if showTradeTable and barstate.islast
     // Delete existing table
     if not na(tradeTable)
         table.delete(tradeTable)
     
-    // Calculate table size
-    tableSize = math.min(array.size(tradeSignals), maxTableRows)
+    // Calculate table size and debug info
+    totalTrades = array.size(tradeSignals)
+    tableSize = math.min(totalTrades, maxTableRows)
     
     // Always create table, even if no trades (to show headers)
-    // Create new table
+    // Debug: Force table creation
+    
+    // Table position logic
     tablePos = switch tablePosition
         "top_center" => position.top_center
         "top_right" => position.top_right
@@ -2023,10 +2213,11 @@ if showTradeTable and barstate.islast
     
     // Create table with at least 2 rows (header + 1 data row minimum) - Now 10 columns
     tableRows = math.max(tableSize + 1, 2)
-    newTable = table.new(tablePos, 10, tableRows, bgcolor=color.black, border_width=3, border_color=color.yellow)
+    // Create professional-looking table
+    newTable = table.new(tablePos, 10, tableRows, bgcolor=color.white, border_width=1, border_color=color.gray)
     tradeTable := newTable
     
-    // Header row - High contrast for dark mode (10 columns now)
+    // Header row - Professional appearance
     table.cell(tradeTable, 0, 0, "Signal", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
     table.cell(tradeTable, 1, 0, "Entry Time", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
     table.cell(tradeTable, 2, 0, "Exit Time", text_color=color.white, text_size=size.normal, bgcolor=color.navy)
@@ -2088,7 +2279,8 @@ if showTradeTable and barstate.islast
     else
         // Show "No Trades" message when no trades are available - White background with colored text (10 columns)
         noTradesBg = color.white
-        table.cell(tradeTable, 0, 1, "No Trades", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
+        debugMsg = "No Trades (" + str.tostring(totalTrades) + ")"
+        table.cell(tradeTable, 0, 1, debugMsg, text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
         table.cell(tradeTable, 1, 1, "Yet", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
         table.cell(tradeTable, 2, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
         table.cell(tradeTable, 3, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
@@ -2099,6 +2291,8 @@ if showTradeTable and barstate.islast
         table.cell(tradeTable, 8, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
         table.cell(tradeTable, 9, 1, "-", text_color=color.gray, text_size=size.small, bgcolor=noTradesBg)
 
+
+
 // ============================================================================
 // ZONE ALLOCATION SYSTEM
 // ============================================================================
@@ -2107,10 +2301,20 @@ if showTradeTable and barstate.islast
 getSignalZone(signalType) =>
     switch signalType
         "CONS_BREAKOUT" => 5    // Top zone - Consolidation breakouts
-        "ORB" => 4              // Upper zone - ORB signals
-        "ZONE_INFO" => 3        // Middle zone - Zone information  
-        "TRAP" => 2             // Lower zone - Bull/Bear traps
-        "WHIPSAW" => 1          // Bottom zone - Whipsaw/Fake signals
+        "ORB_LONG" => 4         // Upper zone - ORB Long signals
+        "ORB_SHORT" => 4        // Upper zone - ORB Short signals
+        "ORB" => 4              // Upper zone - ORB signals (fallback)
+        "MARKET_CONTROL" => 4   // Upper zone - Market control info (above zone info)
+        "ZONE_INFO" => 2        // Lower zone - Zone information
+        "BULL_TRAP" => 2        // Lower zone - Bull trap signals  
+        "TRAP" => 2             // Lower zone - Generic traps (fallback)
+        "BEAR_TRAP_WHIPSAW" => 1 // Bottom zone - Bear trap whipsaws
+        "BULL_TRAP_WHIPSAW" => 1 // Bottom zone - Bull trap whipsaws
+        "ORB_WHIPSAW" => 1      // Bottom zone - ORB whipsaws
+        "ENHANCED_WHIPSAW" => 1 // Bottom zone - Enhanced whipsaws
+        "WHIPSAW_ENTRY" => 1    // Bottom zone - Main whipsaw entry signals
+        "BEAR_TRAP" => 1        // Bottom zone - Bear trap signals (maximum separation)
+        "WHIPSAW" => 1          // Bottom zone - Generic whipsaw/Fake signals
         => 3                    // Default to middle zone
 
 // Calculate zone-based Y position
@@ -2218,123 +2422,7 @@ getLabelY(baseY, isAbove, signalType = "DEFAULT") =>
     
     newY
 
-// Enhanced function to calculate exit label Y position with overlap prevention
-getExitLabelY(baseY, isAbove, signalType = "EXIT") =>
-    float newY = baseY
-    float spacing = labelSpacing  // User-configurable spacing between labels
-    float baseOffset = labelDistance  // Fixed distance in points from candle
-    float proximityRange = maxLabelProximity  // Consider labels within this many bars as potentially overlapping
-    bool currentDirection = isAbove  // Local copy that can be modified
-    
-    // Use zone-based positioning if enabled, otherwise use original method
-    if enableZoneAllocation
-        newY := getZoneBasedY(baseY, signalType, currentDirection)
-    else
-        // Original positioning method
-        if currentDirection
-            newY := baseY + baseOffset
-        else
-            newY := baseY - baseOffset
-    
-    // Enhanced overlap prevention - check multiple passes for better spacing
-    maxIterations = 8  // More iterations for better resolution
-    iteration = 0
-    overlapFound = true
-    
-    while overlapFound and iteration < maxIterations
-        overlapFound := false
-        iteration := iteration + 1
-        
-        // Smart distribution: count labels above/below to decide optimal direction
-        labelsAbove = 0
-        labelsBelow = 0
-        if smartDistribution and array.size(recentExitLabelBars) > 0
-            for j = 0 to array.size(recentExitLabelBars) - 1
-                recentBarJ = array.get(recentExitLabelBars, j)
-                recentYJ = array.get(recentExitLabelYs, j)
-                if math.abs(bar_index - recentBarJ) <= proximityRange
-                    if recentYJ > baseY
-                        labelsAbove := labelsAbove + 1
-                    else
-                        labelsBelow := labelsBelow + 1
-        
-        // If too many labels in original direction, consider switching
-        if smartDistribution and iteration > 2 and ((currentDirection and labelsAbove > labelsBelow + 2) or (not currentDirection and labelsBelow > labelsAbove + 2))
-            currentDirection := not currentDirection
-            newY := currentDirection ? baseY + baseOffset : baseY - baseOffset
-        
-        // Check for overlaps with other exit labels
-        if array.size(recentExitLabelBars) > 0
-            for i = 0 to array.size(recentExitLabelBars) - 1
-                recentBar = array.get(recentExitLabelBars, i)
-                recentY = array.get(recentExitLabelYs, i)
-                
-                // Check if this label is close enough to potentially overlap
-                barDistance = math.abs(bar_index - recentBar)
-                if barDistance <= proximityRange
-                    // Enhanced spacing calculation - moderate increase for same-bar labels
-                    proximityFactor = 1.0 - (barDistance / proximityRange)
-                    baseSpacing = barDistance == 0 ? spacing * 2.0 : spacing  // 2x spacing for same bar
-                    requiredSpacing = baseSpacing * (1.0 + proximityFactor * 1.2)  // 100% to 220% spacing
-                    
-                    // More aggressive overlap detection and adjustment
-                    yDistance = math.abs(newY - recentY)
-                    if yDistance < requiredSpacing
-                        overlapFound := true
-                        
-                        // Smart positioning: stack labels efficiently with directional distribution
-                        if currentDirection
-                            if newY <= recentY
-                                newY := recentY + requiredSpacing
-                            else
-                                // If we're above but too close, move even higher
-                                newY := newY + (requiredSpacing - yDistance) * 1.2  // Extra buffer
-                        else
-                            if newY >= recentY
-                                newY := recentY - requiredSpacing
-                            else
-                                // If we're below but too close, move even lower  
-                                newY := newY - (requiredSpacing - yDistance) * 1.2  // Extra buffer
-        
-        // Also check for overlaps with entry labels to prevent conflicts
-        if array.size(recentLabelBars) > 0
-            for i = 0 to array.size(recentLabelBars) - 1
-                recentBar = array.get(recentLabelBars, i)
-                recentY = array.get(recentLabelYs, i)
-                
-                // Check if this label is close enough to potentially overlap
-                barDistance = math.abs(bar_index - recentBar)
-                if barDistance <= proximityRange
-                    proximityFactor = 1.0 - (barDistance / proximityRange)
-                    baseSpacing = barDistance == 0 ? spacing * 2.5 : spacing * 1.5  // Extra spacing vs entry labels
-                    requiredSpacing = baseSpacing * (1.0 + proximityFactor * 1.2)
-                    
-                    yDistance = math.abs(newY - recentY)
-                    if yDistance < requiredSpacing
-                        overlapFound := true
-                        
-                        // Push exit labels further away from entry labels
-                        if currentDirection
-                            if newY <= recentY
-                                newY := recentY + requiredSpacing
-                            else
-                                newY := newY + (requiredSpacing - yDistance) * 1.3
-                        else
-                            if newY >= recentY
-                                newY := recentY - requiredSpacing
-                            else
-                                newY := newY - (requiredSpacing - yDistance) * 1.3
-    
-    // Store this exit label's position for future overlap checks
-    array.push(recentExitLabelYs, newY)
-    array.push(recentExitLabelBars, bar_index)
-    
-    // Keep only recent exit labels (prevent memory buildup)
-    if array.size(recentExitLabelBars) > maxRecentExitLabels
-        array.shift(recentExitLabelYs)
-        array.shift(recentExitLabelBars)
-    
-    newY
+
 
 // Centralized function for all visual representations with tooltip
 drawSignalLabel(barIndex, price, labelText, labelColor, isAbove, tooltip = "", signalType = "DEFAULT") =>
@@ -2354,95 +2442,7 @@ drawSignalLabel(barIndex, price, labelText, labelColor, isAbove, tooltip = "", s
 // EXIT DETECTION LOGIC (Target Achievement)
 // ============================================================================
 
-// Function to create exit markers matching trading signal label style EXACTLY
-createExitMarker(signalType, exitStatus, isShortTrade, target, stop, pnl) =>
-    // Determine exit marker properties
-    isTargetHit = str.contains(exitStatus, "Target Hit")
-    isEODHit = str.contains(exitStatus, "EOD Hit")
-    
-    // Create exit label text matching signal style
-    exitSuffix = if isEODHit
-        " EOD"
-    else if isTargetHit
-        " TGT"
-    else
-        " SL"
-    
-    exitLabelText = signalType + exitSuffix
-    
-    // Set colors: Green for Target, Red for Stop Loss, Orange for EOD
-    labelColor = if isEODHit
-        color.orange
-    else if isTargetHit
-        color.green
-    else
-        color.red
-    
-    // Enhanced tooltip with trade details
-    exitPrice = if isEODHit
-        close
-    else if isTargetHit
-        target
-    else
-        stop
-    
-    pnlText = pnl > 0 ? "+" + str.tostring(pnl, "#.#") : str.tostring(pnl, "#.#")
-    
-    exitTypeText = if isEODHit
-        "End of Day (15:30)"
-    else if isTargetHit
-        "Target Hit"
-    else
-        "Stop Loss Hit"
-    
-    tooltipText = signalType + " EXIT\n" + 
-                  "Exit Type: " + exitTypeText + "\n" + 
-                  "Exit Price: " + str.tostring(exitPrice, "#.##") + "\n" +
-                  "P&L: " + pnlText + " points\n" +
-                  "Exit Time: " + getCurrentTimeString()
-    
-    // CRITICAL FIX: Use EXACT same positioning logic as entry signals
-    // Short trades: position above using high, Long trades: position below using low
-    signalTypeForPositioning = if str.contains(signalType, "ORB")
-        "ORB"
-    else if str.contains(signalType, "TRAP")
-        "TRAP" 
-    else if str.contains(signalType, "CONS")
-        "CONS"
-    else if str.contains(signalType, "WHIPSAW")
-        "WHIPSAW"
-    else
-        "EXIT"
-    
-    // Declare variables that will be set based on trade direction
-    labelY = 0.0
-    labelStyle = label.style_label_down
-    connectionEndPoint = 0.0
-    
-    if isShortTrade
-        // SHORT EXIT: Position above price like "ORB SHORT" entry signal
-        labelY := getLabelY(high, true, signalTypeForPositioning)
-        labelStyle := label.style_label_down
-        connectionEndPoint := high - connectionGap
-    else
-        // LONG EXIT: Position below price like "ORB LONG" entry signal
-        labelY := getLabelY(low, false, signalTypeForPositioning)
-        labelStyle := label.style_label_up
-        connectionEndPoint := low + connectionGap
-    
-    // Create exit label using SAME pattern as entry signals
-    exitLabel = label.new(bar_index, labelY, exitLabelText, 
-                         color=labelColor,
-                         style=labelStyle, 
-                         textcolor=color.white, 
-                         size=size.small,
-                         tooltip=tooltipText)
-    
-    // Add connection line using SAME pattern as entry signals
-    line.new(bar_index, labelY, bar_index, connectionEndPoint, 
-             color=labelColor, 
-             width=1, 
-             style=line.style_dashed)
+
 
 // Helper function to get current time string
 
@@ -2477,103 +2477,16 @@ if whipsawShortTriggered and whipsawShortExitStatus == ""
 
 // Dynamic label updates using stored final texts
 
-if isTradingSession()
-    // NOTE: Legacy exit label updates disabled - using new array-based exit marker system
-    // Entry labels now remain clean without exit status text appended
-    // Exit markers are created separately via createExitMarker() function
-    
-    // All legacy exit label updates removed - now using array-based exit marker system only
-    
-    // Whipsaw Long exit label update (store final text once)
-    if not na(whipsawLongLabel) and whipsawLongTriggered and whipsawLongExitStatus != "" and whipsawLongFinalLabel == ""
-        // Store the final label text permanently
-        whipsawText = threeLL ? "3LL REVERSAL LONG" : "2LL REVERSAL LONG"
-        whipsawLongFinalLabel := whipsawText + "\n" + whipsawLongExitStatus
-        label.set_text(whipsawLongLabel, whipsawLongFinalLabel)
-    else if not na(whipsawLongLabel) and whipsawLongFinalLabel != ""
-        // Use stored final text (prevents values from changing)
-        label.set_text(whipsawLongLabel, whipsawLongFinalLabel)
-    
-    // Whipsaw Short exit label update (store final text once)
-    if not na(whipsawShortLabel) and whipsawShortTriggered and whipsawShortExitStatus != "" and whipsawShortFinalLabel == ""
-        // Store the final label text permanently
-        whipsawText = threeHH ? "3HH REVERSAL SHORT" : "2HH REVERSAL SHORT"
-        whipsawShortFinalLabel := whipsawText + "\n" + whipsawShortExitStatus
-        label.set_text(whipsawShortLabel, whipsawShortFinalLabel)
-    else if not na(whipsawShortLabel) and whipsawShortFinalLabel != ""
-        // Use stored final text (prevents values from changing)
-        label.set_text(whipsawShortLabel, whipsawShortFinalLabel)
+// Note: Dynamic label updates section removed since exit status updates are disabled
+// All exit information is now tracked in the trade table only
 
 // ============================================================================
 // VISUAL INDICATORS
 // ============================================================================
 
-// Market Zone Labels based on current price (always on top of ORH)
-currentZoneType = isNeutralZone() ? "NEUTRAL" : isBullishZone() ? "BULLISH" : "BEARISH"
+// Market Zone Labels - calculated inline where needed
 
-// Function to get active trades P&L summary
-getActiveTradesPnL() =>
-    activeTrades = 0
-    totalPnL = 0.0
-    tradeDetails = ""
-    
-    // Check ORB LONG
-    if orbLongTriggered and orbLongExitStatus == ""
-        pnl = close - orbLongEntry
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "ORB LONG: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check ORB SHORT
-    if orbShortTriggered and orbShortExitStatus == ""
-        pnl = orbShortEntry - close
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "ORB SHORT: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check BULL TRAP
-    if bullTrapTriggered and bullTrapExitStatus == ""
-        pnl = bullTrapEntry - close
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "BULL TRAP: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check BEAR TRAP
-    if bearTrapTriggered and bearTrapExitStatus == ""
-        pnl = close - bearTrapEntry
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "BEAR TRAP: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check CONS BREAKOUT LONG
-    if consBreakoutLongTriggered and consBreakoutLongExitStatus == ""
-        pnl = close - consBreakoutLongEntry
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "CONS BO LONG: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check CONS BREAKOUT SHORT
-    if consBreakoutShortTriggered and consBreakoutShortExitStatus == ""
-        pnl = consBreakoutShortEntry - close
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "CONS BO SHORT: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check FAKE BREAKOUT LONG
-    if fakeBreakoutLongTriggered and fakeBreakoutLongExitStatus == ""
-        pnl = close - fakeBreakoutLongEntry
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "FAKE BD LONG: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    // Check FAKE BREAKOUT SHORT
-    if fakeBreakoutShortTriggered and fakeBreakoutShortExitStatus == ""
-        pnl = fakeBreakoutShortEntry - close
-        activeTrades := activeTrades + 1
-        totalPnL := totalPnL + pnl
-        tradeDetails := tradeDetails + "FAKE BO SHORT: " + (pnl > 0 ? "+" : "") + str.tostring(pnl, "#.##") + " pts\n"
-    
-    [activeTrades, totalPnL, tradeDetails]
+// Note: Unused getActiveTradesPnL function removed to fix syntax errors
 
 
 
@@ -2585,49 +2498,180 @@ if showNeutralZone and shouldShowSignals() and isTradingSession() and not na(orh
         label.delete(currentZoneLabel)
         currentZoneLabel := na
     
-    // Position zone label using zone allocation system
-    zoneY = getZoneBasedY(orh, "ZONE_INFO", true)
+    // Position zone label below control label with proper spacing
+    zoneY = getZoneBasedY(orh, "ZONE_INFO", true) - (zoneSpacing * 2)
     
     // Get current ATR and volatility information
     currentATR = getReliableATR()
     [volatilityLevel, volColor] = classifyVolatility(currentATR)
     
-    // Build enhanced zone text with volatility information
+    // ============================================================================
+    // MARKET CONDITION ANALYSIS - Enhanced Analysis for Trading Context
+    // ============================================================================
+    
+    // Calculate market condition metrics
+    orbRange = orhDetermined and orlDetermined ? orh - orl : na
+    isValidRange = not na(orbRange) and orbRange >= 50
+    
+    // Market condition classification
+    marketCondition = ""
+    conditionColor = color.gray
+    signalQuality = ""
+    
+    if not na(orbRange)
+        if orbRange >= 100 and currentATR >= 20
+            marketCondition := "TRENDING"
+            conditionColor := color.lime
+            signalQuality := "HIGH"
+        else if orbRange >= 70 and currentATR >= 15
+            marketCondition := "MOMENTUM"
+            conditionColor := color.blue
+            signalQuality := "GOOD"
+        else if orbRange >= 50 and currentATR >= 10
+            marketCondition := "RANGING"
+            conditionColor := color.orange
+            signalQuality := "CAUTION"
+        else
+            marketCondition := "CHOPPY"
+            conditionColor := color.red
+            signalQuality := "AVOID"
+    else
+        marketCondition := "PENDING"
+        conditionColor := color.gray
+        signalQuality := "WAIT"
+    
+    // Calculate current zone type based on price position
+    currentZoneType = isNeutralZone() ? "NEUTRAL" : isBullishZone() ? "BULLISH" : "BEARISH"
+    
+    // Build enhanced zone text with market condition
     zoneText = ""
     zoneColor = color.yellow
     textColor = color.black
     
     if currentZoneType == "NEUTRAL"
-        zoneText := "NEUTRAL ZONE\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
+        if showMarketCondition
+            zoneText := "NEUTRAL ZONE\n" + marketCondition + " Market\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
+        else
+            zoneText := "NEUTRAL ZONE\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
         zoneColor := color.yellow
         textColor := color.black
     else if currentZoneType == "BULLISH"
-        zoneText := "BULLISH ZONE\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
+        if showMarketCondition
+            zoneText := "BULLISH ZONE\n" + marketCondition + " Market\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
+        else
+            zoneText := "BULLISH ZONE\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
         zoneColor := color.green
         textColor := color.white
     else if currentZoneType == "BEARISH"
-        zoneText := "BEARISH ZONE\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
+        if showMarketCondition
+            zoneText := "BEARISH ZONE\n" + marketCondition + " Market\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
+        else
+            zoneText := "BEARISH ZONE\nVol: " + volatilityLevel + " (" + str.tostring(currentATR, "#.#") + ")"
         zoneColor := color.red
         textColor := color.white
     
     // Create enhanced tooltip with zone and volatility information
     volatilityMultiplier = getVolatilityMultiplier(currentATR)
+    
+    // Generate market condition implications
+    marketImplications = ""
+    if marketCondition == "TRENDING"
+        marketImplications := "📈 IDEAL CONDITIONS\n• All signals have high probability\n• Trend following preferred\n• Target extensions likely"
+    else if marketCondition == "MOMENTUM"
+        marketImplications := "⚡ GOOD CONDITIONS\n• Most signals reliable\n• Watch for momentum shifts\n• Standard targets achievable"
+    else if marketCondition == "RANGING"
+        marketImplications := "⚠️ MIXED CONDITIONS\n• Use smaller position sizes\n• Take profits at levels\n• Avoid breakout trades"
+    else if marketCondition == "CHOPPY"
+        marketImplications := "🚨 POOR CONDITIONS\n• High stop loss hit rate\n• Consider sitting out\n• Wait for better setup"
+    else
+        marketImplications := "⏳ ANALYSIS PENDING\n• Wait for ORH/ORL confirmation\n• Monitor opening range development"
+    
     tooltipText = ""
     if currentZoneType == "NEUTRAL"
-        tooltipText := "NEUTRAL ZONE\nPrice: " + str.tostring(close, "#.##") + "\nS1: " + str.tostring(s1, "#.##") + " | R1: " + str.tostring(r1, "#.##") + "\n\nVOLATILITY: " + volatilityLevel + "\nATR (3-min): " + str.tostring(currentATR, "#.#") + " points\nMultiplier: " + str.tostring(volatilityMultiplier, "#.#") + "x\n\nTrading Rules:\n• Avoid aggressive trading\n• Scalp with ORB setups only\n• Quick in & out"
+        orbRangeText = not na(orbRange) ? str.tostring(orbRange, "#.#") + " pts" : "Pending"
+        if showMarketCondition
+            tooltipText := "NEUTRAL ZONE\nPrice: " + str.tostring(close, "#.##") + "\nS1: " + str.tostring(s1, "#.##") + " | R1: " + str.tostring(r1, "#.##") + "\n\n📊 MARKET CONDITION: " + marketCondition + "\nORB Range: " + orbRangeText + "\nATR: " + str.tostring(currentATR, "#.#") + " pts (" + volatilityLevel + ")\nSignal Quality: " + signalQuality + "\n\n" + marketImplications + "\n\n🎯 Zone Rules:\n• Scalp with ORB setups only\n• Quick in & out\n• Avoid aggressive trades"
+        else
+            tooltipText := "NEUTRAL ZONE\nPrice: " + str.tostring(close, "#.##") + "\nS1: " + str.tostring(s1, "#.##") + " | R1: " + str.tostring(r1, "#.##") + "\n\nVOLATILITY: " + volatilityLevel + "\nATR (3-min): " + str.tostring(currentATR, "#.#") + " points\nMultiplier: " + str.tostring(volatilityMultiplier, "#.#") + "x\n\nTrading Rules:\n• Avoid aggressive trading\n• Scalp with ORB setups only\n• Quick in & out"
     else if currentZoneType == "BULLISH"
-        tooltipText := "BULLISH ZONE\nPrice: " + str.tostring(close, "#.##") + "\nAbove R1: " + str.tostring(r1, "#.##") + "\nTarget R2: " + str.tostring(r2, "#.##") + "\n\nVOLATILITY: " + volatilityLevel + "\nATR (3-min): " + str.tostring(currentATR, "#.#") + " points\nMultiplier: " + str.tostring(volatilityMultiplier, "#.#") + "x\n\nTrading Rules:\n• Only BULLISH trades\n• ORH Breakout ✓\n• Bear Trap ✓\n• NO SHORTS!"
+        orbRangeText = not na(orbRange) ? str.tostring(orbRange, "#.#") + " pts" : "Pending"
+        if showMarketCondition
+            tooltipText := "BULLISH ZONE\nPrice: " + str.tostring(close, "#.##") + "\nAbove R1: " + str.tostring(r1, "#.##") + "\nTarget R2: " + str.tostring(r2, "#.##") + "\n\n📊 MARKET CONDITION: " + marketCondition + "\nORB Range: " + orbRangeText + "\nATR: " + str.tostring(currentATR, "#.#") + " pts (" + volatilityLevel + ")\nSignal Quality: " + signalQuality + "\n\n" + marketImplications + "\n\n🎯 Zone Rules:\n• Only BULLISH trades\n• ORH Breakout ✓\n• Bear Trap ✓\n• NO SHORTS!"
+        else
+            tooltipText := "BULLISH ZONE\nPrice: " + str.tostring(close, "#.##") + "\nAbove R1: " + str.tostring(r1, "#.##") + "\nTarget R2: " + str.tostring(r2, "#.##") + "\n\nVOLATILITY: " + volatilityLevel + "\nATR (3-min): " + str.tostring(currentATR, "#.#") + " points\nMultiplier: " + str.tostring(volatilityMultiplier, "#.#") + "x\n\nTrading Rules:\n• Only BULLISH trades\n• ORH Breakout ✓\n• Bear Trap ✓\n• NO SHORTS!"
     else if currentZoneType == "BEARISH"
-        tooltipText := "BEARISH ZONE\nPrice: " + str.tostring(close, "#.##") + "\nBelow S1: " + str.tostring(s1, "#.##") + "\nTarget S2: " + str.tostring(s2, "#.##") + "\n\nVOLATILITY: " + volatilityLevel + "\nATR (3-min): " + str.tostring(currentATR, "#.#") + " points\nMultiplier: " + str.tostring(volatilityMultiplier, "#.#") + "x\n\nTrading Rules:\n• Only BEARISH trades\n• ORL Breakdown ✓\n• Bull Trap ✓\n• NO LONGS!"
+        orbRangeText = not na(orbRange) ? str.tostring(orbRange, "#.#") + " pts" : "Pending"
+        if showMarketCondition
+            tooltipText := "BEARISH ZONE\nPrice: " + str.tostring(close, "#.##") + "\nBelow S1: " + str.tostring(s1, "#.##") + "\nTarget S2: " + str.tostring(s2, "#.##") + "\n\n📊 MARKET CONDITION: " + marketCondition + "\nORB Range: " + orbRangeText + "\nATR: " + str.tostring(currentATR, "#.#") + " pts (" + volatilityLevel + ")\nSignal Quality: " + signalQuality + "\n\n" + marketImplications + "\n\n🎯 Zone Rules:\n• Only BEARISH trades\n• ORL Breakdown ✓\n• Bull Trap ✓\n• NO LONGS!"
+        else
+            tooltipText := "BEARISH ZONE\nPrice: " + str.tostring(close, "#.##") + "\nBelow S1: " + str.tostring(s1, "#.##") + "\nTarget S2: " + str.tostring(s2, "#.##") + "\n\nVOLATILITY: " + volatilityLevel + "\nATR (3-min): " + str.tostring(currentATR, "#.#") + " points\nMultiplier: " + str.tostring(volatilityMultiplier, "#.#") + "x\n\nTrading Rules:\n• Only BEARISH trades\n• ORL Breakdown ✓\n• Bull Trap ✓\n• NO LONGS!"
     
-    // Calculate horizontal position based on user setting (distance from current bar)
-    zoneX = bar_index + zoneLabelDistance
-    currentZoneLabel := label.new(zoneX, zoneY, zoneText, color=zoneColor, style=label.style_label_down, textcolor=textColor, size=size.small, tooltip=tooltipText)
+    // Calculate horizontal position based on user setting (same as control label)
+    zoneX = bar_index + zoneLabelDistance + 8  // Same offset as control label
+    currentZoneLabel := label.new(zoneX, zoneY, zoneText, color=zoneColor, style=label.style_label_up, textcolor=textColor, size=size.small, tooltip=tooltipText)
 else
     // Clean up zone label when not showing signals or outside trading session
     if not na(currentZoneLabel)
         label.delete(currentZoneLabel)
         currentZoneLabel := na
+
+// Market Control Label Display
+if showNeutralZone and shouldShowSignals() and marketControlDetermined and isTradingSession()
+    // Delete previous market control label if it exists
+    if not na(marketControlLabel)
+        label.delete(marketControlLabel)
+        marketControlLabel := na
+    
+    controlText = ""
+    controlColor = color.gray
+    controlIcon = ""
+    
+    switch marketControl
+        1 => 
+            controlText := "🟢 BUYERS CONTROL\nSimultaneous + Bullish\nFavor: LONG signals"
+            controlColor := color.new(color.green, 20)
+            controlIcon := "🟢"
+        2 => 
+            controlText := "🟢 BUYERS CONTROL\nSupport Found First\nFavor: LONG signals"
+            controlColor := color.new(color.green, 20)
+            controlIcon := "🟢"
+        3 => 
+            controlText := "🔴 SELLERS CONTROL\nResistance Found First\nFavor: SHORT signals"
+            controlColor := color.new(color.red, 20)
+            controlIcon := "🔴"
+        4 => 
+            controlText := "🔴 SELLERS CONTROL\nSimultaneous + Bearish\nFavor: SHORT signals"
+            controlColor := color.new(color.red, 20)
+            controlIcon := "🔴"
+    
+    // Position market control label above the zone label (same horizontal position)
+    controlY = getZoneBasedY(orh, "MARKET_CONTROL", true)
+    controlX = bar_index + zoneLabelDistance + 8  // Same horizontal position as zone label
+    
+    // Enhanced tooltip with market control implications
+    controlState = str.tostring(marketControl)
+    tradingImplications = marketControl == 1 or marketControl == 2 ? 
+                         "• Higher probability for LONG trades\n• BEAR TRAP setups favored\n• Fade SHORT breakdowns\n• Expect ORH breakout success" :
+                         "• Higher probability for SHORT trades\n• BULL TRAP setups favored\n• Fade LONG breakouts\n• Expect ORL breakdown success"
+    
+    psychology = marketControl == 1 ? "Bulls controlled range formation" :
+                 marketControl == 2 ? "Buyers stepped in at lows first" :
+                 marketControl == 3 ? "Sellers capped rallies first" :
+                 "Bears controlled range formation"
+    
+    controlTooltip = "MARKET CONTROL ANALYSIS\n\nControl State: " + controlState + "\nReason: " + controlReason + "\n\nTRADING IMPLICATIONS:\n" + tradingImplications + "\n\nPSYCHOLOGY:\n" + psychology
+    
+    marketControlLabel := label.new(controlX, controlY, controlText, 
+                                   color=controlColor, 
+                                   style=label.style_label_up, 
+                                   textcolor=color.white, 
+                                   size=size.small,
+                                   tooltip=controlTooltip)
+else
+    // Clean up market control label when not showing
+    if not na(marketControlLabel)
+        label.delete(marketControlLabel)
+        marketControlLabel := na
 
 // ORH/ORL Detection and Labeling - Combined approach
 
@@ -2647,13 +2691,7 @@ if showORLevels and shouldShowSignals() and orlDetermined and not orlLabelDrawn 
     lastLabelBar := orlBarIndex
     orlLabelDrawn := true
 
-// Show provisional ORH/ORL on current candle (when not finalized)
-if showORLevels and shouldShowSignals() and barstate.islast and isTradingSession()
-    if not na(orh) and not orhDetermined
-        label.new(bar_index, orh, "ORH (PROVISIONAL)\n" + str.tostring(orh, "#.##"), color=color.new(orhColor, 50), style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Provisional ORH: Current session high, will be finalized when 3-candle pattern confirms")
-    
-    if not na(orl) and not orlDetermined  
-        label.new(bar_index, orl, "ORL (PROVISIONAL)\n" + str.tostring(orl, "#.##"), color=color.new(color.green, 50), style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Provisional ORL: Current session low, will be finalized when 3-candle pattern confirms")
+// ORH/ORL are only shown when finalized (no provisional display)
 
 // Entry Signals - Only show when conditions are met (once per day)
 // ORB LONG signal - Create minimal label and add to table (with zone filtering)
@@ -2687,7 +2725,15 @@ if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLong
         
         // 🚀 ON-SCREEN ALERT for ORB LONG ENTRY
         if showEntryAlerts and enableOnScreenAlerts
-            alertMsg = "ORB LONG ENTRY\nEntry: " + str.tostring(orbLongEntry, "#.##") + "\nSL: " + str.tostring(orbLongStop, "#.##") + " (-" + str.tostring(orbLongEntry - orbLongStop, "#") + " pts)\nTarget: " + str.tostring(orbLongTarget, "#.##") + " (+" + str.tostring(orbLongTarget - orbLongEntry, "#") + " pts)\nQty: " + str.tostring(quantity) + " units\nRisk: ₹" + str.tostring(riskAmount, "#")
+            // Add market control context
+            controlContext = ""
+            if marketControlDetermined
+                controlState = getMarketControlState()
+                isAligned = isControlAlignedSignal("ORB_LONG")
+                controlContext := "\n" + (controlState == "BUYERS" ? "🟢" : "🔴") + " " + controlState + " CONTROL" + 
+                                 (isAligned ? " - HIGH PROB" : " - CONTRARIAN")
+            
+            alertMsg = "ORB LONG ENTRY" + controlContext + "\nEntry: " + str.tostring(orbLongEntry, "#.##") + "\nSL: " + str.tostring(orbLongStop, "#.##") + " (-" + str.tostring(orbLongEntry - orbLongStop, "#") + " pts)\nTarget: " + str.tostring(orbLongTarget, "#.##") + " (+" + str.tostring(orbLongTarget - orbLongEntry, "#") + " pts)\nQty: " + str.tostring(quantity) + " units\nRisk: ₹" + str.tostring(riskAmount, "#")
             alertColor = getAlertColorForType("ORB LONG", "ENTRY")
             alertIcon = getAlertIcon("ENTRY", 3)
             
@@ -2695,6 +2741,7 @@ if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLong
             array.push(alertMessages, alertMsg)
             array.push(alertTypes, "ENTRY")
             array.push(alertBarIndexes, bar_index)
+            array.push(alertTimes, getCurrentTimeString())
             array.push(alertColors, alertColor)
             array.push(alertPriorities, 3)
             array.push(alertIcons, alertIcon)
@@ -2702,18 +2749,9 @@ if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLong
             array.push(alertIDs, alertCounter)
             alertCounter += 1
             
-            // Play sound if enabled
-            if soundEnabled
-                alert(alertIcon + " " + alertMsg)
+            // Note: Sound alerts disabled in simplified version
             
-            // Limit array size
-            while array.size(alertMessages) > maxSimultaneousAlerts * 2
-                array.shift(alertMessages)
-                array.shift(alertTypes)
-                array.shift(alertBarIndexes)
-                array.shift(alertColors)
-                array.shift(alertPriorities)
-                array.shift(alertIcons)
+            // No array size limit - keep all alerts until they expire naturally
     else
         // Position blocked - create warning label
         warningText = "ORB LONG\n❌ BLOCKED"
@@ -2730,6 +2768,7 @@ if showEntrySignals and shouldShowSignals() and orbLongCondition and not orbLong
             array.push(alertMessages, alertMsg)
             array.push(alertTypes, "BLOCKED")
             array.push(alertBarIndexes, bar_index)
+            array.push(alertTimes, getCurrentTimeString())
             array.push(alertColors, alertColor)
             array.push(alertPriorities, 2)
             array.push(alertIcons, alertIcon)
@@ -2746,7 +2785,7 @@ if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbSho
     
     // Minimal chart label
     labelText = "ORB SHORT"
-    labelY = getLabelY(high, true, "ORB")
+    labelY = getLabelY(high, true, "ORB_SHORT")
     // Get ATR information for tooltip
     currentATR = getReliableATR()
     [volatilityLevel, volColor] = classifyVolatility(currentATR)
@@ -2771,6 +2810,7 @@ if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbSho
             array.push(alertMessages, alertMsg)
             array.push(alertTypes, "ENTRY")
             array.push(alertBarIndexes, bar_index)
+            array.push(alertTimes, getCurrentTimeString())
             array.push(alertColors, color.red)
             array.push(alertPriorities, 3)
             array.push(alertIcons, "🚀")
@@ -2789,6 +2829,7 @@ if showEntrySignals and shouldShowSignals() and orbShortCondition and not orbSho
             array.push(alertMessages, alertMsg)
             array.push(alertTypes, "BLOCKED")
             array.push(alertBarIndexes, bar_index)
+            array.push(alertTimes, getCurrentTimeString())
             array.push(alertColors, color.orange)
             array.push(alertPriorities, 2)
             array.push(alertIcons, "❌")
@@ -2815,6 +2856,7 @@ if showTrapSignals and shouldShowSignals() and bullTrapCondition and not bullTra
         array.push(alertMessages, alertMsg)
         array.push(alertTypes, "ENTRY")
         array.push(alertBarIndexes, bar_index)
+        array.push(alertTimes, str.format("{0,time,HH:mm}", time))
         array.push(alertColors, color.red)
         array.push(alertPriorities, 3)
         array.push(alertIcons, "⚡")
@@ -2828,7 +2870,7 @@ if showTrapSignals and shouldShowSignals() and bearTrapCondition and not bearTra
     bearTrapEntryTime := getCurrentTimeString()
     // Minimal chart label
     labelText = "BEAR TRAP"
-    labelY = getLabelY(low, false, "TRAP")
+    labelY = getLabelY(bearTrapEntry, true, "BEAR_TRAP")
     tooltipText = "BEAR TRAP SIGNAL\nEntry Time: " + bearTrapEntryTime + "\nEntry: " + str.tostring(bearTrapEntry, "#.##") + "\nStop Loss: " + str.tostring(bearTrapStop, "#.##") + "\nTarget: " + str.tostring(bearTrapTarget, "#.##") + "\nStrategy: After ORL breakdown, candle closed above ORL. Confirmation at swing high break."
     bearTrapLabel := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
@@ -2841,6 +2883,7 @@ if showTrapSignals and shouldShowSignals() and bearTrapCondition and not bearTra
         array.push(alertMessages, alertMsg)
         array.push(alertTypes, "ENTRY")
         array.push(alertBarIndexes, bar_index)
+        array.push(alertTimes, str.format("{0,time,HH:mm}", time))
         array.push(alertColors, color.green)
         array.push(alertPriorities, 3)
         array.push(alertIcons, "⚡")
@@ -2905,7 +2948,8 @@ if showTrapSignals and shouldShowSignals() and bearTrapAdditionalWhipsaw and not
     bearTrapWhipsawTime := getCurrentTimeString()
     // Enhanced whipsaw label
     labelText = "WHIPSAW"
-    labelY = getLabelY(low, false, "WHIPSAW")
+    // Force bear trap whipsaw to extreme bottom position to avoid all overlaps
+    labelY = low - (labelDistance + zoneSpacing * 4)  // Quadruple zone spacing for maximum separation
     bearTrapWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for Bear Trap - Momentum will come after whipsaw. Higher probability signal with more trapped participants.")
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.orange, width=1, style=line.style_dashed)
     bearTrapWhipsawTriggered := true
@@ -2915,7 +2959,8 @@ if showTrapSignals and shouldShowSignals() and bullTrapAdditionalWhipsaw and not
     bullTrapWhipsawTime := getCurrentTimeString()
     // Enhanced whipsaw label
     labelText = "WHIPSAW"
-    labelY = getLabelY(high, true, "WHIPSAW")
+    // Force bull trap whipsaw to extreme top position to avoid all overlaps
+    labelY = high + (labelDistance + zoneSpacing * 4)  // Quadruple zone spacing for maximum separation
     bullTrapWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for Bull Trap - Momentum will come after whipsaw. Higher probability signal with more trapped participants.")
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
     bullTrapWhipsawTriggered := true
@@ -2923,9 +2968,10 @@ if showTrapSignals and shouldShowSignals() and bullTrapAdditionalWhipsaw and not
 // Additional Whipsaw for ORB Long - Show enhanced label
 if showEntrySignals and shouldShowSignals() and orbLongAdditionalWhipsaw and not orbLongWhipsawTriggered
     orbLongWhipsawTime := getCurrentTimeString()
-    // Enhanced whipsaw label
+    // Enhanced whipsaw label with extreme positioning to avoid all overlaps
     labelText = "WHIPSAW"
-    labelY = getLabelY(low, false, "WHIPSAW")
+    // Force ORB Long whipsaw to extreme bottom position
+    labelY = low - (labelDistance + zoneSpacing * 5)  // Quintuple zone spacing for absolute separation 
     orbLongWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for ORB Long - ORH holding as support. SL will not hit. Higher probability signal.")
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.orange, width=1, style=line.style_dashed)
     orbLongWhipsawTriggered := true
@@ -2933,9 +2979,10 @@ if showEntrySignals and shouldShowSignals() and orbLongAdditionalWhipsaw and not
 // Additional Whipsaw for ORB Short - Show enhanced label
 if showEntrySignals and shouldShowSignals() and orbShortAdditionalWhipsaw and not orbShortWhipsawTriggered
     orbShortWhipsawTime := getCurrentTimeString()
-    // Enhanced whipsaw label
+    // Enhanced whipsaw label with extreme positioning to avoid all overlaps
     labelText = "WHIPSAW"
-    labelY = getLabelY(high, true, "WHIPSAW")
+    // Force ORB Short whipsaw to extreme top position
+    labelY = high + (labelDistance + zoneSpacing * 5)  // Quintuple zone spacing for absolute separation
     orbShortWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for ORB Short - ORL holding as resistance. SL will not hit. Higher probability signal.")
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
     orbShortWhipsawTriggered := true
@@ -3069,7 +3116,7 @@ if shouldShowSignals() and not trendingDayLabelShown and (trendingDayBullish or 
     
     // Create trending day label
     trendingDayLabel := label.new(bar_index, trendLabelY, trendLabelText, color=trendLabelColor, style=trendLabelStyle, textcolor=color.white, size=size.normal, tooltip=trendTooltipText)
-    line.new(bar_index, trendLabelY, bar_index, trendingDayBullish ? low + connectionGap : high - connectionGap, color=trendLabelColor, width=2, style=line.style_solid)
+    line.new(bar_index, trendLabelY, bar_index, trendingDayBullish ? low + connectionGap : high - connectionGap, color=trendLabelColor, width=1, style=line.style_dashed)
     
     trendingDayLabelShown := true
 
@@ -3099,7 +3146,8 @@ if showWhipsawSignals and shouldShowSignals() and whipsawLongCondition and not w
     whipsawText = threeLL ? "3LL REVERSAL LONG" : "2LL REVERSAL LONG"
     tooltipText = (threeLL ? "Three" : "Two") + " consecutive lower lows detected. Price broke above recent swing high, indicating potential reversal from oversold condition. Entry: Close at reversal candle. SL: max(SwingLow, Entry-35pts). Target: ORH/ORL range distance or nearest R1/R2/R3 pivot above entry."
     labelText = whipsawText
-    labelY = getLabelY(low, false, "WHIPSAW")
+    // Force whipsaw to extreme bottom position to avoid all overlaps
+    labelY = low - (labelDistance + zoneSpacing * 3)  // Triple zone spacing for extreme separation
     whipsawLongLabel := label.new(bar_index, labelY, labelText, color=color.lime, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.lime, width=1, style=line.style_dashed)
     whipsawLongTriggered := true
@@ -3110,7 +3158,8 @@ if showWhipsawSignals and shouldShowSignals() and whipsawShortCondition and not 
     whipsawText = threeHH ? "3HH REVERSAL SHORT" : "2HH REVERSAL SHORT"
     tooltipText = (threeHH ? "Three" : "Two") + " consecutive higher highs detected. Price broke below recent swing low, indicating potential reversal from overbought condition. Entry: Close at reversal candle. SL: min(SwingHigh, Entry+35pts). Target: ORH/ORL range distance or nearest S1/S2/S3 pivot below entry."
     labelText = whipsawText
-    labelY = getLabelY(high, true, "WHIPSAW")
+    // Force whipsaw to extreme top position to avoid all overlaps
+    labelY = high + (labelDistance + zoneSpacing * 3)  // Triple zone spacing for extreme separation
     whipsawShortLabel := label.new(bar_index, labelY, labelText, color=color.maroon, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.maroon, width=1, style=line.style_dashed)
     whipsawShortTriggered := true
@@ -3118,19 +3167,51 @@ if showWhipsawSignals and shouldShowSignals() and whipsawShortCondition and not 
 // Fake Breakout Long Signals (Consolidation + Fake Breakdown = Sharp Move Up)
 if showWhipsawSignals and shouldShowSignals() and fakeBreakoutLongCondition and not fakeBreakoutLongTriggered
     fakeBreakoutLongEntryTime := getCurrentTimeString()
+    
+    // Calculate position sizing with ATR-based risk management
+    [quantity, riskAmount] = calculatePositionSize(fakeBreakoutLongEntry, fakeBreakoutLongStop, "FAKE_BREAKOUT")
+    
     labelText = "FAKE BREAKDOWN LONG"
     labelY = getLabelY(low, false, "WHIPSAW")
-    fakeBreakoutLongLabel := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Fake Breakdown: After consolidation and multiple rejections, price faked breakdown below ORL then reversed sharply upward, trapping bears. Entry: Close at reversal candle. SL: Always ORL level (fake breakdown reversal point). Target: ORH/ORL range distance or nearest R1/R2/R3 pivot above entry.")
+    tooltipText = "FAKE BREAKDOWN LONG SIGNAL\nEntry Time: " + fakeBreakoutLongEntryTime + "\nEntry: " + str.tostring(fakeBreakoutLongEntry, "#.##") + "\nStop Loss: " + str.tostring(fakeBreakoutLongStop, "#.##") + "\nTarget: " + str.tostring(fakeBreakoutLongTarget, "#.##") + "\nStrategy: After consolidation and multiple rejections, price faked breakdown below ORL then reversed sharply upward, trapping bears."
+    fakeBreakoutLongLabel := label.new(bar_index, labelY, labelText, color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.green, width=1, style=line.style_dashed)
+    
+    // Check if position is allowed
+    if isPositionAllowed(riskAmount)
+        // Update position tracking
+        [newPositions, newExposure] = getUpdatedPositionTracking(riskAmount, true)
+        currentPositions := newPositions
+        currentExposure := newExposure
+        
+        // Add to trade table with position sizing
+        addTradeToTable("FAKE BREAKDOWN LONG", fakeBreakoutLongEntryTime, fakeBreakoutLongEntry, fakeBreakoutLongStop, fakeBreakoutLongTarget, quantity, riskAmount, "Active", 0.0, bar_index)
+    
     fakeBreakoutLongTriggered := true
 
 // Fake Breakout Short Signals (Consolidation + Fake Breakout = Sharp Move Down)
 if showWhipsawSignals and shouldShowSignals() and fakeBreakoutShortCondition and not fakeBreakoutShortTriggered
     fakeBreakoutShortEntryTime := getCurrentTimeString()
+    
+    // Calculate position sizing with ATR-based risk management
+    [quantity, riskAmount] = calculatePositionSize(fakeBreakoutShortEntry, fakeBreakoutShortStop, "FAKE_BREAKOUT")
+    
     labelText = "FAKE BREAKOUT SHORT"
     labelY = getLabelY(high, true, "WHIPSAW")
-    fakeBreakoutShortLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Fake Breakout Short: After consolidation and multiple rejections, price faked breakout above ORH then reversed sharply downward, trapping bulls. Entry: Close at reversal candle. SL: Always ORH level (fake breakout reversal point). Target: ORH/ORL range distance or nearest S1/S2/S3 pivot below entry.")
+    tooltipText = "FAKE BREAKOUT SHORT SIGNAL\nEntry Time: " + fakeBreakoutShortEntryTime + "\nEntry: " + str.tostring(fakeBreakoutShortEntry, "#.##") + "\nStop Loss: " + str.tostring(fakeBreakoutShortStop, "#.##") + "\nTarget: " + str.tostring(fakeBreakoutShortTarget, "#.##") + "\nStrategy: After consolidation and multiple rejections, price faked breakout above ORH then reversed sharply downward, trapping bulls."
+    fakeBreakoutShortLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
+    
+    // Check if position is allowed
+    if isPositionAllowed(riskAmount)
+        // Update position tracking
+        [newPositions, newExposure] = getUpdatedPositionTracking(riskAmount, true)
+        currentPositions := newPositions
+        currentExposure := newExposure
+        
+        // Add to trade table with position sizing
+        addTradeToTable("FAKE BREAKOUT SHORT", fakeBreakoutShortEntryTime, fakeBreakoutShortEntry, fakeBreakoutShortStop, fakeBreakoutShortTarget, quantity, riskAmount, "Active", 0.0, bar_index)
+    
     fakeBreakoutShortTriggered := true
 
 // Trade table is updated directly above (not as function call)
@@ -3205,21 +3286,48 @@ if array.size(tradeSignals) > 0 and array.size(tradeStatuses) > 0 and array.size
                     array.set(tradePnLs, i, pnl)
                     array.set(tradeExitTimes, i, getCurrentTimeString())
                     
-                    // Create visual exit marker on chart (if enabled)
-                    if showExitMarkers
-                        // Create exit marker with appropriate styling for EOD vs normal exits
-                        createExitMarker(signalType, exitStatus, isShortTrade, target, stop, pnl)
+                    // 🏷️ UPDATE EXISTING SIGNAL LABEL with exit information
+                    pnlText = pnl > 0 ? "+" + str.tostring(pnl, "#.#") : str.tostring(pnl, "#.#")
+                    exitIcon = if str.contains(exitStatus, "Target")
+                        "🎯"
+                    else if str.contains(exitStatus, "SL")
+                        "❌"
+                    else
+                        "🌅"
                     
+                    // Determine which label to update based on signal type
+                    labelToUpdate = if str.contains(signalType, "BOTH SIDES TRAP")
+                        bothSidesTrapLabel
+                    else
+                        switch signalType
+                            "ORB LONG" => orbLongLabel
+                            "ORB SHORT" => orbShortLabel  
+                            "BULL TRAP" => bullTrapLabel
+                            "BEAR TRAP" => bearTrapLabel
+                            "BULL TRAP C1" => bullTrapCase1Label
+                            "BULL TRAP C2" => bullTrapCase2Label
+                            "BEAR TRAP C1" => bearTrapCase1Label
+                            "BEAR TRAP C2" => bearTrapCase2Label
+                            "CONS LONG" => consBreakoutLongLabel
+                            "CONS SHORT" => consBreakoutShortLabel
+                            "CONS FAKE BO" => fakeBreakoutLongLabel
+                            "CONS FAKE BD" => fakeBreakoutShortLabel
+                            => na
+                    
+                    // Update the label if it exists
+                    if not na(labelToUpdate)
+                        originalText = label.get_text(labelToUpdate)
+                        updatedText = str.split(originalText, "\n")
+                        signalName = array.get(updatedText, 0)  // Get first line (signal name)
+                        newText = signalName + " " + exitIcon + "\n" + exitStatus + "\nTime: " + getCurrentTimeString()
+                        
+                        // Update label text and color based on exit result
+                        exitColor = str.contains(exitStatus, "Target") ? color.green : (str.contains(exitStatus, "SL") ? color.red : color.orange)
+                        label.set_text(labelToUpdate, newText)
+                        label.set_color(labelToUpdate, exitColor)
+
                     // 🎯 ON-SCREEN ALERT for EXIT
                     if showExitAlerts and enableOnScreenAlerts
-                        pnlText = pnl > 0 ? "+" + str.tostring(pnl, "#.#") : str.tostring(pnl, "#.#")
-                        exitIcon = if str.contains(exitStatus, "Target")
-                            "🎯"
-                        else if str.contains(exitStatus, "SL")
-                            "❌"
-                        else
-                            "🌅"
-                        
                         alertMsg = signalType + " EXIT " + exitIcon + "\n" + exitStatus + "\nExit: " + str.tostring(exitPrice, "#.##") + "\nP&L: " + pnlText + " pts\nTime: " + getCurrentTimeString()
                         alertPriority = str.contains(exitStatus, "Target") ? 3 : 2
                         exitColor = str.contains(exitStatus, "Target") ? color.green : (str.contains(exitStatus, "SL") ? color.red : color.orange)
@@ -3227,6 +3335,7 @@ if array.size(tradeSignals) > 0 and array.size(tradeStatuses) > 0 and array.size
                         array.push(alertMessages, alertMsg)
                         array.push(alertTypes, "EXIT")
                         array.push(alertBarIndexes, bar_index)
+                        array.push(alertTimes, getCurrentTimeString())
                         array.push(alertColors, exitColor)
                         array.push(alertPriorities, alertPriority)
                         array.push(alertIcons, exitIcon)
@@ -3240,34 +3349,22 @@ if array.size(tradeSignals) > 0 and array.size(tradeStatuses) > 0 and array.size
 // ON-SCREEN ALERT DISPLAY SYSTEM - PHASE 1
 // ============================================================================
 
-// Clear all alerts if toggle is activated
-if clearAllAlerts
-    alertMessages := array.new<string>()
-    alertTypes := array.new<string>()
-    alertBarIndexes := array.new<int>()
-    alertColors := array.new<color>()
-    alertPriorities := array.new<int>()
-    alertIcons := array.new<string>()
-    alertDismissed := array.new<bool>()
-    alertIDs := array.new<int>()
+// Note: Manual alert clearing removed for simplicity - alerts auto-clear daily
 
 // Clean expired alerts every bar with new dismissal logic
 if enableOnScreenAlerts and array.size(alertMessages) > 0
     newMessages = array.new<string>()
     newTypes = array.new<string>()
     newBarIndexes = array.new<int>()
+    newTimes = array.new<string>()
     newColors = array.new<color>()
     newPriorities = array.new<int>()
     newIcons = array.new<string>()
     newDismissed = array.new<bool>()
     newIDs = array.new<int>()
     
-    // Determine alert duration based on dismissal mode
-    effectiveDuration = switch manualDismissMode
-        "Quick Dismiss (5 bars)" => 5
-        "Extended Time (20 bars)" => 20
-        "Manual Reset" => 999  // Very long duration, user controls
-        => alertDuration  // Default: Auto-Expire Only
+    // Fixed alert duration
+    effectiveDuration = alertDuration  // Fixed: 8 bars
     
     for i = 0 to array.size(alertMessages) - 1
         alertBar = array.get(alertBarIndexes, i)
@@ -3284,6 +3381,7 @@ if enableOnScreenAlerts and array.size(alertMessages) > 0
             array.push(newMessages, array.get(alertMessages, i))
             array.push(newTypes, alertType)
             array.push(newBarIndexes, alertBar)
+            array.push(newTimes, array.get(alertTimes, i))
             array.push(newColors, array.get(alertColors, i))
             array.push(newPriorities, alertPriority)
             array.push(newIcons, array.get(alertIcons, i))
@@ -3293,6 +3391,7 @@ if enableOnScreenAlerts and array.size(alertMessages) > 0
     alertMessages := newMessages
     alertTypes := newTypes
     alertBarIndexes := newBarIndexes
+    alertTimes := newTimes
     alertColors := newColors
     alertPriorities := newPriorities
     alertIcons := newIcons
@@ -3301,29 +3400,15 @@ if enableOnScreenAlerts and array.size(alertMessages) > 0
 
 // Create alert display table
 if enableOnScreenAlerts and array.size(alertMessages) > 0
-    var alertTable = table.new(getAlertTablePosition(), 3, maxSimultaneousAlerts + 1, bgcolor=color.new(color.white, 95), border_width=1)
-    
-    // Clear table
-    table.clear(alertTable, 0, 0, 2, maxSimultaneousAlerts)
+    // Create table with enough rows for current alerts (recreate each time for dynamic sizing)
+    alertTable = table.new(getAlertTablePosition(), 2, array.size(alertMessages) + 1, bgcolor=color.new(color.white, 95), border_width=1)
     
     // Header with control info
-    table.cell(alertTable, 0, 0, "🔔 LIVE ALERTS", text_color=color.black, text_size=getAlertTextSize(), bgcolor=color.new(color.gray, 80))
-    table.cell(alertTable, 1, 0, "(" + str.tostring(array.size(alertMessages)) + ")", text_color=color.black, text_size=size.small, bgcolor=color.new(color.gray, 80))
+    table.cell(alertTable, 0, 0, "⏰ TIME", text_color=color.black, text_size=getAlertTextSize(), bgcolor=color.new(color.gray, 80))
+    table.cell(alertTable, 1, 0, "🔔 ALERT (" + str.tostring(array.size(alertMessages)) + ")", text_color=color.black, text_size=getAlertTextSize(), bgcolor=color.new(color.gray, 80))
     
-    // Control status
-    controlText = switch manualDismissMode
-        "Quick Dismiss (5 bars)" => "⚡ Quick"
-        "Extended Time (20 bars)" => "⏰ Extended"
-        "Manual Reset" => "🔒 Manual"
-        => "⏱️ Auto"
-    
-    if priorityOnlyMode
-        controlText := controlText + " | ⭐ Priority"
-    
-    table.cell(alertTable, 2, 0, controlText, text_color=color.black, text_size=size.tiny, bgcolor=color.new(color.gray, 80), tooltip="Current alert control mode. Use settings to change.")
-    
-    // Display alerts (most recent first, limited by maxSimultaneousAlerts)
-    alertsToShow = math.min(array.size(alertMessages), maxSimultaneousAlerts)
+    // Display all alerts (most recent first)
+    alertsToShow = array.size(alertMessages)
     
     for i = 0 to alertsToShow - 1
         if i < array.size(alertMessages)
@@ -3336,23 +3421,28 @@ if enableOnScreenAlerts and array.size(alertMessages) > 0
             alertAge = bar_index - alertBar
             alertPriority = array.get(alertPriorities, alertIndex)
             
-            // Apply flashing effect for new alerts
-            isFlashing = enableFlashing and alertAge <= flashDuration
-            currentColor = isFlashing and (bar_index % 2 == 0) ? color.new(alertColor, 20) : color.new(alertColor, alertTransparency)
+            // Solid color (no flashing)
+            currentColor = color.new(alertColor, alertTransparency)
             
-            // Display alert with age indicator
-            table.cell(alertTable, 0, i + 1, alertIcon, text_color=color.white, text_size=getAlertTextSize(), bgcolor=currentColor)
-            
-            // Alert message with age info
+            // Display time and alert message
+            alertTime = array.get(alertTimes, alertIndex)
             ageText = str.tostring(alertAge) + " bars ago"
             priorityText = alertPriority >= 3 ? " ⭐" : ""
-            cellTooltip = "Alert age: " + ageText + priorityText + "\nMode: " + manualDismissMode
-            table.cell(alertTable, 1, i + 1, alertMsg, text_color=color.white, text_size=getAlertTextSize(), bgcolor=currentColor, tooltip=cellTooltip)
+            cellTooltip = "Alert time: " + alertTime + "\nAge: " + ageText + priorityText + "\nMode: Auto-expire"
             
-            // Age and priority indicator with matching alert color
-            // Use the same color logic as the main alert cell
-            ageColor = isFlashing and (bar_index % 2 == 0) ? color.new(alertColor, 20) : color.new(alertColor, alertTransparency)
-            table.cell(alertTable, 2, i + 1, ageText + priorityText, text_color=color.white, text_size=size.tiny, bgcolor=ageColor)
+            // Time column
+            table.cell(alertTable, 0, i + 1, alertTime, text_color=color.white, text_size=getAlertTextSize(), bgcolor=currentColor)
+            
+            // Alert message column
+            alertWithIcon = alertIcon + " " + alertMsg + priorityText
+            table.cell(alertTable, 1, i + 1, alertWithIcon, text_color=color.white, text_size=getAlertTextSize(), bgcolor=currentColor, tooltip=cellTooltip)
+
+// ============================================================================
+// STRATEGY EXECUTION - ACTUAL TRADE ENTRIES AND EXITS
+// ============================================================================
+
+// Note: Strategy execution disabled to prevent TradingView's automatic exit markers
+// All signal analysis and tracking still works via trade table and visual indicators
 
 // ============================================================================
 // ALERTS
@@ -3388,7 +3478,7 @@ alertcondition(whipsawShortCondition, "Whipsaw Short Entry", "Whipsaw Short Entr
 alertcondition(fakeBreakoutLongCondition, "Fake Breakdown Long", "Fake Breakdown Long Signal - Consolidation Reversal")
 alertcondition(fakeBreakoutShortCondition, "Fake Breakout Short", "Fake Breakout Short Signal - Consolidation Reversal")
 
-// Note: Exit alerts can be added by monitoring the exit status changes in dynamic labels
+
 
 // Consolidation Phase Alert
 alertcondition(consolidationPhase, "Consolidation Phase", "Consolidation Phase Detected - Multiple Rejections at ORH/ORL")

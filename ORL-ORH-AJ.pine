@@ -1,0 +1,345 @@
+//@version=5
+indicator(title="ORL/ORH v1", overlay=true,max_lines_count = 500)
+
+
+// General User Inputs 
+//==============================================================================
+// Set the date range
+startDate = input.int(title='Start Date', defval=1, minval=1, maxval=31, group='General User Inputs')
+startMonth = input.int(title='Start Month', defval=1, minval=1, maxval=12, group='General User Inputs')
+startYear = input.int(title='Start Year', defval=2023, minval=1970, maxval=2100, group='General User Inputs')
+
+endDate = input.int(title='End Date', defval=31, minval=1, maxval=31, group='General User Inputs')
+endMonth = input.int(title='End Month', defval=12, minval=1, maxval=12, group='General User Inputs')
+endYear = input.int(title='End Year', defval=2023, minval=1970, maxval=2100, group='General User Inputs')
+// Look if the current_close time of the current bar falls inside the date range
+inDateRange = time >= timestamp(syminfo.timezone, startYear, startMonth, startDate, 0, 0) and time < timestamp(syminfo.timezone, endYear, endMonth, endDate, 0, 0)
+date_range = input.bool(false, title='Use the date range above to mark the Candlestick Setups?', group='General User Inputs')
+
+
+
+
+
+
+
+orhColor = input.color(color.red, "ORH COLOR")
+orlColor = input.color(color.green, "ORL COLOR")
+
+// tablo = table.new(position = position.top_right, columns = 2, rows = 2 , bgcolor = color.black, border_width = 2, frame_width=1,frame_color = color.white, border_color=color.white)
+// table.merge_cells(tablo, 0,0,0,1)
+//table.cell(tablo,0,0,text="1 - , 2- Buyers 3- Sellers",bgcolor = color.black, text_color = color.white)
+GetLow(condition, series=low) =>
+    var bool lowFound = na
+    var line lowLine = na
+    var lowBar = 0
+    if(condition)
+        lowFound := false        
+        lowBar := 0
+         
+    var float lowestValueSince = na
+    if (condition or series < lowestValueSince) and lowFound == false
+        lowestValueSince := series
+        lowBar := lowBar + 1
+
+    if ( not condition and lowestValueSince < series and lowFound == false)
+        lowFound := true
+         
+    lowBar
+GetHigh(condition, series=high) =>
+    var float highestValueSince = na
+    var bool highFound = na
+    var line highLine = na
+    var highBar = 0
+    //var barCount = 0
+    if(condition)
+        highFound := false
+        highBar := 0
+    if condition or series > highestValueSince and highFound == false
+        highestValueSince := series
+        highBar := highBar + 1
+
+    if ( not condition and highestValueSince > series and highFound == false)
+        highFound := true
+    
+    highBar
+GetCount(condition) =>    
+    var barCount = 0
+    if(condition)
+        barCount := 0   
+    barCount := barCount + 1
+    barCount
+
+// GetLowestSince() returns the lowest value of the given series
+// since the most recent occurrence of the specified condition.
+// Returns 'na' when that condition has not happened yet, or when
+// the series was 'na' when the condition occurred.
+GetLowestSince(condition, series=low) =>
+    var bool lowFound = na
+    var line lowLine = na
+    
+    if(condition)
+        lowFound := false
+        line.set_x2(lowLine, bar_index)
+        line.set_extend(lowLine, extend.none)  
+        
+         
+    var float lowestValueSince = na
+    if (condition or series < lowestValueSince) and lowFound == false
+        lowestValueSince := series
+        
+    if ( not condition and lowestValueSince < series and lowFound == false)
+        lowFound := true
+        
+        lowLine := line.new(x1=bar_index[1], y1=low[1], x2=bar_index[1], y2=low[1], extend=extend.right, color= orhColor)
+        if not na(lowLine) and line.get_x2(lowLine) != bar_index
+            line.set_x2(lowLine, bar_index)
+    lowestValueSince
+
+
+
+// GetHighestSince() returns the highest value of the given series
+// since the most recent occurrence of the specified condition.
+// Returns 'na' when that condition has not happened yet, or when
+// the series was 'na' when the condition occurred.
+GetHighestSince(condition, series=high) =>
+    var float highestValueSince = na
+    var bool highFound = na
+    var line highLine = na
+    if(condition)
+        highFound := false
+        line.set_x2(highLine, bar_index)
+        line.set_extend(highLine, extend.none)
+    if condition or series > highestValueSince and highFound == false
+        highestValueSince := series
+    if ( not condition and highestValueSince > series and highFound == false)
+        highFound := true
+        highLine := line.new(x1=bar_index[1], y1=high[1], x2=bar_index[1], y2=high[1], extend=extend.right, color=orlColor)
+        if not na(highLine) and line.get_x2(highLine) != bar_index
+            line.set_x2(highLine, bar_index)
+    highestValueSince
+
+
+
+
+newday = ta.change(time("D"))
+
+
+// Configure the session with inputs
+session  = "0915-1530"//, title="Trading Session")
+var hh = 0.0
+var ll = 0.0
+var lowBar = 0
+var highBar = 0
+var barCount =0
+
+
+
+
+if not(date_range == true and inDateRange == false)  // Plot only if the bar is in date range, or the feature has been turned off 
+    hh := GetHighestSince(newday)
+    ll := GetLowestSince(newday)
+    lowBar := GetLow(newday)
+    highBar := GetHigh(newday)
+    //barCount := GetCount(newday)
+
+//create a function to check the details of ORH/ORL Rotation..
+
+
+
+newWeek = ta.change(time("M"))
+
+var hhWeek = 0.0
+var llWeek = 0.0
+
+
+higher_timeframe_high = request.security(syminfo.tickerid, "1D", high[1], gaps= barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+higher_timeframe_low = request.security(syminfo.tickerid, "1D", low[1], gaps= barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+if timeframe.isdaily and not(date_range == true and inDateRange == false)
+    hhWeek := GetHighestSince(newWeek)
+    llWeek := GetLowestSince(newWeek)
+    lowBar := GetLow(newday)
+    highBar := GetHigh(newday)
+    barCount := GetCount(newday)
+
+
+plotchar(lowBar, "week", char = "")
+plotchar(highBar, "week", char = "")
+plotchar(ll, "week", char = "")
+plotchar(hh, "week", char = "")
+plotchar(barCount, "week", char = "")
+//weeklyHigh = ta.highestbars()
+
+trigCon =  high[2] > high[1] and high > high[1] //and (low[2] > low[1])
+lowtrigCon = low[2] < low[1] and low[1] > low //and high[2] > high[1]
+var checkHigh = false
+var checkLow = false
+if newday
+    checkHigh := false
+    checkLow := false
+con = if (hh == hh[1] and checkHigh == false)
+    checkHigh := true
+    true
+else 
+    false
+
+lowcon = if (ll == ll[1] and checkLow == false)
+    checkLow := true
+    true
+else
+    false
+
+
+confirmORH = con[1]
+confirmORL = lowcon[1]
+
+plotchar(confirmORH, "week", char = "")
+plotchar(confirmORL, "week", char = "")
+
+checkORLORHBreakDown(hh, ll, barCount, confirmORH, confirmORL) =>
+    var retValue =0 
+    var buyCandle = false
+    var sellCandle = false
+    var lowTouch = false
+    var highTouch = false
+    if newday
+        retValue := 0
+        lowTouch := false
+        highTouch := false
+        buyCandle := false
+        sellCandle := false
+    if (confirmORH == true and confirmORL == true)
+        // table.cell(tablo,0,1,text="1",bgcolor = color.black, text_color = color.white)
+        //retValue := 1
+        lowTouch := true
+        highTouch := true
+
+        retValue := open[2] > close[2] ? 4 : open[2] < close[2] ? 1 : 0 
+        //xx = ta.valuewhen(buyBar, bar_index,0)
+        if not(date_range == true and inDateRange == false)  // Plot only if the bar is in date range, or the feature has been turned off 
+            oe=label.new(bar_index, (retValue == 1 or retValue == 2 ? hh : ll), '' + str.tostring(retValue == 1 or retValue == 2 ? "OR CONTROL = BUYERS" : retValue == 3 or retValue == 4 ? "OR CONTROL = SELLERS" : "" ),textcolor= (retValue == 1 or retValue == 2 ? color.green : color.red), style=label.style_none, color=color.black)
+    //label.delete(oe[1]) 
+    else if (confirmORH == true and lowTouch == true)
+        
+        retValue := 2
+        if not(date_range == true and inDateRange == false)  // Plot only if the bar is in date range, or the feature has been turned off 
+            oe1=label.new(bar_index, (retValue == 1 or retValue == 2 ? hh : ll), '' + str.tostring(retValue == 1 or retValue == 2 ? "OR CONTROL = BUYERS" : retValue == 3 or retValue == 4 ? "OR CONTROL = SELLERS" : "" ),textcolor= (retValue == 1 or retValue == 2 ? color.green : color.red), style=label.style_none, color=color.black)
+    else if (confirmORL == true and highTouch == true)
+        // table.clear(tablo,0,1)
+        // table.cell(tablo,0,1,text="3",bgcolor = color.black, text_color = color.white)
+        retValue := 3
+        if not(date_range == true and inDateRange == false)  // Plot only if the bar is in date range, or the feature has been turned off 
+            oe2=label.new(bar_index, (retValue == 1 or retValue == 2 ? hh : ll), '' + str.tostring(retValue == 1 or retValue == 2 ? "OR CONTROL = BUYERS" : retValue == 3 or retValue == 4 ? "OR CONTROL = SELLERS" : "" ),textcolor= (retValue == 1 or retValue == 2 ? color.green : color.red), style=label.style_none, color=color.black)
+    else if (confirmORH == true)
+        highTouch := true
+    else if (confirmORL == true)
+        lowTouch := true
+    
+    // if retValue == 1
+    //     oe=label.new(bar_index, ll, '' + str.tostring(retValue == 1 or retValue == 2 ? "BUY - ORH" : retValue == 3 or retValue == 4 ? "SELL - ORH" : "" ),textcolor=color.green, style=label.style_none, color=color.black)
+    // else if retValue == 2
+    //     oe1=label.new(bar_index, ll, '' + str.tostring(retValue == 1 or retValue == 2 ? "BUY - ORH" : retValue == 3 or retValue == 4 ? "SELL - ORH" : "" ),textcolor=color.green, style=label.style_none, color=color.black)
+    // if retValue == 3
+    //     oe2=label.new(bar_index, hh, '' + str.tostring(retValue == 1 or retValue == 2 ? "BUY - ORH" : retValue == 3 or retValue == 4 ? "SELL - ORH" : "" ),textcolor=color.red, style=label.style_none, color=color.black)
+    // else if retValue == 4
+    //     oe3=label.new(bar_index, hh, '' + str.tostring(retValue == 1 or retValue == 2 ? "BUY - ORH" : retValue == 3 or retValue == 4 ? "SELL - ORH" : "" ),textcolor=color.red, style=label.style_none, color=color.black)
+
+    if retValue == 1 and close > hh and buyCandle == false
+        buyCandle := true
+        sellCandle := false
+    else if retValue == 1 and close < ll and sellCandle == false
+        sellCandle := true
+        buyCandle := false
+        // sellCandle := false
+    else if retValue == 2 and close > hh and buyCandle == false
+        buyCandle := true
+        sellCandle := false
+    else if retValue == 2 and close < ll and sellCandle == false
+        sellCandle := true
+        buyCandle := false
+    else if retValue == 3 and close > hh and buyCandle == false
+        buyCandle := true
+        sellCandle := false
+    else if retValue == 3 and close < ll and sellCandle == false
+        sellCandle := true
+        buyCandle := false
+    else if retValue == 4 and close > hh and buyCandle == false
+        buyCandle := true
+        sellCandle := false
+    else if retValue == 4 and close < ll and sellCandle == false
+        sellCandle := true
+        buyCandle := false
+    
+    [retValue, buyCandle, sellCandle]
+
+
+[temp, buyCandle, sellCandle] = checkORLORHBreakDown(hh, ll, barCount, confirmORH, confirmORL)
+
+
+
+
+plotchar(temp, "1,2 - BUYERS \n 3,4 - Sellers", char = "")
+
+
+var string str = na
+
+// if newday
+//     str := na
+strValue = if temp == 1 and buyCandle == true
+    str := "ORH BUY"
+else if temp == 1 and sellCandle == true
+    str := "ORH SELL"
+else if temp == 2 and buyCandle == true
+    str := "ORH BUY"
+else if temp == 2 and sellCandle == true
+    str := "ORH SELL"
+else if temp == 3 and buyCandle == true
+    str := "ORH BUY"
+else if temp == 3 and sellCandle == true
+    str := "ORH SELL"
+else if temp == 4 and buyCandle == true
+    str := "ORH BUY"
+else if temp == 4 and sellCandle == true
+    str := "ORH SELL"
+
+
+// table.cell(tablo,0,1,text=str.tostring(temp),bgcolor = color.black, text_color = color.white)
+// table.cell(tablo,1,1,text=(buyCandle ? "ORH BUY" : sellCandle ? "ORH SELL": ""),bgcolor = color.black, text_color = color.white)
+buyBar = if buyCandle[1] == false and buyCandle == true
+    true
+else 
+    false
+
+sellBar = if sellCandle[1] == false and sellCandle == true
+    true
+else 
+    false
+
+if sellBar
+    highValue = ta.valuewhen(sellBar, high, 0)
+    barValue = ta.valuewhen(sellBar, bar_index, 0)
+    if temp == 1 or temp == 2
+        oe4=label.new(barValue, highValue, 'SELL' ,textcolor=  color.red, style=label.style_none, color=color.black, textalign = text.align_left, yloc = yloc.abovebar)
+if buyBar
+    lowValue = ta.valuewhen(buyBar, low, 0)
+    barValue = ta.valuewhen(buyBar, bar_index, 0)
+    if temp == 3 or temp == 4
+        oe5=label.new(barValue, lowValue, 'BUY',textcolor=  color.green , style=label.style_none, color=color.black, textalign = text.align_left, yloc = yloc.belowbar)
+// if buyBar
+//     xx = ta.valuewhen(buyBar, bar_index,0)
+//     oe=label.new(xx, ll, '' + str.tostring(temp == 1 or temp == 2 ? "BUY - ORH" : temp == 3 or temp == 4 ? "SELL - ORH" : "" ),textcolor=color.green, style=label.style_none, color=color.black)
+//     //label.delete(oe[1])
+
+// if sellBar
+//     xsell = ta.valuewhen(sellBar, bar_index,0)
+//     osell=label.new(xsell, hh, ''+ str.tostring(temp == 1 or temp == 2 ? "BUY - ORH" : temp == 3 or temp == 4 ? "SELL - ORH" : "" ),textcolor=color.red, style=label.style_none, color=color.black)
+//     //label.delete(osell[1])
+
+plotshape(buyBar, "HH", style= shape.circle, color = color.green , location = location.belowbar , text = "") //hh < close and 
+plotshape(sellBar, "LL", style= shape.circle, color = color.red , location = location.abovebar, text = "" )//ll > close and 
+
+
+
+//plot(hh)
+//plot(ll)
+//lower_time_frame = '1'
+//[l_open,l_high,l_low,l_close]  = request.security_lower_tf(syminfo.tickerid, lower_time_frame,[open,high,low,close])
