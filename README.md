@@ -1,4 +1,4 @@
-# AJ Intraday ORB Trading Strategy
+# Intraday ORB Trading Strategy
 
 ## Overview
 A sophisticated intraday trading strategy for Nifty/Bank Nifty futures using Opening Range Breakout (ORB) methodology with advanced pattern recognition and institutional-quality risk management.
