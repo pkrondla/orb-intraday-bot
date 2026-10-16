@@ -31,25 +31,28 @@ def build_readonly_client(settings: Settings) -> ReadOnlyGrowwClient:
 
 
 def build_trading_client(settings: Settings) -> GrowwTradingClient:
-    """Trading client. Refuses to build without a separate trading key."""
+    """Trading client. Uses GROWW_TRADING_TOTP_* if set, otherwise the same GROWW_TOTP_* key."""
     token = settings.groww_trading_totp_token.get_secret_value()
     secret = settings.groww_trading_totp_secret.get_secret_value()
     if not token or not secret:
+        token = settings.groww_totp_token.get_secret_value()
+        secret = settings.groww_totp_secret.get_secret_value()
+    if not token or not secret:
         raise MissingCredentialsError(
-            "Set GROWW_TRADING_TOTP_TOKEN and GROWW_TRADING_TOTP_SECRET for live trading."
+            "Set GROWW_TOTP_TOKEN and GROWW_TOTP_SECRET for live trading "
+            "(or GROWW_TRADING_TOTP_* to override)."
         )
-    # Refuse to reuse the data-only key.
-    if (
-        token == settings.groww_totp_token.get_secret_value()
+    # Share the data token cache when using the same key so TOTP is not fetched twice.
+    cache = (
+        settings.data_dir / "groww_token.json"
+        if token == settings.groww_totp_token.get_secret_value()
         and secret == settings.groww_totp_secret.get_secret_value()
-    ):
-        raise MissingCredentialsError(
-            "Trading TOTP key must be different from the data-only GROWW_TOTP_* key."
-        )
+        else settings.data_dir / "groww_trading_token.json"
+    )
     manager = TokenManager(
         token,
         secret,
-        settings.data_dir / "groww_trading_token.json",
+        cache,
         cooldown_sec=settings.token_cooldown_sec,
     )
     return GrowwTradingClient(manager)

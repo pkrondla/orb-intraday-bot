@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # paper | shadow | live. Live still needs LIVE_ARMED and a daily Telegram /arm (see M5).
     live_mode: Literal["paper", "shadow", "live"] = Field(default="paper", alias="LIVE_MODE")
     live_armed: bool = Field(default=False, alias="LIVE_ARMED")
-    # Separate Groww trading key (never reuse the data-only key). Required only for live mode.
+    # Optional override for live trading. Empty = reuse GROWW_TOTP_TOKEN / GROWW_TOTP_SECRET.
     groww_trading_totp_token: SecretStr = Field(
         default=SecretStr(""), alias="GROWW_TRADING_TOTP_TOKEN"
     )
@@ -51,10 +51,15 @@ class Settings(BaseSettings):
     )
 
     def has_trading_credentials(self) -> bool:
-        return bool(
+        trading = (
             self.groww_trading_totp_token.get_secret_value()
             and self.groww_trading_totp_secret.get_secret_value()
         )
+        shared = (
+            self.groww_totp_token.get_secret_value()
+            and self.groww_totp_secret.get_secret_value()
+        )
+        return bool(trading or shared)
 
     @field_validator("live_trading")
     @classmethod

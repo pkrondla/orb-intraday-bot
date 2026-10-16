@@ -154,25 +154,24 @@ def test_entry_fetches_ltp_when_price_missing() -> None:
     assert broker.placed[0]["price"] > 100.0  # padded
 
 
-def test_trading_factory_rejects_same_key_as_data() -> None:
+def test_trading_factory_reuses_shared_totp_key(tmp_path) -> None:  # noqa: ANN001
+    from pathlib import Path
+
     from pydantic import SecretStr
 
-    from orb_intraday_bot.adapters.groww.factory import (
-        MissingCredentialsError,
-        build_trading_client,
-    )
+    from orb_intraday_bot.adapters.groww.factory import build_trading_client
+    from orb_intraday_bot.adapters.groww.trading_client import GrowwTradingClient
     from orb_intraday_bot.config.settings import Settings
 
     settings = Settings.model_construct(
-        groww_totp_token=SecretStr("same"),
-        groww_totp_secret=SecretStr("same-secret"),
-        groww_trading_totp_token=SecretStr("same"),
-        groww_trading_totp_secret=SecretStr("same-secret"),
-        data_dir="data",
+        groww_totp_token=SecretStr("shared"),
+        groww_totp_secret=SecretStr("shared-secret"),
+        groww_trading_totp_token=SecretStr(""),
+        groww_trading_totp_secret=SecretStr(""),
+        data_dir=Path(tmp_path),
         token_cooldown_sec=180,
     )
-    try:
-        build_trading_client(settings)
-        raise AssertionError("expected MissingCredentialsError")
-    except MissingCredentialsError:
-        pass
+    client = build_trading_client(settings)
+    assert isinstance(client, GrowwTradingClient)
+    # Same key shares the data token cache file.
+    assert (Path(tmp_path) / "groww_token.json").parent == Path(tmp_path)

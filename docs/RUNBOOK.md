@@ -52,12 +52,10 @@ while positions are open unless `force=true`.
 
 ## Rotate keys
 
-1. Create a new Groww data-only (or trading) API key.
-2. Update GitHub Secrets (`GROWW_TOTP_*` or `GROWW_TRADING_TOTP_*`).
+1. Create a new Groww API key (or keep using the existing `GROWW_TOTP_*` key).
+2. Update GitHub Secrets (`GROWW_TOTP_*`; optionally `GROWW_TRADING_TOTP_*` to override).
 3. Redeploy (or edit `C:\orb-bot\.env` and `nssm restart OrbBot`).
 4. Revoke the old key in Groww.
-
-Never reuse the data-only key as the trading key. The factory refuses that.
 
 ## Staged rollout checklist
 

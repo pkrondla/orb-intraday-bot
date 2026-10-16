@@ -1,7 +1,7 @@
 """Capability-scoped Groww client that may place orders.
 
 This is the ONLY module outside tests that may call place_order / cancel_order /
-modify_order / create_smart_order. It is built only with a separate trading TOTP key.
+modify_order / create_smart_order. Built from GROWW_TOTP_* (or optional GROWW_TRADING_TOTP_*).
 The read-only client stays read-only and is used for all market data.
 """
 

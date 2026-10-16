@@ -1,6 +1,6 @@
 """Staged arming: paper -> shadow -> live.
 
-Live requires ALL of: LIVE_MODE=live, LIVE_ARMED=true, trading credentials present, and a
+Live requires ALL of: LIVE_MODE=live, LIVE_ARMED=true, Groww TOTP credentials present, and a
 daily Telegram `/arm <code>` confirmation. Anything missing falls back to paper and is reported.
 """
 

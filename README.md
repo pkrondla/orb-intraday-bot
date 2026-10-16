@@ -22,8 +22,8 @@ orb-bot summary [YYYY-MM-DD]        # trades and P&L from the database
 ```
 
 Deploy to the Windows EC2: see `docs/DEPLOY.md`. Ops runbook: `docs/RUNBOOK.md`.
-Live orders require `LIVE_MODE=live`, a separate trading key, `LIVE_ARMED=true`, and a daily
-Telegram `/arm <code>`; the default is paper.
+Live orders require `LIVE_MODE=live`, `LIVE_ARMED=true`, and a daily Telegram `/arm <code>`
+(uses the same `GROWW_TOTP_*` key unless you set `GROWW_TRADING_TOTP_*`); the default is paper.
 
 `python -m orb_intraday_bot <command>` works too. Tests: `python -m pytest`.
 

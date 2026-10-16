@@ -20,11 +20,11 @@ Already done if the Groww bot is deployed:
 |---|---|
 | `WINRM_PASSWORD` | Windows login password |
 | `GH_PAT` | PAT with `repo` read access (git clone/pull) |
-| `GROWW_TOTP_TOKEN` | Groww **data-only** API TOTP token |
-| `GROWW_TOTP_SECRET` | Groww data-only TOTP secret |
+| `GROWW_TOTP_TOKEN` | Groww API TOTP token (data and, by default, live trading) |
+| `GROWW_TOTP_SECRET` | Groww API TOTP secret |
 | `TELEGRAM_BOT_TOKEN` | New dedicated bot from @BotFather |
-| `GROWW_TRADING_TOTP_TOKEN` | (later, live) separate trading key |
-| `GROWW_TRADING_TOTP_SECRET` | (later, live) |
+| `GROWW_TRADING_TOTP_TOKEN` | Optional live override; leave unset to reuse `GROWW_TOTP_*` |
+| `GROWW_TRADING_TOTP_SECRET` | Optional live override |
 
 ### Variables
 
