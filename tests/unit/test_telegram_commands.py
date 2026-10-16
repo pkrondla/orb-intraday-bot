@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from orb_intraday_bot.runtime.telegram_commands import (
     CommandBus,
@@ -18,7 +19,11 @@ def test_parse_commands() -> None:
     assert parse_command("/flatten").kind is CommandKind.FLATTEN
     assert parse_command("/flatten ab12").kind is CommandKind.FLATTEN_CONFIRM
     assert parse_command("/flatten ab12").arg == "ab12"
-    assert parse_command("/arm dead").kind is CommandKind.ARM
+    assert parse_command("/stop").kind is CommandKind.STOP_TODAY
+    assert parse_command("/pause").kind is CommandKind.STOP_TODAY
+    assert parse_command("/start").kind is CommandKind.START_TODAY
+    assert parse_command("/resume").kind is CommandKind.START_TODAY
+    assert parse_command("/arm dead").kind is CommandKind.UNKNOWN      # no daily arm any more
     assert parse_command("hello").kind is CommandKind.UNKNOWN
 
 
@@ -30,13 +35,14 @@ def test_bus_flatten_confirm_is_case_insensitive() -> None:
     assert not bus.confirm_flatten(code)   # consumed
 
 
-def test_bus_arm_and_disarm() -> None:
+def test_bus_stop_is_per_day() -> None:
     bus = CommandBus()
-    code = bus.begin_arm()
-    assert bus.confirm_arm(code)
-    assert bus.armed_today
-    bus.disarm()
-    assert not bus.armed_today
+    day = date(2026, 10, 16)
+    assert not bus.is_stopped(day)
+    bus.stop_for(day)
+    assert bus.is_stopped(day) and not bus.is_stopped(date(2026, 10, 19))
+    bus.start_for(day)
+    assert not bus.is_stopped(day)
 
 
 def test_poller_ignores_unauthorized_chat() -> None:
@@ -94,4 +100,4 @@ def test_poller_queues_authorized_commands_and_handles_help() -> None:
     assert any("ORB bot commands" in r for r in replies)
     assert any("Confirm flatten" in r for r in replies)
     cmds = bus.drain()
-    assert [c.kind for c in cmds] == [CommandKind.PAUSE]
+    assert [c.kind for c in cmds] == [CommandKind.STOP_TODAY]

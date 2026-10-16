@@ -13,7 +13,8 @@ Dry run and live order path. Real orders stay off unless `DRY_RUN=false`.
 ### Added
 - `DRY_RUN` setting (default `true`). With it true the bot runs exactly as live trading and only
   the broker order call is skipped (`DryRunVenue` fills against real bid/ask quotes). `DRY_RUN=false`
-  sends real orders and needs `LIVE_MODE=live`, `LIVE_ARMED=true`, credentials and the daily `/arm`.
+  sends real orders and needs `LIVE_MODE=live`, `LIVE_ARMED=true`, and credentials. There is no daily
+  confirmation.
 - `runtime/executor.py` (`LiveExecutor`): pre-trade risk gate (limits, spread, price sanity,
   funds), entry limit order with a 10 s timeout then cancel (never chased), partial fills sold
   back, broker-side protective stop kept in step with the position, exits (limit just under the
@@ -28,9 +29,12 @@ Dry run and live order path. Real orders stay off unless `DRY_RUN=false`.
 
 ### Changed
 - `LIVE_TRADING` is removed; `DRY_RUN` replaces it. The startup guard now refuses
-  `DRY_RUN=false` unless live mode, armed, and credentialed.
-- `/arm` is valid for one trading day only, and operator commands (`/arm`, `/pause`,
-  `/flatten`) are now also handled while a session is running (before, only between sessions).
+  `DRY_RUN=false` unless live mode, `LIVE_ARMED` and credentials.
+- No daily `/arm`. With the settings on, every market day trades. New `/stop` (no new entries for
+  the rest of today, exits still managed) and `/start` (allow entries again today); a stop applies
+  to that day only and survives a restart (`data/TRADING_OFF`). `/pause` and `/resume` are aliases.
+  `/arm` and `/disarm` are gone. Operator commands (`/stop`, `/start`, `/flatten`) are now also
+  handled while a session is running (before, only between sessions).
 - A flatten that cannot sell is retried on every poll instead of being marked done. A session
   that ends with an open position raises a CRITICAL alert.
 

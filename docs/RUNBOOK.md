@@ -1,7 +1,8 @@
 # ORB bot runbook
 
-Paper-first. Orders (dry run or real) only happen on a day you arm with `/arm`; real orders also
-need `DRY_RUN=false`.
+Paper-first. With `LIVE_MODE=live` and `LIVE_ARMED=true` the bot trades every market day on its
+own (dry run or real). Real orders also need `DRY_RUN=false`. Send `/stop` to skip the rest of a
+day and `/start` to allow it again.
 
 ## Daily (unattended)
 
@@ -13,7 +14,9 @@ NSSM services on the EC2 host:
 | `OrbBotWatch` | `orb-bot watchdog` | Telegram alert if the heartbeat goes silent (never trades) |
 
 Telegram commands (authorized chat only): `/status` `/today` `/positions` `/report`
-`/pause` `/resume` `/flatten` `/arm` `/disarm` `/help`.
+`/stop` `/start` `/flatten` `/help`. `/stop` means no new entries for the rest of today (open
+positions are still managed; `/flatten` closes them). It ends by itself at midnight and survives a
+restart. `/start` allows entries again the same day. `/pause` and `/resume` are the same commands.
 
 ## Restart
 
@@ -64,12 +67,12 @@ while positions are open unless `force=true`.
 |---|---|---|
 | 1. Paper on EC2 | `LIVE_MODE=paper` (default), run 4 weeks | `FORWARD_TEST.md` operational criteria |
 | 2. Shadow | `LIVE_MODE=shadow` | Shadow fills vs modelled within tolerance |
-| 3. Dry run on the live market | `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=true`, daily `/arm <code>` | Two or more weeks of clean sessions (see below) |
+| 3. Dry run on the live market | `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=true` | Two or more weeks of clean sessions (see below) |
 | 4. Live 1 lot | Same, with `DRY_RUN=false` | Daily review; risk limits in `config/risk.yaml` |
 | 5. Scale | Raise `max_lots_per_trade` only by changing `config/risk.yaml` and redeploying | Written go/no-go |
 
-Orders, dry or real, still require a Telegram `/arm <code>` every morning before 09:15. The arm
-lasts for that day only. Without it the bot falls back to paper and says so on Telegram.
+There is no morning confirmation: once the settings are on, every market day trades. If
+`LIVE_ARMED` is false or credentials are missing the bot runs as paper and says so on Telegram.
 
 ## Dry run and live: what the bot does
 

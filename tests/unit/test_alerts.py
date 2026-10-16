@@ -49,14 +49,12 @@ def test_lifecycle_alerts() -> None:
     alerts.resumed()
     alerts.flatten_requested()
     alerts.kill_switch("daily loss")
-    alerts.armed("live")
-    alerts.disarmed()
     alerts.deployed("0.9.0", "deadbeef", "paper")
     alerts.silent(180, "running", "no heartbeat")
     alerts.shutdown("idle")
     joined = notes.joined()
     for word in (
         "STARTED", "banner", "PAUSED", "RESUMED", "FLATTEN", "KILL SWITCH",
-        "ARMED", "DISARMED", "DEPLOYED", "SILENT", "STOPPED",
+        "DEPLOYED", "SILENT", "STOPPED",
     ):
         assert word in joined

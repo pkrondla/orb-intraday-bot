@@ -431,7 +431,7 @@ class LiveRunner:
             if now >= target:
                 return
             if self._on_idle is not None:
-                self._on_idle()          # operator commands (/arm, /pause, /flatten) mid-session
+                self._on_idle()          # operator commands (/stop, /start, /flatten) mid-session
             self._poll_ticks()
             remaining = (target - self._clock.now()).total_seconds()
             if remaining <= 0:

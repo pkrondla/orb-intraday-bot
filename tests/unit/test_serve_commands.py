@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from orb_intraday_bot.app.context import AppContext
-from orb_intraday_bot.app.serve import ServeState, drain_commands, handle_command
+from orb_intraday_bot.app.serve import ServeState, drain_commands, handle_command, read_stopped_day
 from orb_intraday_bot.config.settings import Settings, StrategyConfig
 from orb_intraday_bot.core.clock import IST, FixedClock
 from orb_intraday_bot.execution.models import OrderIntent, OrderLeg, OrderStatus
@@ -36,7 +36,7 @@ def _ctx(tmp_path: Path) -> AppContext:
     return AppContext(settings, StrategyConfig(), tmp_path)
 
 
-def test_handle_status_pause_resume_arm_disarm(tmp_path: Path) -> None:
+def test_handle_status_stop_and_start(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     write_heartbeat(
         tmp_path / "heartbeat.json",
@@ -59,33 +59,25 @@ def test_handle_status_pause_resume_arm_disarm(tmp_path: Path) -> None:
     assert replies and "running" in replies[-1].lower() or replies
 
     handle_command(
-        Command(CommandKind.PAUSE), ctx=ctx, alerts=alerts, state=state,
+        Command(CommandKind.STOP_TODAY), ctx=ctx, alerts=alerts, state=state,
         reply=replies.append, now=now,
     )
-    assert state.bus.paused
+    assert state.bus.is_stopped(now.date())
+    assert "stopped for 2026-10-16" in replies[-1]
+    assert read_stopped_day(tmp_path) == now.date()             # survives a restart
+    assert not state.bus.is_stopped(date(2026, 10, 19))         # but only for that day
     handle_command(
-        Command(CommandKind.RESUME), ctx=ctx, alerts=alerts, state=state,
+        Command(CommandKind.START_TODAY), ctx=ctx, alerts=alerts, state=state,
         reply=replies.append, now=now,
     )
-    assert not state.bus.paused
-
+    assert not state.bus.is_stopped(now.date())
+    assert "started for 2026-10-16" in replies[-1]
+    assert read_stopped_day(tmp_path) is None
     handle_command(
-        Command(CommandKind.ARM, arg=""), ctx=ctx, alerts=alerts, state=state,
+        Command(CommandKind.START_TODAY), ctx=ctx, alerts=alerts, state=state,
         reply=replies.append, now=now,
     )
-    code = state.bus.begin_arm()  # ensure path; previous issued a code via begin_arm inside
-    # Re-issue cleanly
-    code = state.bus.begin_arm()
-    handle_command(
-        Command(CommandKind.ARM, arg=code), ctx=ctx, alerts=alerts, state=state,
-        reply=replies.append, now=now,
-    )
-    assert state.bus.armed_today
-    handle_command(
-        Command(CommandKind.DISARM), ctx=ctx, alerts=alerts, state=state,
-        reply=replies.append, now=now,
-    )
-    assert not state.bus.armed_today
+    assert "not stopped" in replies[-1]
 
 
 def test_flatten_confirm_writes_marker(tmp_path: Path) -> None:

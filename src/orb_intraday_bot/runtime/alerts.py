@@ -53,23 +53,19 @@ class Alerts:
     def session_start(self, banner: str) -> None:
         self._notifier.send(banner)
 
-    def paused(self) -> None:
-        self._notifier.send("ORB bot PAUSED: no new entries. Open positions still managed.")
+    def paused(self, day: str = "today") -> None:
+        self._notifier.send(
+            f"ORB bot PAUSED for {day}: no new entries. Open positions still managed."
+        )
 
-    def resumed(self) -> None:
-        self._notifier.send("ORB bot RESUMED: new entries allowed again.")
+    def resumed(self, day: str = "today") -> None:
+        self._notifier.send(f"ORB bot RESUMED for {day}: new entries allowed again.")
 
     def flatten_requested(self) -> None:
         self._notifier.send("ORB bot FLATTEN: closing every open position this bot owns.")
 
     def kill_switch(self, detail: str) -> None:
         self._notifier.send(f"ORB bot KILL SWITCH: {detail}")
-
-    def armed(self, mode: str) -> None:
-        self._notifier.send(f"ORB bot ARMED for today (mode={mode}).")
-
-    def disarmed(self) -> None:
-        self._notifier.send("ORB bot DISARMED.")
 
     def deployed(self, version: str, sha: str, mode: str) -> None:
         self._notifier.send(f"ORB bot DEPLOYED v{version} ({sha[:8]})\nmode: {mode}")

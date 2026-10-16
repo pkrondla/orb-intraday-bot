@@ -30,11 +30,9 @@ _HELP = (
     "/today - today's trades and P&L\n"
     "/positions - open positions\n"
     "/report - forward-test statistics\n"
-    "/pause - stop opening new trades (exits still run)\n"
-    "/resume - allow new trades again\n"
+    "/stop - no new trades for the rest of today (exits still run); trading restarts tomorrow\n"
+    "/start - allow new trades again today\n"
     "/flatten - close everything (reply /flatten <code> to confirm)\n"
-    "/arm <code> - arm live trading for today (when LIVE_MODE=live); expires at midnight\n"
-    "/disarm - cancel today's arm\n"
     "/help - this list"
 )
 
@@ -44,12 +42,10 @@ class CommandKind(StrEnum):
     TODAY = "today"
     POSITIONS = "positions"
     REPORT = "report"
-    PAUSE = "pause"
-    RESUME = "resume"
+    STOP_TODAY = "stop_today"
+    START_TODAY = "start_today"
     FLATTEN = "flatten"
     FLATTEN_CONFIRM = "flatten_confirm"
-    ARM = "arm"
-    DISARM = "disarm"
     HELP = "help"
     UNKNOWN = "unknown"
 
@@ -80,13 +76,12 @@ def parse_command(text: str) -> Command:
         "today": CommandKind.TODAY,
         "positions": CommandKind.POSITIONS,
         "report": CommandKind.REPORT,
-        "pause": CommandKind.PAUSE,
-        "resume": CommandKind.RESUME,
+        "stop": CommandKind.STOP_TODAY,
+        "pause": CommandKind.STOP_TODAY,
+        "start": CommandKind.START_TODAY,
+        "resume": CommandKind.START_TODAY,
         "flatten": CommandKind.FLATTEN if not arg else CommandKind.FLATTEN_CONFIRM,
-        "arm": CommandKind.ARM,
-        "disarm": CommandKind.DISARM,
         "help": CommandKind.HELP,
-        "start": CommandKind.HELP,
     }
     kind = mapping.get(verb, CommandKind.UNKNOWN)
     return Command(kind=kind, arg=arg)
@@ -99,10 +94,9 @@ class CommandBus:
         self._queue: queue.Queue[Command] = queue.Queue()
         self._lock = threading.Lock()
         self._flatten_code: str | None = None
-        self._arm_code: str | None = None
-        self.paused = False
-        self.armed_today = False
-        self.armed_day: date | None = None
+        # The day (IST) on which the operator sent /stop. Trading is on by default every day and
+        # a stop expires by itself: it only ever applies to the day it names.
+        self.stopped_day: date | None = None
 
     def put(self, command: Command) -> None:
         self._queue.put(command)
@@ -129,32 +123,19 @@ class CommandBus:
                 self._flatten_code = None
             return ok
 
-    def begin_arm(self) -> str:
-        code = secrets.token_hex(2)
+    def stop_for(self, day: date) -> None:
         with self._lock:
-            self._arm_code = code
-        return code
+            self.stopped_day = day
 
-    def confirm_arm(self, code: str, day: date | None = None) -> bool:
-        """Accept the arm code. `day` is the trading day it is valid for (None = not tracked)."""
+    def start_for(self, day: date) -> None:
         with self._lock:
-            ok = bool(self._arm_code) and code.strip().lower() == self._arm_code
-            if ok:
-                self._arm_code = None
-                self.armed_today = True
-                self.armed_day = day
-            return ok
+            if self.stopped_day == day:
+                self.stopped_day = None
 
-    def is_armed(self, day: date) -> bool:
-        """True if /arm was confirmed for `day`. An arm never carries over to another day."""
+    def is_stopped(self, day: date) -> bool:
+        """True if the operator stopped trading for `day`. Never carries over to another day."""
         with self._lock:
-            return self.armed_today and (self.armed_day is None or self.armed_day == day)
-
-    def disarm(self) -> None:
-        with self._lock:
-            self._arm_code = None
-            self.armed_today = False
-            self.armed_day = None
+            return self.stopped_day == day
 
 
 def _urllib_get(url: str) -> bytes:  # pragma: no cover - network

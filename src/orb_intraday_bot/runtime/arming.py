@@ -1,7 +1,9 @@
 """Staged arming: paper -> shadow -> live, and whether the broker order step runs.
 
-Live requires ALL of: LIVE_MODE=live, LIVE_ARMED=true, Groww TOTP credentials present, and a
-daily Telegram `/arm <code>` confirmation. Anything missing falls back to paper and is reported.
+Live requires ALL of: LIVE_MODE=live, LIVE_ARMED=true and Groww TOTP credentials present.
+Anything missing falls back to paper and is reported. There is no daily confirmation: trading is
+on every market day, and the operator can switch a day off with Telegram `/stop` (and back on
+with `/start`).
 
 What actually happens to an entry is the `order_mode`:
 
@@ -9,7 +11,7 @@ What actually happens to an entry is the `order_mode`:
 - `dry_run`  the full live pipeline (risk gate, real bid/ask, order state machine, protective
              stop, exits, reconciliation, logs) with the broker order step skipped. `shadow`
              always runs this way, and so does `live` while DRY_RUN is true (the default).
-- `live`     the same pipeline, with real orders. Only when LIVE_MODE=live, armed, and
+- `live`     the same pipeline, with real orders. Only when LIVE_MODE=live, LIVE_ARMED=true and
              DRY_RUN=false.
 """
 
@@ -47,7 +49,6 @@ class ArmingDecision:
 def resolve_mode(
     settings: Settings,
     *,
-    armed_today: bool,
     trading_credentials_present: bool,
 ) -> ArmingDecision:
     requested: Mode = settings.live_mode
@@ -65,26 +66,20 @@ def resolve_mode(
         return ArmingDecision(
             "paper", "LIVE_MODE=live but trading credentials missing; falling back to paper", dry
         )
-    if not armed_today:
-        return ArmingDecision(
-            "paper",
-            "LIVE_MODE=live but not armed via Telegram /arm today; falling back to paper",
-            dry,
-        )
     if dry:
-        return ArmingDecision("live", "armed today; DRY_RUN=true, broker orders are skipped", dry)
-    return ArmingDecision("live", "armed for live trading today", dry)
+        return ArmingDecision("live", "DRY_RUN=true, broker orders are skipped", dry)
+    return ArmingDecision("live", "live trading", dry)
 
 
 def configured_mode_label(settings: Settings) -> str:
-    """What the settings ask for, for the startup message (arming is decided each day)."""
+    """What the settings ask for, for the startup message ."""
     if settings.live_mode == "paper":
         return "paper (no orders)"
     if settings.live_mode == "shadow":
         return "shadow (dry run: broker orders skipped)"
     if settings.dry_run:
-        return "live pipeline, DRY RUN (broker orders skipped); send /arm each morning"
-    return "LIVE, real orders; send /arm each morning"
+        return "live pipeline, DRY RUN (broker orders skipped); /stop and /start control each day"
+    return "LIVE, real orders; /stop and /start control each day"
 
 
 def describe_order_mode(order_mode: str) -> str:

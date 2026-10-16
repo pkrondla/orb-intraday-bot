@@ -1,8 +1,8 @@
-"""How serve wires the executor: arming per day, risk, restart recovery, mid-session commands."""
+"""How serve wires the executor: order modes, risk, restart recovery, mid-session commands."""
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import time
 from pathlib import Path
 from typing import Any
 
@@ -14,24 +14,21 @@ from orb_intraday_bot.app.context import AppContext
 from orb_intraday_bot.app.serve import (
     ServeState,
     build_executor,
-    handle_command,
     parse_clock_time,
     restore_risk,
     run_one_session,
 )
 from orb_intraday_bot.config.settings import Settings
-from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.execution.account import DryRunAccount
 from orb_intraday_bot.execution.dry_run_venue import DryRunVenue
 from orb_intraday_bot.paper.models import ExitReason, Fill, PositionStatus
 from orb_intraday_bot.risk.engine import RiskEngine
 from orb_intraday_bot.risk.limits import RiskLimits
-from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.executor import LiveExecutor
 from orb_intraday_bot.runtime.telegram_commands import Command, CommandBus, CommandKind
 from orb_intraday_bot.storage.store import TradeStore
 from tests.execution_support import AutoQuotes, FakeAccount
-from tests.runtime_support import DAY, RUN_CFG, Harness, Recorder, at
+from tests.runtime_support import DAY, RUN_CFG, Harness, at
 from tests.unit.test_paper import opened
 
 
@@ -184,34 +181,6 @@ def test_live_without_dry_run_builds_the_real_venue(
     assert clients.trading_built == 1
 
 
-# ---- arming per day ----------------------------------------------------------------------
-def test_arm_is_for_one_day_and_says_what_orders_will_be_sent(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path, live_mode="live", live_armed=True, dry_run=True)
-    state = ServeState(bus=CommandBus(), risk=RiskEngine())
-    notes, replies = Recorder(), []
-    now = datetime(2026, 10, 16, 8, 55, tzinfo=IST)
-    code = state.bus.begin_arm()
-    handle_command(
-        Command(CommandKind.ARM, arg=code), ctx=ctx, alerts=Alerts(notes), state=state,
-        reply=replies.append, now=now,
-    )
-    assert "DRY RUN" in replies[-1]
-    assert state.bus.is_armed(now.date())
-    assert not state.bus.is_armed(datetime(2026, 10, 19, tzinfo=IST).date())   # not Monday
-
-
-def test_a_wrong_arm_code_issues_a_new_one(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path, live_mode="live", live_armed=True)
-    state = ServeState(bus=CommandBus(), risk=RiskEngine())
-    replies: list[str] = []
-    handle_command(
-        Command(CommandKind.ARM, arg="nope"), ctx=ctx, alerts=Alerts(Recorder()), state=state,
-        reply=replies.append, now=datetime(2026, 10, 16, tzinfo=IST),
-    )
-    assert "reply /arm" in replies[-1]
-    assert not state.bus.is_armed(datetime(2026, 10, 16, tzinfo=IST).date())
-
-
 # ---- a whole session through run_one_session ---------------------------------------------
 class _Rig:
     def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **settings: Any) -> None:
@@ -243,12 +212,10 @@ class _Rig:
         return TradeStore(self.ctx.database_path)
 
 
-def test_an_armed_session_trades_through_the_executor_and_counts_risk(
+def test_a_session_trades_through_the_executor_and_counts_risk_without_any_daily_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch)
-    code = rig.state.bus.begin_arm()
-    assert rig.state.bus.confirm_arm(code, DAY)
     store = rig.run()
     positions = store.positions_for_day(DAY)
     assert positions and all(p.order_mode == "dry_run" for p in positions)
@@ -258,54 +225,49 @@ def test_an_armed_session_trades_through_the_executor_and_counts_risk(
         sum(p.net_option_pnl for p in positions)
     )
 
-def test_a_session_that_is_not_armed_runs_as_paper_and_says_so(
+def test_a_session_without_live_arming_runs_as_paper_and_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch)
+    rig.ctx.settings.live_armed = False
     store = rig.run()
     positions = store.positions_for_day(DAY)
     assert positions and all(p.order_mode == "paper" for p in positions)
     assert rig.state.risk.state.trades_today == 0              # paper trades never counted
-    assert "Not armed today" in rig.h.notes.joined()
+    assert "Running as PAPER" in rig.h.notes.joined()
     assert store.orders_for_signal(positions[0].position_id) == []
 
 
-def test_yesterdays_arm_does_not_carry_over(
+def test_a_stop_from_an_earlier_day_does_not_carry_over(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch)
-    code = rig.state.bus.begin_arm()
-    assert rig.state.bus.confirm_arm(code, DAY.replace(day=14))
+    rig.state.bus.stop_for(DAY.replace(day=14))                 # yesterday's stop is long over
     store = rig.run()
-    assert all(p.order_mode == "paper" for p in store.positions_for_day(DAY))
+    positions = store.positions_for_day(DAY)
+    assert positions and all(p.order_mode == "dry_run" for p in positions)
 
 
 def test_commands_sent_during_the_session_are_acted_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch)
-    code = rig.state.bus.begin_arm()
-    assert rig.state.bus.confirm_arm(code, DAY)
-    rig.state.bus.put(Command(CommandKind.PAUSE))               # queued before the session
+    rig.state.bus.put(Command(CommandKind.STOP_TODAY))               # queued before the session
     store = rig.run()
-    assert rig.state.bus.paused                                 # drained mid-session
-    assert store.positions_for_day(DAY) == []                   # paused: no entry was taken
-    assert "Paused" in rig.h.notes.joined()                     # the operator got the reply
+    assert rig.state.bus.is_stopped(DAY)                                 # drained mid-session
+    assert store.positions_for_day(DAY) == []                   # stopped: no entry was taken
+    assert "stopped for" in rig.h.notes.joined()                     # the operator got the reply
 
 
 def test_a_restart_mid_day_restores_the_risk_counters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch)
-    code = rig.state.bus.begin_arm()
-    assert rig.state.bus.confirm_arm(code, DAY)
     first = rig.run()
     trades = len(first.positions_for_day(DAY))
     assert trades >= 1
     # A new process: fresh risk engine and bus, same database and the day already traded.
     rig.state = ServeState(bus=CommandBus(), risk=RiskEngine(limits=RiskLimits()))
-    code = rig.state.bus.begin_arm()
-    assert rig.state.bus.confirm_arm(code, DAY)
     rig.h.clock.set(at(9, 10))
     rig.h.source.candles = []                                   # nothing new to trade
     rig.h.lines.clear()

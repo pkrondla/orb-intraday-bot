@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     # Optional dead-man ping URL (e.g. healthchecks.io). Watchdog hits it when healthy.
     healthcheck_url: str = Field(default="", alias="HEALTHCHECK_URL")
-    # paper | shadow | live. Live still needs LIVE_ARMED and a daily Telegram /arm.
+    # paper | shadow | live. Live still needs LIVE_ARMED and credentials.
     live_mode: Literal["paper", "shadow", "live"] = Field(default="paper", alias="LIVE_MODE")
     live_armed: bool = Field(default=False, alias="LIVE_ARMED")
     # True (the default) runs the whole live pipeline but skips the broker order step: orders are

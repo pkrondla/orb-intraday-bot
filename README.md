@@ -2,7 +2,7 @@
 
 ## Python paper-trading bot (`orb_intraday_bot`)
 
-Paper by default: with the default settings it never places an order. It trades Nifty futures signals and tracks the matching CE/PE option as a paper position. With `LIVE_MODE=live`, `LIVE_ARMED=true` and a daily Telegram `/arm`, it runs the full order pipeline instead: with `DRY_RUN=true` (the default) everything happens as in live trading except the call that sends the order to the broker; with `DRY_RUN=false` real orders are sent. See `docs/RUNBOOK.md`. The rules are in `intraday-setup.md`; progress is in `PROGRESS.md`.
+Paper by default: with the default settings it never places an order. It trades Nifty futures signals and tracks the matching CE/PE option as a paper position. With `LIVE_MODE=live` and `LIVE_ARMED=true` it runs the full order pipeline instead: with `DRY_RUN=true` (the default) everything happens as in live trading except the call that sends the order to the broker; with `DRY_RUN=false` real orders are sent. See `docs/RUNBOOK.md`. The rules are in `intraday-setup.md`; progress is in `PROGRESS.md`.
 
 Setup: `pip install -e .[dev]`, copy `.env.example` to `.env` and fill in the data-only Groww credentials (and optionally Telegram).
 
@@ -22,8 +22,8 @@ orb-bot summary [YYYY-MM-DD]        # trades and P&L from the database
 ```
 
 Deploy to the Windows EC2: see `docs/DEPLOY.md`. Ops runbook: `docs/RUNBOOK.md`.
-Live orders require `LIVE_MODE=live`, `LIVE_ARMED=true`, and a daily Telegram `/arm <code>`
-(uses the same `GROWW_TOTP_*` key unless you set `GROWW_TRADING_TOTP_*`); the default is paper.
+Live orders require `LIVE_MODE=live`, `LIVE_ARMED=true` and `DRY_RUN=false`; Telegram `/stop`
+and `/start` switch a single day off and on (uses the same `GROWW_TOTP_*` key unless you set `GROWW_TRADING_TOTP_*`); the default is paper.
 
 `python -m orb_intraday_bot <command>` works too. Tests: `python -m pytest`.
 

@@ -1,8 +1,8 @@
 """Startup safety checks. The bot refuses to run if any of these fail.
 
-Real orders need all of: LIVE_MODE=live, LIVE_ARMED=true, trading credentials, DRY_RUN=false and a
-daily Telegram /arm. DRY_RUN defaults to true, so a missing or misspelt setting never sends an
-order. The market-data client stays read-only whatever the mode is.
+Real orders need all of: LIVE_MODE=live, LIVE_ARMED=true, trading credentials and DRY_RUN=false.
+Telegram /stop and /start switch a day off and on. DRY_RUN defaults to true, so a missing or
+misspelt setting never sends an order. The market-data client stays read-only whatever the mode is.
 """
 
 from __future__ import annotations

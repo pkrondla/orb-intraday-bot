@@ -34,7 +34,7 @@ Already done if the Groww bot is deployed:
 | `WINRM_USERNAME` | Windows user (for example `Administrator`) |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat id |
 | `LIVE_MODE` | `paper` (default), `shadow`, or `live` |
-| `LIVE_ARMED` | `false` until you intentionally arm live (also needed for the dry run) |
+| `LIVE_ARMED` | `false` until you intentionally switch the live pipeline on (also needed for the dry run) |
 | `DRY_RUN` | `true` (default): the whole live pipeline, but no order is sent to the broker. `false`: real orders |
 | `HEALTHCHECK_URL` | Optional healthchecks.io ping URL |
 
@@ -46,13 +46,12 @@ Already done if the Groww bot is deployed:
 | `LIVE_ARMED` | `true` |
 | `DRY_RUN` | `true` |
 
-Then send `/arm` to the Telegram bot each morning before 09:15 and reply with the code it gives
-you. The arm is for that day only. Without it the day runs as plain paper trading and the bot
-tells you so. With these settings **no order can reach Groww**: the order step is replaced by a
+Trading is then on every market day with nothing to send in the morning. To skip the rest of a
+day send `/stop` to the Telegram bot; `/start` allows it again that day. A stop applies to that
+day only and is remembered across a restart. With these settings **no order can reach Groww**: the order step is replaced by a
 simulation that fills against the real bid/ask. See `docs/RUNBOOK.md` for what to check.
 
-Real orders need all of: `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=false`, Groww credentials,
-and the daily `/arm`. If `DRY_RUN=false` is set without the others the bot refuses to start.
+Real orders need all of: `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=false` and Groww credentials. If `DRY_RUN=false` is set without the others the bot refuses to start.
 
 ## Deploy
 
@@ -101,4 +100,4 @@ Logs: `C:\orb-bot\logs\orb-bot.log`, `orb-bot-error.log`, `orb-watch.log`.
 Create a **new** bot with @BotFather (do not reuse the Groww bot token). Message it once,
 then read your chat id from `https://api.telegram.org/bot<token>/getUpdates`. Commands:
 
-`/status` `/today` `/positions` `/report` `/pause` `/resume` `/flatten` `/arm` `/disarm` `/help`
+`/status` `/today` `/positions` `/report` `/stop` `/start` `/flatten` `/help` (`/pause` and `/resume` still work as the same commands)

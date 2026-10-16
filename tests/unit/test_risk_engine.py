@@ -51,18 +51,17 @@ def test_arming_requires_all_gates() -> None:
         groww_trading_totp_token=SecretStr("tok"),
         groww_trading_totp_secret=SecretStr("sec"),
     )
-    assert resolve_mode(base, armed_today=True, trading_credentials_present=True).is_live
-    assert not resolve_mode(base, armed_today=False, trading_credentials_present=True).is_live
+    assert resolve_mode(base, trading_credentials_present=True).is_live
+    assert not resolve_mode(base, trading_credentials_present=False).is_live
     disarmed = Settings.model_construct(
         live_mode="live",
         live_armed=False,
         groww_trading_totp_token=SecretStr("tok"),
         groww_trading_totp_secret=SecretStr("sec"),
     )
-    d = resolve_mode(disarmed, armed_today=True, trading_credentials_present=True)
+    d = resolve_mode(disarmed, trading_credentials_present=True)
     assert d.mode == "paper"
     assert resolve_mode(
         Settings.model_construct(live_mode="shadow", live_armed=False),
-        armed_today=False,
         trading_credentials_present=False,
     ).mode == "shadow"

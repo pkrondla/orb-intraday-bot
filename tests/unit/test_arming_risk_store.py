@@ -1,4 +1,4 @@
-"""Order modes, arming per day, risk blocking and rebuilding, schema v3 and the order store."""
+"""Order modes, the per-day /stop, risk blocking and rebuilding, schema v3 and the order store."""
 
 from __future__ import annotations
 
@@ -40,24 +40,21 @@ def _settings(**overrides: Any) -> Settings:
 
 # ---- arming and order modes --------------------------------------------------------------
 @pytest.mark.parametrize(
-    ("settings", "armed", "creds", "mode", "order_mode"),
+    ("settings", "creds", "mode", "order_mode"),
     [
-        ({"live_mode": "paper"}, True, True, "paper", "paper"),
-        ({"live_mode": "shadow"}, False, True, "shadow", "dry_run"),
-        ({"live_mode": "shadow", "dry_run": False}, False, True, "shadow", "dry_run"),
-        ({"live_mode": "live", "live_armed": False}, True, True, "paper", "paper"),
-        ({"live_mode": "live", "live_armed": True}, True, False, "paper", "paper"),
-        ({"live_mode": "live", "live_armed": True}, False, True, "paper", "paper"),
-        ({"live_mode": "live", "live_armed": True}, True, True, "live", "dry_run"),
-        ({"live_mode": "live", "live_armed": True, "dry_run": False}, True, True, "live", "live"),
+        ({"live_mode": "paper"}, True, "paper", "paper"),
+        ({"live_mode": "shadow"}, True, "shadow", "dry_run"),
+        ({"live_mode": "shadow", "dry_run": False}, True, "shadow", "dry_run"),
+        ({"live_mode": "live", "live_armed": False}, True, "paper", "paper"),
+        ({"live_mode": "live", "live_armed": True}, False, "paper", "paper"),
+        ({"live_mode": "live", "live_armed": True}, True, "live", "dry_run"),
+        ({"live_mode": "live", "live_armed": True, "dry_run": False}, True, "live", "live"),
     ],
 )
 def test_the_order_mode_follows_every_gate(
-    settings: dict[str, Any], armed: bool, creds: bool, mode: str, order_mode: str
+    settings: dict[str, Any], creds: bool, mode: str, order_mode: str
 ) -> None:
-    decision = resolve_mode(
-        _settings(**settings), armed_today=armed, trading_credentials_present=creds
-    )
+    decision = resolve_mode(_settings(**settings), trading_credentials_present=creds)
     assert (decision.mode, decision.order_mode) == (mode, order_mode)
     assert decision.is_live is (mode == "live")
 
@@ -77,22 +74,17 @@ def test_labels_say_what_will_happen() -> None:
     assert describe_order_mode("odd") == "odd"
 
 
-# ---- the arm is for one day --------------------------------------------------------------
-def test_an_arm_is_valid_for_its_own_day_only() -> None:
+# ---- /stop and /start are for one day ----------------------------------------------------
+def test_a_stop_is_valid_for_its_own_day_only() -> None:
     bus = CommandBus()
-    code = bus.begin_arm()
-    assert not bus.confirm_arm("wrong", DAY)
-    assert bus.confirm_arm(code, DAY)
-    assert bus.is_armed(DAY)
-    assert not bus.is_armed(date(2026, 10, 19))
-    bus.disarm()
-    assert not bus.is_armed(DAY) and bus.armed_day is None
-
-
-def test_an_arm_without_a_day_is_valid_any_day() -> None:
-    bus = CommandBus()
-    assert bus.confirm_arm(bus.begin_arm())
-    assert bus.is_armed(DAY) and bus.is_armed(date(2026, 10, 19))
+    assert not bus.is_stopped(DAY)                  # trading is on by default
+    bus.stop_for(DAY)
+    assert bus.is_stopped(DAY)
+    assert not bus.is_stopped(date(2026, 10, 19))   # the next day starts on its own
+    bus.start_for(date(2026, 10, 19))               # starting another day does not clear this one
+    assert bus.is_stopped(DAY)
+    bus.start_for(DAY)
+    assert not bus.is_stopped(DAY) and bus.stopped_day is None
 
 
 # ---- risk ---------------------------------------------------------------------------------

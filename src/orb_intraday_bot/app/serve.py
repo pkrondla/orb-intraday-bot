@@ -26,7 +26,6 @@ from orb_intraday_bot.risk.limits import RiskLimits, load_risk_limits
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.arming import (
     configured_mode_label,
-    describe_order_mode,
     resolve_mode,
 )
 from orb_intraday_bot.runtime.calendar import load_holidays, next_session_start
@@ -46,6 +45,7 @@ from orb_intraday_bot.storage.store import TradeStore
 
 log = logging.getLogger("orb.serve")
 STOP_FILE_NAME = "bot.stop"
+TRADING_OFF_FILE_NAME = "TRADING_OFF"
 SESSION_START = "09:00"
 _IDLE_STEP_SEC = 15
 
@@ -66,6 +66,30 @@ SessionFunc = Callable[[AppContext, Notifier, ServeState, Clock, SleepFunc], Run
 
 def stop_file_path(data_dir: Path) -> Path:
     return data_dir / STOP_FILE_NAME
+
+
+def trading_off_path(data_dir: Path) -> Path:
+    """Marker holding the day (ISO date) the operator sent /stop, so a restart keeps it."""
+    return data_dir / TRADING_OFF_FILE_NAME
+
+
+def read_stopped_day(data_dir: Path) -> date | None:
+    try:
+        return date.fromisoformat(trading_off_path(data_dir).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def write_stopped_day(data_dir: Path, day: date | None) -> None:
+    path = trading_off_path(data_dir)
+    try:
+        if day is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(day.isoformat() + "\n", encoding="utf-8")
+    except OSError as exc:
+        log.warning("could not update %s: %s", path.name, type(exc).__name__)
 
 
 def should_stop(data_dir: Path, state: ServeState) -> bool:
@@ -133,15 +157,28 @@ def handle_command(
         finally:
             store.close()
         return
-    if command.kind is CommandKind.PAUSE:
-        bus.paused = True
-        alerts.paused()
-        reply("Paused.")
+    if command.kind is CommandKind.STOP_TODAY:
+        day = now.astimezone(IST).date()
+        bus.stop_for(day)
+        write_stopped_day(ctx.data_dir, day)
+        alerts.paused(day.isoformat())
+        reply(
+            f"Trading stopped for {day.isoformat()}: no new entries. Open positions are still "
+            "managed (use /flatten to close them). Send /start to allow trades again today; "
+            "otherwise trading resumes on the next day by itself."
+        )
         return
-    if command.kind is CommandKind.RESUME:
-        bus.paused = False
-        alerts.resumed()
-        reply("Resumed.")
+    if command.kind is CommandKind.START_TODAY:
+        day = now.astimezone(IST).date()
+        was_stopped = bus.is_stopped(day)
+        bus.start_for(day)
+        write_stopped_day(ctx.data_dir, None)
+        alerts.resumed(day.isoformat())
+        reply(
+            f"Trading started for {day.isoformat()}: new entries allowed."
+            if was_stopped
+            else f"Trading was not stopped for {day.isoformat()}; new entries are already allowed."
+        )
         return
     if command.kind is CommandKind.FLATTEN_CONFIRM:
         if bus.confirm_flatten(command.arg):
@@ -151,26 +188,6 @@ def handle_command(
             reply("Flatten requested. The session will close open positions.")
         else:
             reply("Flatten code mismatch. Send /flatten again for a new code.")
-        return
-    if command.kind is CommandKind.ARM:
-        if bus.confirm_arm(command.arg, now.astimezone(IST).date()):
-            today = now.astimezone(IST).date()
-            decision = resolve_mode(
-                ctx.settings,
-                armed_today=bus.is_armed(today),
-                trading_credentials_present=ctx.settings.has_trading_credentials(),
-            )
-            alerts.armed(describe_order_mode(decision.order_mode))
-            reply(f"Armed for today. Orders: {describe_order_mode(decision.order_mode)}.")
-        else:
-            # First /arm without a pending code, or wrong code: issue a new one.
-            code = bus.begin_arm()
-            reply(f"To arm live trading today, reply /arm {code}")
-        return
-    if command.kind is CommandKind.DISARM:
-        bus.disarm()
-        alerts.disarmed()
-        reply("Disarmed.")
         return
     reply(f"Unhandled command: {command.kind.value}")
 
@@ -222,12 +239,11 @@ def run_one_session(
     )
 
     def executor_enabled() -> bool:
-        """Armed today and the executor's order mode is the one the arming resolves to."""
+        """The executor's order mode is the one the settings resolve to (no daily confirmation)."""
         if executor is None:
             return False
         decision = resolve_mode(
             ctx.settings,
-            armed_today=state.bus.is_armed(clock.now().astimezone(IST).date()),
             trading_credentials_present=ctx.settings.has_trading_credentials(),
         )
         return decision.order_mode == executor.mode
@@ -250,16 +266,11 @@ def run_one_session(
     if executor is not None and not executor_enabled() and ctx.settings.live_mode == "live":
         decision = resolve_mode(
             ctx.settings,
-            armed_today=False,
             trading_credentials_present=ctx.settings.has_trading_credentials(),
         )
-        alerts.order_event(
-            f"Not armed today: running as PAPER. {decision.reason}. "
-            "Send /arm and confirm the code to enable orders."
-        )
-
+        alerts.order_event(f"Running as PAPER: {decision.reason}.")
     def entries_allowed() -> bool:
-        if state.bus.paused or state.risk.state.halted:
+        if state.bus.is_stopped(today) or state.risk.state.halted:
             return False
         decision = state.risk.check_entry(lots=1)
         return decision.allowed
@@ -418,6 +429,7 @@ def serve_loop(
         capital_inr=ctx.cfg.sizing.capital_inr,
     )
     state = ServeState(bus=CommandBus(), risk=risk)
+    state.bus.stopped_day = read_stopped_day(ctx.data_dir)    # a /stop survives a restart
     holidays = load_holidays() if holidays is None else holidays
     mode = configured_mode_label(ctx.settings)
 
