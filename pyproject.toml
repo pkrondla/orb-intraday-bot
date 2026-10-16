@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orb-intraday-bot"
+version = "0.1.0"
+description = "ORB Intraday Bot - Nifty futures paper-trading bot (no live orders)"
+requires-python = ">=3.12"
+dependencies = [
+    "growwapi>=1.5.0",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pyotp>=2.9",
+    "pyyaml>=6.0",
+    "tzdata",
+]
+
+[project.scripts]
+orb-bot = "orb_intraday_bot.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "types-PyYAML",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+ignore_missing_imports = true

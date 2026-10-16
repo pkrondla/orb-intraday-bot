@@ -1,0 +1,114 @@
+# Strategy parameters. Values marked [assumption] are not in the teacher's notes
+# (see intraday-setup.md). Change them here, not in code.
+
+instrument:
+  underlying: NIFTY        # Nifty futures only
+  exchange: NSE
+  segment: FNO
+  futures_tick_size: 0.1   # verified from the Groww instruments file
+  option_tick_size: 0.05
+  roll_days_before_expiry: 0   # 0 = stay on current-month contract through expiry day
+
+session:
+  open: "09:15"
+  close: "15:30"
+  candle_minutes: 3
+  candle_publish_delay_sec: 5  # wait after a boundary before fetching the closed candle
+
+stops:
+  hard_stop_points: 35
+  min_stop_points: 10          # [assumption] safety floor
+  option_fallback_points: 20   # used only if delta is unavailable
+
+targets:
+  t1_rule: nearest_pivot_else_half   # [assumption]
+  t1_book_fraction: 0.5              # [assumption]
+  move_sl_to_entry_after_t1: true    # [assumption]
+  t1_max_distance_points: null       # [tuning] null = no cap; else T1 is at most this far from entry
+
+options:
+  strike_step: 50
+  delta_min: 0.50
+  delta_max: 0.60
+  delta_target: 0.55
+  candidates: [atm, itm1]
+
+sizing:
+  capital_inr: 500000          # [assumption]
+  risk_pct_per_trade: 0.01     # [assumption]
+  max_open_positions: 5        # [assumption]
+  risk_basis: stop_plan        # stop_plan = lots from the level distance, stop stays 35 pts
+                               # (your rule); hard_stop = lots from the real stop distance
+
+consolidation:
+  min_touches: 3               # [assumption]
+  min_minutes: 45
+  max_minutes: 60
+
+entries:
+  orb_entry_reference: previous_candle   # notes: "previous candle low"
+  orb_fill_rule: touch_else_confirmation_close   # [assumption]
+  fake_breakout_entry_retracement: 0.5
+  retest_tolerance_points: 1.0           # [assumption] feed noise: Groww vs TradingView ~0.7 pt
+
+whipsaw:
+  min_rejections: 2            # [assumption]
+
+structure:                     # 2LL/3LL and 2HH/3HH
+  min_count: 2
+  max_count: 3
+  min_rise_points: 20          # [assumption]
+
+fake_break:                    # consolidation + fake breakdown / breakout   [all assumptions]
+  consolidation_candles: 10
+  max_range_points: 45
+  edge_touches: 2
+  max_fake_candles: 3
+  min_reversal_leg_points: 20
+  max_wait_candles: 10
+
+arbiter:                       # [all assumptions]
+  priority:                    # highest first
+    - ORB_BREAKOUT
+    - PIVOT_BREAKOUT
+    - TRAP_REVERSE_RETEST
+    - FOLLOWUP_CASE_1
+    - FOLLOWUP_CASE_2
+    - CONSOLIDATION_BREAKOUT
+    - ADDITIONAL_WHIPSAW
+    - FAKE_BREAK
+    - STRUCTURE_WHIPSAW
+  allow_opposite_positions: false
+  max_trades_per_day: 6
+  max_structure_trades_per_day: 2
+
+paper:
+  slippage_option_points: 0.0  # [assumption] option points lost on each fill
+  database_file: paper_trades.sqlite
+  charges:                     # [assumptions] fractions of premium turnover; verify vs contract note
+    brokerage_flat_inr: 20     # per order (or brokerage_pct of turnover, whichever is lower)
+    brokerage_pct: 0.001
+    stt_sell_pct: 0.0015       # 0.15% on the sell side (options STT from 1 Apr 2026)
+    exchange_txn_pct: 0.0003503
+    sebi_pct: 0.000001
+    stamp_buy_pct: 0.00003
+    gst_pct: 0.18
+
+runtime:                       # live run timing and monitoring
+  poll_interval_sec: 15        # futures/option price polls while a position is open
+  fetch_retry_sec: 5           # retry while a closed candle is not published yet
+  max_signal_age_sec: 120      # a signal older than this (restart catch-up) is not opened
+  stall_alert_sec: 180         # alert if no new candle this long after it should exist
+  no_session_exit_time: "09:45"  # no candles by then: treat as a holiday and exit
+  heartbeat_file: heartbeat.json
+  notify_candle_reports: false # true = send every candle report to Telegram
+
+enabled_setups:
+  orb: true
+  trap: true
+  followup_failure: true
+  additional_whipsaw: true
+  consolidation_breakout: true
+  whipsaw_structure: true
+  fake_breakout: true
+  both_sides_trap: false       # notes give a heading only

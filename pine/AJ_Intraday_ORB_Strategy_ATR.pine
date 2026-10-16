@@ -93,7 +93,7 @@ orlColor = color.green       // ORL color: Green
 // Enhanced Label Positioning Settings
 labelDistance = input.float(30.0, "Label Distance from Candles (Points)", minval=5.0, maxval=80.0, step=2.5, tooltip="Fixed distance in points from candle price (increased for better visibility)", group="Label Settings")
 labelSpacing = input.float(70.0, "Label Spacing (Points)", minval=10.0, maxval=120.0, step=5.0, tooltip="Minimum spacing between overlapping labels (aggressive spacing for whipsaws)", group="Label Settings")
-connectionGap = input.float(2.0, "Connection Line Gap (Points)", minval=0.0, maxval=10.0, step=0.5, tooltip="Gap between connection line and candle high/low", group="Label Settings")
+connectionGap = input.float(0.0, "Connection Line Gap (Points)", minval=0.0, maxval=10.0, step=0.5, tooltip="Gap between connection line and candle high/low", group="Label Settings")
 maxLabelProximity = input.int(8, "Label Proximity Range (Bars)", minval=5, maxval=15, tooltip="Consider labels within this many bars for overlap prevention", group="Label Settings")
 smartDistribution = input.bool(true, "Smart Label Distribution", tooltip="Automatically distribute labels to less crowded areas when many overlap", group="Label Settings")
 zoneLabelDistance = input.int(10, "Zone Label Distance (Bars)", minval=1, maxval=50, step=1, tooltip="Distance in bars from current price to display the zone label on x-axis", group="Label Settings")
@@ -287,14 +287,14 @@ var int orhBarIndex = 0
 var int orlBarIndex = 0
 var bool orhLabelDrawn = false
 var bool orlLabelDrawn = false
+var label orhLabel = na
+var label orlLabel = na
 
-// Session tracking variables for first green/red candle detection
-var float sessionLowestSoFar = na
-var bool foundFirstGreenWithLowest = false
-var int sessionLowestBarIndex = 0
-var float sessionHighestSoFar = na
-var bool foundFirstRedWithHighest = false
-var int sessionHighestBarIndex = 0
+// Session tracking variables for absolute high/low detection
+var float sessionAbsoluteHigh = na
+var int sessionAbsoluteHighBar = 0
+var float sessionAbsoluteLow = na
+var int sessionAbsoluteLowBar = 0
 
 // ============================================================================
 // MARKET CONTROL VARIABLES & FUNCTIONS (declared early for use in ATR functions)
@@ -795,12 +795,10 @@ if newDay
     orhLabelDrawn := false
     orlLabelDrawn := false
     // Reset session tracking variables
-    sessionLowestSoFar := na
-    foundFirstGreenWithLowest := false
-    sessionLowestBarIndex := 0
-    sessionHighestSoFar := na
-    foundFirstRedWithHighest := false
-    sessionHighestBarIndex := 0
+    sessionAbsoluteHigh := na
+    sessionAbsoluteHighBar := 0
+    sessionAbsoluteLow := na
+    sessionAbsoluteLowBar := 0
     // Reset Market Control tracking
     marketControl := 0
     orhConfirmedFirst := false
@@ -858,38 +856,36 @@ if newDay
     bearTrapCase1Target := 0.0
     bearTrapCase2Target := 0.0
 
-// ORH/ORL Detection: First green/red candle approach
-// ORL = Session's lowest low, determined when first green candle appears
-// ORH = Session's highest high, determined when first red candle appears
+// ORH/ORL Detection: First candle that breaks the trend from start of day
+// ORL = First candle that has higher low than previous candle (stops making lower lows)
+// ORH = First candle that has lower high than previous candle (stops making higher highs)
 
-// ORL Detection: First green candle after we've seen the session's lowest low
-if isTradingSession() and not orlDetermined and not foundFirstGreenWithLowest
-    // Track the lowest low seen so far and which bar it occurred on
-    if na(sessionLowestSoFar) or low < sessionLowestSoFar
-        sessionLowestSoFar := low
-        sessionLowestBarIndex := bar_index
+// ORL Detection: Find first candle that stops making lower lows from start of day
+if isTradingSession() and not orlDetermined and bar_index >= 1
+    currentDayStart = ta.valuewhen(ta.change(time("1D")) != 0, bar_index, 0)
     
-    // If current candle is green and we have a session low, use the session low as ORL
-    if close > open and not na(sessionLowestSoFar)
-        orl := sessionLowestSoFar
-        orlBarIndex := sessionLowestBarIndex  // Use the bar where lowest low actually occurred
-        orlDetermined := true
-        foundFirstGreenWithLowest := true
+    // Only check candles from current trading day
+    if bar_index >= currentDayStart + 1
+        // Check if current candle [0] has higher low than previous candle [1]
+        if low > low[1]
+            // This candle stopped making lower lows - previous candle [1] is the ORL
+            orl := low[1]
+            orlBarIndex := bar_index - 1
+            orlDetermined := true
 
 
-// ORH Detection: First red candle after we've seen the session's highest high
-if isTradingSession() and not orhDetermined and not foundFirstRedWithHighest
-    // Track the highest high seen so far and which bar it occurred on
-    if na(sessionHighestSoFar) or high > sessionHighestSoFar
-        sessionHighestSoFar := high
-        sessionHighestBarIndex := bar_index
+// ORH Detection: Find first candle that stops making higher highs from start of day
+if isTradingSession() and not orhDetermined and bar_index >= 1
+    currentDayStart = ta.valuewhen(ta.change(time("1D")) != 0, bar_index, 0)
     
-    // If current candle is red and we have a session high, use the session high as ORH
-    if close < open and not na(sessionHighestSoFar)
-        orh := sessionHighestSoFar
-        orhBarIndex := sessionHighestBarIndex  // Use the bar where highest high actually occurred
-        orhDetermined := true
-        foundFirstRedWithHighest := true
+    // Only check candles from current trading day
+    if bar_index >= currentDayStart + 1
+        // Check if current candle [0] has lower high than previous candle [1]
+        if high < high[1]
+            // This candle stopped making higher highs - previous candle [1] is the ORH
+            orh := high[1]
+            orhBarIndex := bar_index - 1
+            orhDetermined := true
 
     
 // Market Control Determination - Execute when both levels are determined
@@ -2377,13 +2373,18 @@ getZoneBasedY(baseY, signalType, isAbove) =>
         // Get zone number (1-5, where 5 is highest)
         zoneLevel = getSignalZone(signalType)
         
+        // Calculate price-relative spacing based on current price range
+        // Use a percentage of the current price for better scaling across different chart types
+        priceRelativeSpacing = baseY * 0.001  // 0.1% of current price
+        zoneOffset = (zoneLevel - 3) * priceRelativeSpacing
+        
         // Calculate base position from price level
         if isAbove
             // Position above price with zone-based offset
-            baseY + labelDistance + (zoneLevel - 3) * zoneSpacing
+            baseY + labelDistance + zoneOffset
         else
             // Position below price with zone-based offset  
-            baseY - labelDistance - (zoneLevel - 3) * zoneSpacing
+            baseY - labelDistance - zoneOffset
 
 // Enhanced function to calculate label Y position with zone allocation and overlap prevention
 getLabelY(baseY, isAbove, signalType = "DEFAULT") =>
@@ -2550,7 +2551,9 @@ if showNeutralZone and shouldShowSignals() and isTradingSession() and not na(orh
         currentZoneLabel := na
     
     // Position zone label below control label with proper spacing
-    zoneY = getZoneBasedY(orh, "ZONE_INFO", true) - (zoneSpacing * 2)
+    // Use price-relative spacing for better scaling across chart types
+    priceRelativeSpacing = orh * 0.001  // 0.1% of ORH price
+    zoneY = getZoneBasedY(orh, "ZONE_INFO", true) - (priceRelativeSpacing * 2)
     
     // Get current ATR and volatility information
     currentATR = getReliableATR()
@@ -2728,16 +2731,24 @@ else
 
 // Draw ORH label when finalized and not yet drawn
 if showORLevels and shouldShowSignals() and orhDetermined and not orhLabelDrawn and orhBarIndex > 0
-    // Draw finalized ORH label
-    labelY = drawSignalLabel(orhBarIndex, orh, "ORH (FINAL)\n" + str.tostring(orh, "#.##"), orhColor, true, "Opening Range High: Finalized when price stopped making higher highs using 3-candle pattern (current candle lower high than previous, previous higher than candle before)")
+    // Draw finalized ORH label - positioned close to actual price level
+    // Use direct positioning instead of zone-based for ORL/ORH levels
+    labelY = orh + labelDistance  // Position above the ORH level
+    orhLabel := label.new(orhBarIndex, labelY, "ORH (FINAL)\n" + str.tostring(orh, "#.##"), color=orhColor, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Opening Range High: Finalized when price stopped making higher highs using 3-candle pattern (current candle lower high than previous, previous higher than candle before)")
+    // Connection line from label to ORH level
+    line.new(orhBarIndex, labelY, orhBarIndex, orh - connectionGap, color=orhColor, width=1, style=line.style_dashed)
     lastLabelY := labelY
     lastLabelBar := orhBarIndex
     orhLabelDrawn := true
 
 // Draw ORL label when finalized and not yet drawn
 if showORLevels and shouldShowSignals() and orlDetermined and not orlLabelDrawn and orlBarIndex > 0
-    // Draw finalized ORL label
-    labelY = drawSignalLabel(orlBarIndex, orl, "ORL (FINAL)\n" + str.tostring(orl, "#.##"), color.green, false, "Opening Range Low: Finalized when price stopped making lower lows using 3-candle pattern (current candle higher low than previous, previous lower than candle before)")
+    // Draw finalized ORL label - positioned close to actual price level
+    // Use direct positioning instead of zone-based for ORL/ORH levels
+    labelY = orl - labelDistance  // Position below the ORL level
+    orlLabel := label.new(orlBarIndex, labelY, "ORL (FINAL)\n" + str.tostring(orl, "#.##"), color=color.green, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Opening Range Low: Finalized when price stopped making lower lows using 3-candle pattern (current candle higher low than previous, previous lower than candle before)")
+    // Connection line from label to ORL level
+    line.new(orlBarIndex, labelY, orlBarIndex, orl + connectionGap, color=color.green, width=1, style=line.style_dashed)
     lastLabelY := labelY
     lastLabelBar := orlBarIndex
     orlLabelDrawn := true
@@ -3000,7 +3011,8 @@ if showTrapSignals and shouldShowSignals() and bearTrapAdditionalWhipsaw and not
     // Enhanced whipsaw label
     labelText = "WHIPSAW"
     // Force bear trap whipsaw to extreme bottom position to avoid all overlaps
-    labelY = low - (labelDistance + zoneSpacing * 4)  // Quadruple zone spacing for maximum separation
+    priceRelativeSpacing = low * 0.001  // 0.1% of low price
+    labelY = low - (labelDistance + priceRelativeSpacing * 4)  // Quadruple price-relative spacing for maximum separation
     bearTrapWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for Bear Trap - Momentum will come after whipsaw. Higher probability signal with more trapped participants.")
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.orange, width=1, style=line.style_dashed)
     bearTrapWhipsawTriggered := true
@@ -3011,7 +3023,8 @@ if showTrapSignals and shouldShowSignals() and bullTrapAdditionalWhipsaw and not
     // Enhanced whipsaw label
     labelText = "WHIPSAW"
     // Force bull trap whipsaw to extreme top position to avoid all overlaps
-    labelY = high + (labelDistance + zoneSpacing * 4)  // Quadruple zone spacing for maximum separation
+    priceRelativeSpacing = high * 0.001  // 0.1% of high price
+    labelY = high + (labelDistance + priceRelativeSpacing * 4)  // Quadruple price-relative spacing for maximum separation
     bullTrapWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for Bull Trap - Momentum will come after whipsaw. Higher probability signal with more trapped participants.")
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
     bullTrapWhipsawTriggered := true
@@ -3022,7 +3035,8 @@ if showEntrySignals and shouldShowSignals() and orbLongAdditionalWhipsaw and not
     // Enhanced whipsaw label with extreme positioning to avoid all overlaps
     labelText = "WHIPSAW"
     // Force ORB Long whipsaw to extreme bottom position
-    labelY = low - (labelDistance + zoneSpacing * 5)  // Quintuple zone spacing for absolute separation 
+    priceRelativeSpacing = low * 0.001  // 0.1% of low price
+    labelY = low - (labelDistance + priceRelativeSpacing * 5)  // Quintuple price-relative spacing for absolute separation 
     orbLongWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for ORB Long - ORH holding as support. SL will not hit. Higher probability signal.")
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.orange, width=1, style=line.style_dashed)
     orbLongWhipsawTriggered := true
@@ -3033,7 +3047,8 @@ if showEntrySignals and shouldShowSignals() and orbShortAdditionalWhipsaw and no
     // Enhanced whipsaw label with extreme positioning to avoid all overlaps
     labelText = "WHIPSAW"
     // Force ORB Short whipsaw to extreme top position
-    labelY = high + (labelDistance + zoneSpacing * 5)  // Quintuple zone spacing for absolute separation
+    priceRelativeSpacing = high * 0.001  // 0.1% of high price
+    labelY = high + (labelDistance + priceRelativeSpacing * 5)  // Quintuple price-relative spacing for absolute separation
     orbShortWhipsawLabel := label.new(bar_index, labelY, labelText, color=color.orange, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip="Additional Whipsaw for ORB Short - ORL holding as resistance. SL will not hit. Higher probability signal.")
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.orange, width=1, style=line.style_dashed)
     orbShortWhipsawTriggered := true
@@ -3198,7 +3213,8 @@ if showWhipsawSignals and shouldShowSignals() and whipsawLongCondition and not w
     tooltipText = (threeLL ? "Three" : "Two") + " consecutive lower lows detected. Price broke above recent swing high, indicating potential reversal from oversold condition. Entry: Close at reversal candle. SL: max(SwingLow, Entry-35pts). Target: ORH/ORL range distance or nearest R1/R2/R3 pivot above entry."
     labelText = whipsawText
     // Force whipsaw to extreme bottom position to avoid all overlaps
-    labelY = low - (labelDistance + zoneSpacing * 3)  // Triple zone spacing for extreme separation
+    priceRelativeSpacing = low * 0.001  // 0.1% of low price
+    labelY = low - (labelDistance + priceRelativeSpacing * 3)  // Triple price-relative spacing for extreme separation
     whipsawLongLabel := label.new(bar_index, labelY, labelText, color=color.lime, style=label.style_label_up, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, low + connectionGap, color=color.lime, width=1, style=line.style_dashed)
     whipsawLongTriggered := true
@@ -3210,7 +3226,8 @@ if showWhipsawSignals and shouldShowSignals() and whipsawShortCondition and not 
     tooltipText = (threeHH ? "Three" : "Two") + " consecutive higher highs detected. Price broke below recent swing low, indicating potential reversal from overbought condition. Entry: Close at reversal candle. SL: min(SwingHigh, Entry+35pts). Target: ORH/ORL range distance or nearest S1/S2/S3 pivot below entry."
     labelText = whipsawText
     // Force whipsaw to extreme top position to avoid all overlaps
-    labelY = high + (labelDistance + zoneSpacing * 3)  // Triple zone spacing for extreme separation
+    priceRelativeSpacing = high * 0.001  // 0.1% of high price
+    labelY = high + (labelDistance + priceRelativeSpacing * 3)  // Triple price-relative spacing for extreme separation
     whipsawShortLabel := label.new(bar_index, labelY, labelText, color=color.maroon, style=label.style_label_down, textcolor=color.white, size=size.small, tooltip=tooltipText)
     line.new(bar_index, labelY, bar_index, high - connectionGap, color=color.maroon, width=1, style=line.style_dashed)
     whipsawShortTriggered := true
@@ -3267,10 +3284,9 @@ if showWhipsawSignals and shouldShowSignals() and fakeBreakoutShortCondition and
 
 // Trade table is updated directly above (not as function call)
 
-// Function to detect End of Trading Day (EOD) - Now Dynamic
+// Function to detect End of Trading Day (EOD) - Universal Logic
 isEOD() =>
-    // Dynamic EOD detection that works with any market/timeframe
-    // Method 1: Day change detection (most reliable)
+    // Method 1: Day change detection (most reliable for all markets)
     dayChanged = ta.change(time("1D")) != 0
     
     // Method 2: Large time gap detection (for markets with breaks)
@@ -3279,11 +3295,9 @@ isEOD() =>
     lastBarTime := time
     largeTimeGap = currentTimeGap > 240  // More than 4 hours gap indicates day end
     
-    // Method 3: Last bar of available data
-    isLastBarOfData = barstate.islast
-    
-    // EOD is triggered by any of these conditions
-    dayChanged or largeTimeGap or isLastBarOfData
+    // EOD is triggered by these universal conditions only
+    // Removed market-specific time checks to work with all markets
+    dayChanged or largeTimeGap
 
 // Update trade statuses when exits occur (works on both real-time and historical data)
 // Check all active trades in the table for exit conditions

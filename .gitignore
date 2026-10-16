@@ -68,3 +68,15 @@ my_*
 .env
 .env.local
 .env.production
+# Python / bot runtime
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+data/
+.env.*
+!.env.example

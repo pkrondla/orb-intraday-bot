@@ -1,4 +1,26 @@
-# AJ Intraday ORB Trading Strategy
+# ORB Intraday Bot - Trading Strategy
+
+## Python paper-trading bot (`orb_intraday_bot`)
+
+Paper only: it never places an order (`LIVE_TRADING` must stay false, and the broker client is read-only). It trades Nifty futures signals and tracks the matching CE/PE option as a paper position. The rules are in `intraday-setup.md`; progress is in `PROGRESS.md`.
+
+Setup: `pip install -e .[dev]`, copy `.env.example` to `.env` and fill in the data-only Groww credentials (and optionally Telegram).
+
+```
+orb-bot check                       # connection, contract, pivots, option chain, database
+orb-bot replay --last 30            # past sessions on real futures candles (synthetic option prices)
+orb-bot replay 2026-10-14 --events  # one day, with every signal and exit
+orb-bot sweep --last 60            # compare config variants on the same candles
+orb-bot report                      # forward-test statistics from the database
+orb-bot reconcile                   # today's live run against a replay of the same candles
+orb-bot run                         # live paper session; start before 09:15 IST, it exits after 15:30
+orb-bot status                      # is a run alive
+orb-bot summary [YYYY-MM-DD]        # trades and P&L from the database
+```
+
+`python -m orb_intraday_bot <command>` works too. Tests: `python -m pytest`.
+
+The sections below describe the original Pine Script indicator.
 
 ## Overview
 A sophisticated intraday trading strategy for Nifty/Bank Nifty futures using Opening Range Breakout (ORB) methodology with advanced pattern recognition and institutional-quality risk management.
@@ -6,8 +28,8 @@ A sophisticated intraday trading strategy for Nifty/Bank Nifty futures using Ope
 ## Key Features
 
 ### 🎯 Dynamic ORH/ORL Detection
-- **Pattern-Based Formation**: Uses 3-candle pattern recognition instead of fixed time windows
-- **Real-time Detection**: ORH/ORL can form anytime during trading session when pattern confirms
+- **Run-Based Formation**: ORH is the peak of the run of higher highs from the first candle of the day. ORL is the low of the run of lower lows. No fixed time window
+- **Real-time Detection**: Each level is set once per day, at the close of the candle that ends its run
 - **Precise Entry Points**: Identifies exact turning points rather than arbitrary time-based levels
 
 ### 📊 16 Trading Patterns
@@ -76,8 +98,8 @@ A sophisticated intraday trading strategy for Nifty/Bank Nifty futures using Ope
 - **Stop Loss**: ATR-based with pattern-specific multipliers
 
 ### Pattern Recognition
-- **ORH Formation**: `high < high[1] and high[1] > high[2]`
-- **ORL Formation**: `low > low[1] and low[1] < low[2]`
+- **ORH Formation**: run continues while `high >= high[1]` from the first candle (equal highs extend it); the first candle with `high < high[1]` ends it, and ORH = `high[1]`
+- **ORL Formation**: run continues while `low <= low[1]` from the first candle (equal lows extend it); the first candle with `low > low[1]` ends it, and ORL = `low[1]`
 - **Validation**: Multi-touch consolidation with 3+ touches
 - **Structure**: LL/HH rule compliance required
 
