@@ -5,9 +5,10 @@ from __future__ import annotations
 from orb_intraday_bot.adapters.groww.client import ReadOnlyGrowwClient
 from orb_intraday_bot.adapters.groww.token import TokenManager
 from orb_intraday_bot.config.settings import Settings
+from orb_intraday_bot.core.errors import ConfigurationError
 
 
-class MissingCredentialsError(RuntimeError):
+class MissingCredentialsError(ConfigurationError, RuntimeError):
     pass
 
 

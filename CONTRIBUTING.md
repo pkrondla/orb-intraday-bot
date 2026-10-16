@@ -42,8 +42,9 @@ put a key with trading permission on a development machine.
 - Strategy code (`core`, `indicators`, `patterns`, `risk`, `engine`) does no I/O and imports no
   broker, database, runtime or CLI code.
 - Only `adapters/groww` imports the Groww SDK. Adapters never import strategy code.
-- Layers only import downwards (see `[tool.importlinter]` in `pyproject.toml`). Two known cycles
-  are listed there as debt and are removed in Phase 12; do not add to that list.
+- Layers only import downwards (see `[tool.importlinter]` in `pyproject.toml`). There are no
+  exceptions; do not add `ignore_imports`. Persistence is reached through ports (for example
+  `paper/ports.py`), implemented in `storage`.
 
 ## Dependencies
 

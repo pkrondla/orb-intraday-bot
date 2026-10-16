@@ -27,25 +27,23 @@ from pathlib import Path
 from typing import Protocol
 
 from orb_intraday_bot import __version__
+from orb_intraday_bot.config.fingerprint import fingerprint
 from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import IST, Clock
+from orb_intraday_bot.core.errors import must_halt
 from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.contract import FuturesContract
 from orb_intraday_bot.indicators.pivots import pivots_from_session
 from orb_intraday_bot.options.planner import OptionDataSource, OptionPlanner
-from orb_intraday_bot.runtime.day import CandleReport, TradingDay
+from orb_intraday_bot.runtime.alerts import Alerts
+from orb_intraday_bot.runtime.day import TradingDay
 from orb_intraday_bot.runtime.monitor import (
     Watchdog,
     another_instance_running,
     write_heartbeat,
 )
 from orb_intraday_bot.runtime.notify import Notifier
-from orb_intraday_bot.runtime.report import (
-    format_candle_report,
-    format_day_end,
-    format_exit,
-    format_opened,
-)
+from orb_intraday_bot.runtime.report import format_candle_report, format_day_end, format_exit
 from orb_intraday_bot.storage.store import TradeStore
 
 log = logging.getLogger("orb.live")
@@ -86,7 +84,7 @@ class LiveRunner:
         self._cfg = config
         self._source = source
         self._store = store
-        self._notify = notifier
+        self._alerts = Alerts(notifier, config.runtime.notify_candle_reports)
         self._clock = clock
         self._sleep = sleep
         self._out = out
@@ -114,7 +112,7 @@ class LiveRunner:
             msg = f"{type(exc).__name__}: {exc}"
             log.exception("Run failed")
             self._beat("error", msg)
-            self._notify.send(f"ORB bot STOPPED with an error: {msg}\nPositions are saved.")
+            self._alerts.stopped_with_error(msg)
             return RunOutcome(1, msg)
 
     # -- the day -------------------------------------------------------------------------
@@ -182,6 +180,8 @@ class LiveRunner:
         try:
             candles = self._source.session_candles(contract, day)
         except Exception as exc:         # data problems are retried, not fatal
+            if must_halt(exc):
+                raise
             msg = self._watchdog.record_error(exc)
             log.warning("Candle fetch failed: %s", msg)
             return None
@@ -194,28 +194,13 @@ class LiveRunner:
         fresh = age <= self._cfg.runtime.max_signal_age_sec
         report = trading.on_candle(candle, allow_open=fresh, catch_up=not fresh)
         self._out(format_candle_report(report))
-        self._send_alerts(report)
+        self._alerts.candle(report)
         self._beat("running", f"processed {candle.start:%H:%M}")
-
-    def _send_alerts(self, report: CandleReport) -> None:
-        for outcome in report.opened:
-            self._notify.send(format_opened(outcome))
-        for outcome in report.outcomes:
-            if outcome.status == "stale":
-                s = outcome.signal
-                self._notify.send(
-                    f"MISSED {s.setup.value} {s.level_name} {s.direction.value} @ "
-                    f"{s.entry_price:.1f}: the bot was not running when it fired."
-                )
-        for event in report.exits:
-            self._notify.send(format_exit(event))
-        if self._cfg.runtime.notify_candle_reports:
-            self._notify.send(format_candle_report(report))
 
     def _finish(self, trading: TradingDay, day: date) -> RunOutcome:
         text = format_day_end(trading.summary(), trading.positions_today())
         self._out(text)
-        self._notify.send(text)
+        self._alerts.day_end(text)
         self._beat("finished", "session complete")
         return RunOutcome(0, "session complete")
 
@@ -234,13 +219,15 @@ class LiveRunner:
                 price = live.get(contract.trading_symbol, price)
                 options = {s: v for s, v in live.items() if s != contract.trading_symbol}
             except Exception as exc:
+                if must_halt(exc):
+                    raise
                 log.warning("End-of-day price fetch failed: %s", exc)
         if price is None:
             return
         self._out("  The last candle never arrived: closing open positions at the last price.")
         for event in trading.paper.close_all(close_dt, price, options):
             self._out("  " + format_exit(event))
-            self._notify.send(format_exit(event))
+            self._alerts.exit(event)
 
     def _poll_ticks(self) -> None:
         trading, contract = self._day, self._contract
@@ -258,6 +245,8 @@ class LiveRunner:
         try:
             prices = self._source.ltp(symbols)
         except Exception as exc:
+            if must_halt(exc):
+                raise
             log.warning("Price poll failed: %s", self._watchdog.record_error(exc))
             return
         self._watchdog.record_success()
@@ -266,9 +255,8 @@ class LiveRunner:
             return
         options = {s: v for s, v in prices.items() if s != contract.trading_symbol}
         for event in trading.paper.on_tick(now, futures, options):
-            text = format_exit(event)
-            self._out("  " + text)
-            self._notify.send(text)
+            self._out("  " + format_exit(event))
+            self._alerts.exit(event)
 
     def _wait_until(self, target: datetime) -> None:
         interval = self._cfg.runtime.poll_interval_sec
@@ -310,10 +298,12 @@ class LiveRunner:
         trading: TradingDay,
     ) -> str:
         restored = trading.paper.open_positions
+        fp = fingerprint(self._cfg)
         lines = [
             f"ORB Intraday Bot v{__version__} - PAPER MODE (no orders are ever placed)",
             f"  {contract.trading_symbol} (expiry {contract.expiry}, lot {contract.lot_size}); "
             f"pivots from {prev_day}: S1 {s1:.1f}, R1 {r1:.1f}",
+            f"  rules {fp.strategy} (assumptions {fp.assumptions}, runtime {fp.runtime})",
         ]
         if restored:
             lines.append(f"  restored {len(restored)} open position(s) from the database")

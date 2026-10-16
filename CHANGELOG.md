@@ -6,6 +6,11 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+### Changed (Phase 12, behaviour-preserving: the golden 54-day replay is unchanged)
+- Golden replay test (`tests/golden`): the 54-session replay, 212 trades, is frozen as a file.
+- `paper` depends on a `PositionRepository` port instead of SQLite; the storage/paper import
+  cycle and its `ignore_imports` exceptions are gone.
+
 ## [0.9.0] - 2026-10-16
 
 First tagged version: the paper-trading bot, ready for the forward test. **Paper only; no order

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from orb_intraday_bot.config.settings import StrategyConfig
+from orb_intraday_bot.core.errors import TradePlanError
 from orb_intraday_bot.core.models import Direction
 from orb_intraday_bot.options.chain import OptionContract, OptionQuote
 from orb_intraday_bot.options.selector import FLAG_DELTA_MISSING, OptionSelection
@@ -36,7 +37,7 @@ from orb_intraday_bot.risk.targets import TargetPlan
 FLAG_TARGET_DELTA_ASSUMED = "target_delta_assumed"
 
 
-class OptionPlanError(ValueError):
+class OptionPlanError(TradePlanError, ValueError):
     """The option trade cannot be planned (reason in the message)."""
 
 

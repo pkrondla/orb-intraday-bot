@@ -35,7 +35,8 @@ Ordered by how much each would hurt a live system.
    alerts and heartbeat. Business flow should sit in application services, and the CLI should
    only parse arguments.
 5. **Layer rules are conventions, not enforced.** *(Closed in Phase 11 with `import-linter`
-   contracts in CI; two storage/paper cycles are listed as debt and go in Phase 12.)*
+   contracts in CI; the storage/paper cycle was removed in Phase 12 with a `PositionRepository`
+   port.)*
 6. **Persistence is thin.** SQLite with no schema version or migrations; positions are stored as
    one JSON blob (hard to query and to evolve); no append-only event log for audit and replay.
 7. **Prices and money are plain floats.** Fine for research. Orders need tick-rounded price
