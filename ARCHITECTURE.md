@@ -23,14 +23,19 @@ Ordered by how much each would hurt a live system.
 1. **No delivery process.** *(Closed in Phase 11.)* The project is committed, but had no
    branch policy, CI, lock file, enforced layer rules or tagged release to run a forward test
    against. Phase 11 added all of them (see `CONTRIBUTING.md`).
-2. **Position lifecycle and fill simulation are one class.** `PaperEngine` decides *what* to do
+2. **Position lifecycle and fill simulation are one class.** *(Moved to Phase 15 on purpose:
+   the split is defined by the `OrderIntent` contract, which does not exist yet; splitting
+   before it would guess the interface. Phase 12 removed the storage coupling, the first step.)*
+   `PaperEngine` decides *what* to do
    (stops, T1, T2) and also *pretends* the order filled. Live needs these separated: a
    position/exit manager that emits order **intents**, and an execution venue that turns an
    intent into real or simulated fills.
 3. **No order model.** There is no order state machine (new, sent, acknowledged, partial,
    filled, rejected, cancelled), no client order IDs, no broker reconciliation, no handling of
    rejections or partial fills.
-4. **Application logic lives in the wrong places.** `cli.py` (500 lines) holds replay
+4. **Application logic lives in the wrong places.** *(Closed in Phase 12: `app/` holds the
+   services, `cli.py` only parses and prints, `runtime/alerts.py` owns every message.)*
+   Originally: `cli.py` (500 lines) held replay
    orchestration and printing; `LiveRunner` (320 lines) mixes scheduling, polling, catch-up,
    alerts and heartbeat. Business flow should sit in application services, and the CLI should
    only parse arguments.
@@ -39,13 +44,21 @@ Ordered by how much each would hurt a live system.
    port.)*
 6. **Persistence is thin.** SQLite with no schema version or migrations; positions are stored as
    one JSON blob (hard to query and to evolve); no append-only event log for audit and replay.
-7. **Prices and money are plain floats.** Fine for research. Orders need tick-rounded price
+7. **Prices and money are plain floats.** *(Moved to Phase 15: the types belong to the order
+   model, and changing every float now would only risk the golden replay for no benefit.)*
+   Fine for research. Orders need tick-rounded price
    types, integer quantities and `Decimal` for rupees.
-8. **Config mixes concerns and is not recorded with results.** Strategy rules, runtime timing and
+8. **Config mixes concerns and is not recorded with results.** *(Closed in Phase 12 by
+   `config/fingerprint.py`: three hashes, the strategy hash is stored on every position. The YAML
+   stays one file; a physical split into three models comes with the risk config in Phase 16.)*
+   Strategy rules, runtime timing and
    paper assumptions share one model; a trade does not record which config produced it.
-9. **Logging is ad hoc.** `print` plus unstructured logs; no run ID, no metrics, no health
+9. **Logging is ad hoc.** *(Partly closed in Phase 12: JSON event log with a run id; metrics and
+   a health endpoint are Phase 17.)* `print` plus unstructured logs; no run ID, no metrics, no health
    endpoint.
-10. **Broad `except Exception` in the runner** and no error taxonomy (retryable data error, fatal
+10. **Broad `except Exception` in the runner** and no error taxonomy. *(Closed in Phase 12:
+    `core/errors.py`; the runner asks `reaction_for`/`must_halt`. Unknown SDK errors in the data
+    path are still retried on purpose.)* Originally: (retryable data error, fatal
     strategy error, broker rejection, risk breach each need a different reaction).
 11. **Single-threaded polling.** Fine for paper. Live needs a streaming feed and order updates
     arriving while the strategy runs.

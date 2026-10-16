@@ -37,6 +37,7 @@ from orb_intraday_bot.indicators.pivots import pivots_from_session
 from orb_intraday_bot.options.planner import OptionDataSource, OptionPlanner
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import TradingDay
+from orb_intraday_bot.runtime.logs import log_event
 from orb_intraday_bot.runtime.monitor import (
     Watchdog,
     another_instance_running,
@@ -110,7 +111,7 @@ class LiveRunner:
             return RunOutcome(130, "stopped by the user")
         except Exception as exc:
             msg = f"{type(exc).__name__}: {exc}"
-            log.exception("Run failed")
+            log.exception("Run failed", extra={"event": "run_failed", "error": msg})
             self._beat("error", msg)
             self._alerts.stopped_with_error(msg)
             return RunOutcome(1, msg)
@@ -129,6 +130,11 @@ class LiveRunner:
         )
         self._day = trading
         self._out(self._banner(contract, prev_day, pivots.r1, pivots.s1, trading))
+        log_event(
+            log, "run_started", day=day.isoformat(), symbol=contract.trading_symbol,
+            version=__version__, strategy_hash=fingerprint(cfg).strategy,
+            restored_positions=len(trading.paper.open_positions),
+        )
 
         open_dt = datetime.combine(day, time(9, 15), tzinfo=IST)
         close_dt = datetime.combine(day, time(15, 30), tzinfo=IST)
@@ -195,12 +201,20 @@ class LiveRunner:
         report = trading.on_candle(candle, allow_open=fresh, catch_up=not fresh)
         self._out(format_candle_report(report))
         self._alerts.candle(report)
+        log_event(
+            log, "candle_processed", candle=f"{candle.start:%H:%M}", fresh=fresh,
+            opened=len(report.opened), exits=len(report.exits),
+            open_positions=len(trading.paper.open_positions),
+        )
         self._beat("running", f"processed {candle.start:%H:%M}")
 
     def _finish(self, trading: TradingDay, day: date) -> RunOutcome:
         text = format_day_end(trading.summary(), trading.positions_today())
         self._out(text)
         self._alerts.day_end(text)
+        log_event(
+            log, "run_finished", day=day.isoformat(), trades=len(trading.positions_today()),
+        )
         self._beat("finished", "session complete")
         return RunOutcome(0, "session complete")
 

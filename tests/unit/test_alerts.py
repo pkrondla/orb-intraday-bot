@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import CandleReport
-from tests.unit.test_runtime import Recorder, make_day, real_day
+from tests.runtime_support import Recorder, make_day, real_day
 
 
 def _reports() -> list[CandleReport]:

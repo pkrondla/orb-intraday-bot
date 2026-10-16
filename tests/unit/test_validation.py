@@ -3,6 +3,7 @@ sanity checks, live-versus-replay reconciliation and the variant sweep."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -42,10 +43,10 @@ from orb_intraday_bot.paper.models import ExitReason
 from orb_intraday_bot.risk.targets import plan_targets
 from orb_intraday_bot.storage.store import TradeStore
 from tests.helpers import at, series
+from tests.runtime_support import PREV_DAY, prev_session
 from tests.unit.test_paper import CFG, bar, make_trade
 from tests.unit.test_retest_and_swing import real_day
 from tests.unit.test_risk_and_engine import STOPS, WIDE, make
-from tests.unit.test_runtime import PREV_DAY, prev_session
 
 LOT = 65
 DAY = date(2026, 10, 15)
@@ -369,7 +370,7 @@ def test_sweep_runs_variants_on_the_same_candles() -> None:
 def test_store_lists_trade_days() -> None:
     store = TradeStore(":memory:")
     assert store.trade_days() == []
-    from tests.unit.test_runtime import make_day
+    from tests.runtime_support import make_day
 
     day = make_day(store)
     for candle in real_day():
@@ -390,11 +391,11 @@ def test_new_commands_parse() -> None:
 
 
 def test_report_command_on_an_empty_and_a_filled_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, cli_context: Callable[..., object], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from tests.unit.test_runtime import make_day
+    from tests.runtime_support import make_day
 
-    monkeypatch.setattr(cli, "_load", lambda: (None, CFG, tmp_path))
+    cli_context()
     assert cli.main(["report"]) == 1
     store = TradeStore(tmp_path / CFG.paper.database_file)
     day = make_day(store)

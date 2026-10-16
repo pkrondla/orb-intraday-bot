@@ -10,6 +10,13 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 - Golden replay test (`tests/golden`): the 54-session replay, 212 trades, is frozen as a file.
 - `paper` depends on a `PositionRepository` port instead of SQLite; the storage/paper import
   cycle and its `ignore_imports` exceptions are gone.
+- `cli.py` only parses and prints; the work moved to `app/` services (replay, forward test,
+  health) that take their collaborators as parameters. `runtime/alerts.py` owns every alert.
+- Error taxonomy (`core/errors.py`): each failure family has one reaction (retry, reject the
+  signal, stop, flatten). The runner stops on safety or configuration errors instead of retrying.
+- Positions record the strategy hash (`config/fingerprint.py`); the run banner prints it.
+- Structured JSON event log with a run id (`logs/orb-bot-<day>.jsonl`) next to the text log.
+- Coverage gate raised from 85% to 92%; test fakes shared in `tests/runtime_support.py`.
 
 ## [0.9.0] - 2026-10-16
 

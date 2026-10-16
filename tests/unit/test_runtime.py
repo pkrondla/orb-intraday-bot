@@ -9,24 +9,18 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from orb_intraday_bot import cli
-from orb_intraday_bot.config.settings import StrategyConfig
-from orb_intraday_bot.core.clock import IST, FixedClock
-from orb_intraday_bot.core.models import Candle
+from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.signals import Setup
-from orb_intraday_bot.data.contract import FuturesContract
-from orb_intraday_bot.indicators.pivots import pivots_from_session
-from orb_intraday_bot.options.chain import OptionChain
 from orb_intraday_bot.options.planner import OptionPlanner
 from orb_intraday_bot.paper.models import ExitReason
 from orb_intraday_bot.runtime.day import TradingDay
-from orb_intraday_bot.runtime.live import LiveRunner
 from orb_intraday_bot.runtime.monitor import (
     Watchdog,
     another_instance_running,
@@ -35,39 +29,18 @@ from orb_intraday_bot.runtime.monitor import (
 )
 from orb_intraday_bot.runtime.notify import NullNotifier, TelegramNotifier
 from orb_intraday_bot.runtime.report import format_candle_report
-from orb_intraday_bot.runtime.synthetic import SyntheticOptions
 from orb_intraday_bot.storage.store import TradeStore
-from tests.helpers import at, series
-from tests.unit.test_retest_and_swing import real_day
-
-DAY = date(2026, 10, 15)
-PREV_DAY = date(2026, 10, 14)
-LOT = 75
-CFG = StrategyConfig()
-# Coarser retry steps keep the simulated five-hour wait after the data ends fast.
-RUN_CFG = StrategyConfig.model_validate(
-    {"runtime": {"fetch_retry_sec": 60, "poll_interval_sec": 30}}
+from tests.helpers import at
+from tests.runtime_support import (
+    CFG,
+    DAY,
+    LOT,
+    Harness,
+    NoChain,
+    Recorder,
+    make_day,
+    real_day,
 )
-CONTRACT = FuturesContract("NIFTY26OCTFUT", "NIFTY-26Oct", "1", date(2026, 10, 27), LOT, 0.05)
-
-
-def prev_session() -> list[Candle]:
-    return series(
-        [(22750, 22900, 22600, 22750), (22750, 22800, 22650, 22750)],
-        first=at(9, 15, PREV_DAY),
-    )
-
-
-def make_day(store: TradeStore | None = None, planner: OptionPlanner | None = None) -> TradingDay:
-    return TradingDay(
-        CFG, DAY, CONTRACT.trading_symbol, pivots_from_session(prev_session()),
-        planner or OptionPlanner(CFG, SyntheticOptions(LOT)), store,
-    )
-
-
-class NoChain(SyntheticOptions):
-    def option_chain(self, expiry: date) -> OptionChain:
-        return OptionChain(expiry, None, {})
 
 
 # ---- TradingDay --------------------------------------------------------------------------
@@ -135,78 +108,7 @@ def test_candle_report_has_the_levels_and_the_trade() -> None:
     assert "ORH" in texts[3]
 
 
-# ---- fake data source for the live runner ------------------------------------------------
-class FakeSource(SyntheticOptions):
-    def __init__(self, clock: FixedClock, candles: list[Candle]) -> None:
-        super().__init__(LOT)
-        self.clock = clock
-        self.candles = candles
-        self.fail_fetches = 0
-        self.price_override: tuple[datetime, float] | None = None
-
-    def futures_contract(self, today: date | None = None) -> FuturesContract:
-        return CONTRACT
-
-    def previous_session(
-        self, contract: FuturesContract, today: date, lookback_days: int = 10
-    ) -> tuple[date, list[Candle]]:
-        return PREV_DAY, prev_session()
-
-    def session_candles(self, contract: FuturesContract, day: date) -> list[Candle]:
-        if self.fail_fetches > 0:
-            self.fail_fetches -= 1
-            raise ConnectionError("boom")
-        now = self.clock.now()
-        return [c for c in self.candles if c.start + timedelta(minutes=3) <= now]
-
-    def ltp(self, trading_symbols: Sequence[str]) -> dict[str, float]:
-        price = self.candles[-1].close if self.candles else 22800.0
-        if self.price_override and self.clock.now() >= self.price_override[0]:
-            price = self.price_override[1]
-        return {
-            s: (price if s == CONTRACT.trading_symbol else 150.0) for s in trading_symbols
-        }
-
-
-class Recorder:
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-
-    def send(self, text: str) -> None:
-        self.messages.append(text)
-
-    def joined(self) -> str:
-        return "\n".join(self.messages)
-
-
-class Harness:
-    def __init__(
-        self, tmp_path: Path, start: datetime, candles: list[Candle] | None = None
-    ) -> None:
-        self.clock = FixedClock(start)
-        self.source = FakeSource(self.clock, real_day() if candles is None else candles)
-        self.store = TradeStore(":memory:")
-        self.notes = Recorder()
-        self.lines: list[str] = []
-        self.sleeps = 0
-        self.data_dir = tmp_path
-
-    def sleep(self, seconds: float) -> None:
-        self.sleeps += 1
-        assert self.sleeps < 100_000, "runner is not advancing"
-        self.clock.advance(seconds=seconds)
-
-    def runner(self) -> LiveRunner:
-        return LiveRunner(
-            RUN_CFG, self.data_dir, self.source, self.store, self.notes, self.clock,
-            self.sleep, self.lines.append,
-        )
-
-    @property
-    def text(self) -> str:
-        return "\n".join(self.lines)
-
-
+# ---- live runner (fakes live in tests/runtime_support.py) --------------------------------
 def test_full_session_from_before_the_open(tmp_path: Path) -> None:
     h = Harness(tmp_path, at(9, 10))
     outcome = h.runner().run()
@@ -395,9 +297,9 @@ def test_parser_commands() -> None:
 
 
 def test_status_and_summary_commands(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, cli_context: Callable[..., object], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli, "_load", lambda: (None, CFG, tmp_path))
+    cli_context()
     assert cli.main(["status"]) == 1
     assert "not run" in capsys.readouterr().out
 

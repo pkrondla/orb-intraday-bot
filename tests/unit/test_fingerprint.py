@@ -10,7 +10,7 @@ from orb_intraday_bot.config.fingerprint import (
 )
 from orb_intraday_bot.config.settings import StrategyConfig, apply_overrides
 from orb_intraday_bot.paper.models import Position
-from tests.unit.test_runtime import CFG, make_day, real_day
+from tests.runtime_support import CFG, make_day, real_day
 
 
 def test_every_config_section_belongs_to_exactly_one_group() -> None:

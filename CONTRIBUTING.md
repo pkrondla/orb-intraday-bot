@@ -30,7 +30,7 @@ put a key with trading permission on a development machine.
 
 ## Definition of done
 
-1. `scripts\dev.ps1 ci` is green: ruff, mypy strict, import-linter, tests, coverage at least 85%.
+1. `scripts\dev.ps1 ci` is green: ruff, mypy strict, import-linter, tests, coverage at least 92% (it was 89% at v0.9.0 and is raised only, never lowered), and the golden replay unchanged.
 2. New behaviour has tests, including the failure case. A bug fix starts with a failing test.
 3. Behaviour changes carry a replay before and after (`orb-bot replay --last 60`, or the golden
    replay once Phase 12 lands) and a bump of the strategy version.
