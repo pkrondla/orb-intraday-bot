@@ -89,6 +89,7 @@ class Position:
     remaining_lots: int
     t1_done: bool = False
     breakeven_after_t1: bool = True   # from config targets.move_sl_to_entry_after_t1
+    strategy_hash: str = ""           # the rules this trade was opened under (config.fingerprint)
     stop_at_entry: bool = False
     status: PositionStatus = PositionStatus.OPEN
     closed_at: datetime | None = None

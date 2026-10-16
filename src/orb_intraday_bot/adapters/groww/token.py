@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from orb_intraday_bot.core.clock import IST
+from orb_intraday_bot.core.errors import DataUnavailableError
 
 EXPIRY_HOUR_IST = 6
 _RATE_LIMIT_MARKERS = ("rate limit", "ratelimit", "too many requests", "429")
@@ -33,7 +34,7 @@ class TokenProvider(Protocol):
     def invalidate(self) -> None: ...
 
 
-class TokenCooldownError(RuntimeError):
+class TokenCooldownError(DataUnavailableError, RuntimeError):
     """Raised instead of calling the token endpoint while a rate-limit cooldown is active."""
 
 

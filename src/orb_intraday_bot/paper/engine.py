@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, time, timedelta
 
+from orb_intraday_bot.config.fingerprint import fingerprint
 from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.models import Candle, Direction
@@ -29,12 +30,13 @@ from orb_intraday_bot.paper.exits import (
     modeled_option_price,
 )
 from orb_intraday_bot.paper.models import Position
-from orb_intraday_bot.storage.store import TradeStore
+from orb_intraday_bot.paper.ports import PositionRepository
 
 
 class PaperEngine:
-    def __init__(self, config: StrategyConfig, store: TradeStore | None = None) -> None:
+    def __init__(self, config: StrategyConfig, store: PositionRepository | None = None) -> None:
         self._cfg = config
+        self._strategy_hash = fingerprint(config).strategy
         self._store = store
         self._open: dict[str, Position] = {}
         self._closed: list[Position] = []
@@ -107,6 +109,7 @@ class PaperEngine:
             t1_book_lots=plan.t1_book_lots,
             remaining_lots=plan.lots,
             breakeven_after_t1=self._cfg.targets.move_sl_to_entry_after_t1,
+            strategy_hash=self._strategy_hash,
             flags=list(plan.flags),
             notes=[
                 f"entry: {signal.entry_basis}",

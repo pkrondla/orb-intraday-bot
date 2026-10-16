@@ -56,7 +56,7 @@ source = ["src/orb_intraday_bot"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 92
 show_missing = true
 skip_covered = true
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
@@ -70,21 +70,16 @@ name = "Layers: each layer only imports from layers below it"
 type = "layers"
 layers = [
     "orb_intraday_bot.cli",
+    "orb_intraday_bot.app",
     "orb_intraday_bot.analysis",
     "orb_intraday_bot.runtime",
-    "orb_intraday_bot.storage | orb_intraday_bot.paper",
+    "orb_intraday_bot.storage",
+    "orb_intraday_bot.paper",
     "orb_intraday_bot.options",
     "orb_intraday_bot.engine",
     "orb_intraday_bot.patterns | orb_intraday_bot.risk",
     "orb_intraday_bot.indicators",
     "orb_intraday_bot.core",
-]
-# Known debt, removed in Phase 12 (split PaperEngine into a position manager and a venue, and move
-# the position models out of the paper package): storage and paper import each other.
-ignore_imports = [
-    "orb_intraday_bot.storage.store -> orb_intraday_bot.paper.report",
-    "orb_intraday_bot.storage.store -> orb_intraday_bot.paper.models",
-    "orb_intraday_bot.paper.engine -> orb_intraday_bot.storage.store",
 ]
 
 [[tool.importlinter.contracts]]
@@ -102,6 +97,7 @@ forbidden_modules = [
     "orb_intraday_bot.storage",
     "orb_intraday_bot.runtime",
     "orb_intraday_bot.analysis",
+    "orb_intraday_bot.app",
     "orb_intraday_bot.cli",
     "growwapi",
     "sqlite3",
@@ -121,6 +117,7 @@ forbidden_modules = [
     "orb_intraday_bot.storage",
     "orb_intraday_bot.runtime",
     "orb_intraday_bot.analysis",
+    "orb_intraday_bot.app",
     "orb_intraday_bot.cli",
 ]
 
@@ -140,6 +137,7 @@ source_modules = [
     "orb_intraday_bot.storage",
     "orb_intraday_bot.runtime",
     "orb_intraday_bot.analysis",
+    "orb_intraday_bot.app",
     "orb_intraday_bot.cli",
 ]
 forbidden_modules = ["growwapi"]

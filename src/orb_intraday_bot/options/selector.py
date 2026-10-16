@@ -13,6 +13,7 @@ import math
 from dataclasses import dataclass
 
 from orb_intraday_bot.config.settings import OptionsConfig
+from orb_intraday_bot.core.errors import TradePlanError
 from orb_intraday_bot.core.models import Direction
 from orb_intraday_bot.options.chain import OptionChain, OptionKind, OptionQuote
 
@@ -20,7 +21,7 @@ FLAG_DELTA_OUT_OF_BAND = "delta_out_of_band"
 FLAG_DELTA_MISSING = "delta_missing"
 
 
-class OptionSelectionError(RuntimeError):
+class OptionSelectionError(TradePlanError, RuntimeError):
     pass
 
 

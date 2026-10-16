@@ -9,6 +9,7 @@ from typing import Any
 
 from orb_intraday_bot.config.settings import InstrumentConfig
 from orb_intraday_bot.core.clock import IST, Clock, SystemClock
+from orb_intraday_bot.core.errors import DataUnavailableError
 from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.candles import parse_candle_rows
 from orb_intraday_bot.data.contract import FuturesContract, select_futures_contract
@@ -24,7 +25,7 @@ _FMT = "%Y-%m-%d %H:%M:%S"
 _MAX_DAYS_PER_REQUEST = 28   # Groww allows 30 days of 3-minute candles per request
 
 
-class NoSessionDataError(RuntimeError):
+class NoSessionDataError(DataUnavailableError, RuntimeError):
     pass
 
 

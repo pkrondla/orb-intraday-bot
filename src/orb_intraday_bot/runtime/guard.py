@@ -8,9 +8,10 @@ from orb_intraday_bot.adapters.groww.client import (
     ReadOnlyGrowwClient,
 )
 from orb_intraday_bot.config.settings import Settings
+from orb_intraday_bot.core.errors import SafetyViolationError
 
 
-class SafetyError(RuntimeError):
+class SafetyError(SafetyViolationError, RuntimeError):
     pass
 
 

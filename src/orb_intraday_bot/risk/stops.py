@@ -22,11 +22,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from orb_intraday_bot.config.settings import StopsConfig
+from orb_intraday_bot.core.errors import TradePlanError
 from orb_intraday_bot.core.models import Direction
 from orb_intraday_bot.core.signals import SetupSignal
 
 
-class PlanError(ValueError):
+class PlanError(TradePlanError, ValueError):
     """The signal cannot be turned into a valid trade plan; the message is shown in the report."""
 
 
