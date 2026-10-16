@@ -20,9 +20,9 @@ what is not, and the target design. The work to get there is Phases 10 to 22 in 
 
 Ordered by how much each would hurt a live system.
 
-1. **Nothing is under version control.** All the Python work is untracked in git (only the
-   original Pine files were ever committed). No history, no review, no CI, no tagged release to
-   run a forward test against.
+1. **No delivery process.** *(Closed in Phase 11.)* The project is committed, but had no
+   branch policy, CI, lock file, enforced layer rules or tagged release to run a forward test
+   against. Phase 11 added all of them (see `CONTRIBUTING.md`).
 2. **Position lifecycle and fill simulation are one class.** `PaperEngine` decides *what* to do
    (stops, T1, T2) and also *pretends* the order filled. Live needs these separated: a
    position/exit manager that emits order **intents**, and an execution venue that turns an
@@ -34,7 +34,8 @@ Ordered by how much each would hurt a live system.
    orchestration and printing; `LiveRunner` (320 lines) mixes scheduling, polling, catch-up,
    alerts and heartbeat. Business flow should sit in application services, and the CLI should
    only parse arguments.
-5. **Layer rules are conventions, not enforced.** Nothing stops `patterns/` importing `storage/`.
+5. **Layer rules are conventions, not enforced.** *(Closed in Phase 11 with `import-linter`
+   contracts in CI; two storage/paper cycles are listed as debt and go in Phase 12.)*
 6. **Persistence is thin.** SQLite with no schema version or migrations; positions are stored as
    one JSON blob (hard to query and to evolve); no append-only event log for audit and replay.
 7. **Prices and money are plain floats.** Fine for research. Orders need tick-rounded price

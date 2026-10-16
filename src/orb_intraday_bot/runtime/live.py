@@ -26,6 +26,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from orb_intraday_bot import __version__
 from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import IST, Clock
 from orb_intraday_bot.core.models import Candle
@@ -310,7 +311,7 @@ class LiveRunner:
     ) -> str:
         restored = trading.paper.open_positions
         lines = [
-            "ORB Intraday Bot - PAPER MODE (no orders are ever placed)",
+            f"ORB Intraday Bot v{__version__} - PAPER MODE (no orders are ever placed)",
             f"  {contract.trading_symbol} (expiry {contract.expiry}, lot {contract.lot_size}); "
             f"pivots from {prev_day}: S1 {s1:.1f}, R1 {r1:.1f}",
         ]
