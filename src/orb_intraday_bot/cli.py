@@ -55,6 +55,8 @@ def _today() -> date:
 
 # -- run -----------------------------------------------------------------------------------
 def cmd_run(_: argparse.Namespace) -> int:
+    from orb_intraday_bot.analysis.levels import levels_path, remember
+    from orb_intraday_bot.indicators.pivots import SessionLevels
     from orb_intraday_bot.runtime.live import LiveRunner
     from orb_intraday_bot.runtime.logs import new_run_id
     from orb_intraday_bot.runtime.notify import build_notifier
@@ -63,9 +65,16 @@ def cmd_run(_: argparse.Namespace) -> int:
     ctx = load_context()
     clock = SystemClock()
     store = TradeStore(ctx.database_path)
+    data = build_market_data(ctx)
+
+    def save_levels(symbol: str, levels: SessionLevels) -> None:
+        # The exchange close is only available in the morning; keep it for replay and reconcile.
+        remember(levels_path(ctx.history_path(symbol)), levels)
+
     runner = LiveRunner(
-        ctx.cfg, ctx.data_dir, build_market_data(ctx), store, build_notifier(ctx.settings),
+        ctx.cfg, ctx.data_dir, data, store, build_notifier(ctx.settings),
         clock, time.sleep, make_output(ctx.data_dir, clock.now().date(), new_run_id(clock.now())),
+        on_levels=save_levels,
     )
     outcome = runner.run()
     store.close()
@@ -127,7 +136,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     results = run_range(
         prep.cfg, prep.history.candles, prep.contract.trading_symbol, prep.contract.lot_size,
         prep.first, prep.last, only=prep.only, today=prep.today,
-        min_candles=request.min_candles, on_day=on_day, on_report=detail,
+        min_candles=request.min_candles, on_day=on_day, on_report=detail, levels=prep.levels,
     )
     if not results:
         print("No sessions to replay in that range (or no earlier session for the pivots).")
@@ -161,6 +170,7 @@ def cmd_sweep(args: argparse.Namespace) -> int:
         prep.cfg, variants, prep.history.candles, prep.contract.trading_symbol,
         prep.contract.lot_size, prep.first, prep.last, prep.only, prep.today,
         args.min_candles, progress=lambda name: print(f"  running {name} ...", flush=True),
+        levels=prep.levels,
     )
     days = len(results[0].results)
     print(f"\n{days} sessions, {prep.contract.trading_symbol}. Replay prices are synthetic; read "

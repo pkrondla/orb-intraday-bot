@@ -118,10 +118,13 @@ Two or more setups in the same direction mark a trending day.
 
 ## 4. Pivots and Zones
 
-- **Pivot type [Assumption]:** traditional daily pivots from the previous day's OHLC, with R1 to R5 and S1 to S5. Please check these against your chart.
+- **Pivot type:** traditional daily pivots from the previous day's OHLC, with R1 to R5 and S1 to S5. Checked against TradingView's "Pivot Points Standard" (Traditional, Auto, daily-based values) on 16 Oct 2026: every level matches.
   - P = (H + L + C) / 3, R1 = 2P − L, S1 = 2P − H, R2 = P + (H − L), S2 = P − (H − L).
   - R3 = 2P + H − 2L, S3 = 2P + L − 2H, R4 = 3P + H − 3L, S4 = 3P + L − 3H, R5 = 4P + H − 4L, S5 = 4P + L − 4H.
-  - H, L and C are the previous regular session's high, low and last close for the same futures contract.
+  - H, L and C are the previous session's values for the same futures contract, as the daily bar shows them, not the 3-minute candles:
+    - H and L come from the daily bar, which includes the pre-open trade (so L can be below every 3-minute candle).
+    - C is the exchange's closing price, not the last candle's close. Source, best first: the exchange's previous close from the live quote (only at the morning start); the volume-weighted average of the 1-minute closes from 15:00 to 15:40; the last 3-minute candle. The run banner shows which was used.
+    - The live run saves each morning's values to `data/history/<symbol>.levels.json`; replay, sweep and reconcile read them. A replay of a day the bot did not run uses the VWAP close, which is within a few paise of the exchange's number on the day checked, but is not guaranteed exact.
 - Pivots are for reference. Entries and exits come from the OR rules.
 
 | Zone | Rule |

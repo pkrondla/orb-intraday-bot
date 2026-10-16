@@ -6,6 +6,23 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+### Changed (pivot inputs now match TradingView; this changes live and replay behaviour)
+- The bot's pivots differed from TradingView's "Pivot Points Standard" (Traditional) by 2 to
+  12 points. The formulas were right; the previous session's low and close were not. TradingView's
+  daily bar includes the pre-open trade in the low and closes on the exchange's closing price.
+- High and low now come from Groww's daily bar (includes the pre-open trade). The close is the
+  exchange's previous close from the live quote (cross-checked against `last_price - day_change`),
+  else the volume-weighted 1-minute closes of 15:00 to 15:40, else the last 3-minute candle.
+  Checked on 15 Oct 2026: R3, R2, R1, P, S1 and S2 equal TradingView's to the displayed 0.1.
+- The run banner and `check` print the high, low, close and where the close came from.
+- The live run saves each morning's levels to `data/history/<symbol>.levels.json`. Replay, sweep
+  and reconcile read them back (and fetch the VWAP version once for days the bot never saw), so a
+  replay of a live day uses the same pivots the live run used. Days with no levels fall back to
+  the candles. Replays of earlier days use the VWAP close, which is close to, not exactly, the
+  exchange's number.
+- Results of replays and sweeps will differ from before for the same days. The golden replay test
+  is unchanged: it runs on frozen candles without saved levels.
+
 ### Changed (Phase 12, behaviour-preserving: the golden 54-day replay is unchanged)
 - Golden replay test (`tests/golden`): the 54-session replay, 212 trades, is frozen as a file.
 - `paper` depends on a `PositionRepository` port instead of SQLite; the storage/paper import

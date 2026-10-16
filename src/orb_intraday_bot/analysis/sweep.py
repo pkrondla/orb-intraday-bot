@@ -10,7 +10,7 @@ variants of the same idea, most weeks) over the single best row.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -18,6 +18,7 @@ from orb_intraday_bot.analysis.backtest import DayResult, run_range
 from orb_intraday_bot.analysis.stats import Overall, overall, rows_from_results
 from orb_intraday_bot.config.settings import StrategyConfig, apply_overrides
 from orb_intraday_bot.core.models import Candle
+from orb_intraday_bot.indicators.pivots import SessionLevels
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +80,7 @@ def run_sweep(
     today: date | None,
     min_candles: int,
     progress: Callable[[str], None] | None = None,
+    levels: Mapping[date, SessionLevels] | None = None,
 ) -> list[VariantResult]:
     out = []
     for variant in variants:
@@ -87,7 +89,7 @@ def run_sweep(
         cfg = apply_overrides(base, variant.overrides)
         results = run_range(
             cfg, candles, symbol, lot_size, first, last, only=only, today=today,
-            min_candles=min_candles,
+            min_candles=min_candles, levels=levels,
         )
         out.append(
             VariantResult(

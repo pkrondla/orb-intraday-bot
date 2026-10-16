@@ -9,6 +9,7 @@ from pathlib import Path
 
 from orb_intraday_bot.analysis.backtest import SignalRecord, run_day, signal_records, split_sessions
 from orb_intraday_bot.analysis.history import load_history
+from orb_intraday_bot.analysis.levels import levels_path, load_range
 from orb_intraday_bot.analysis.reconcile import format_reconciliation, reconcile
 from orb_intraday_bot.analysis.stats import TradeRow, format_report, trade_rows
 from orb_intraday_bot.app.replay import ReplayData
@@ -94,9 +95,17 @@ def reconcile_day(
             f"The database has no signals or trades for {day}: the live run did not record "
             "that day (or never ran), so there is nothing to compare."
         )
+    prev_day = earlier[-1]
+    # The levels the live run saved that morning (the exchange close), so both sides use the
+    # same pivots; a day it never saw falls back to the closing VWAP, then to the candles.
+    levels = load_range(
+        levels_path(history_path_for(contract.trading_symbol)),
+        lambda a, b: data.historical_levels(contract, a, b),
+        prev_day, prev_day, today,
+    )
     replay = run_day(
-        cfg, day, contract.trading_symbol, contract.lot_size, sessions[earlier[-1]],
-        sessions[day], earlier[-1],
+        cfg, day, contract.trading_symbol, contract.lot_size, sessions[prev_day],
+        sessions[day], prev_day, levels=levels.get(prev_day),
     )
     return (
         format_reconciliation(reconcile(day, live_signals, live_positions, replay))

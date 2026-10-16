@@ -9,13 +9,13 @@ morning would.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.models import Candle
-from orb_intraday_bot.indicators.pivots import pivots_from_session
+from orb_intraday_bot.indicators.pivots import SessionLevels, pivots_from_session
 from orb_intraday_bot.options.planner import OptionPlanner
 from orb_intraday_bot.paper.models import Position
 from orb_intraday_bot.runtime.day import CandleReport, TradingDay
@@ -87,10 +87,14 @@ def run_day(
     previous_day: date | None = None,
     on_report: Callable[[CandleReport], None] | None = None,
     force_close: bool = True,
+    levels: SessionLevels | None = None,
 ) -> DayResult:
+    """`levels` are the previous session's exchange-style high, low and close; without them the
+    pivots come from the previous session's own 3-minute candles."""
     store = TradeStore(":memory:")
+    pivots = levels.pivots() if levels is not None else pivots_from_session(previous)
     trading = TradingDay(
-        cfg, day, symbol, pivots_from_session(previous),
+        cfg, day, symbol, pivots,
         OptionPlanner(cfg, SyntheticOptions(lot_size)), store,
     )
     for candle in candles:
@@ -124,8 +128,12 @@ def run_range(
     min_candles: int = 0,
     on_day: Callable[[date], None] | None = None,
     on_report: Callable[[CandleReport], None] | None = None,
+    levels: Mapping[date, SessionLevels] | None = None,
 ) -> list[DayResult]:
-    """Every session in `candles` that has an earlier session in the data to take pivots from."""
+    """Every session in `candles` that has an earlier session in the data to take pivots from.
+
+    `levels` maps a session to its saved high, low and close; a day with no entry takes its
+    pivots from the previous session's candles."""
     sessions = split_sessions(candles)
     days = list(sessions)
     results = []
@@ -145,6 +153,7 @@ def run_range(
             run_day(
                 cfg, day, symbol, lot_size, sessions[prev_day], sessions[day], prev_day, on_report,
                 force_close=today is None or day < today,
+                levels=levels.get(prev_day) if levels is not None else None,
             )
         )
     return results

@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Protocol
 
 from orb_intraday_bot.config.settings import StrategyConfig
-from orb_intraday_bot.core.models import Candle, Direction
+from orb_intraday_bot.core.models import Direction
 from orb_intraday_bot.data.contract import FuturesContract
-from orb_intraday_bot.indicators.pivots import pivots_from_session
+from orb_intraday_bot.indicators.pivots import SessionLevels
 from orb_intraday_bot.options.chain import OptionChain
 from orb_intraday_bot.options.selector import kind_for, select_option
 from orb_intraday_bot.runtime.monitor import ACTIVE_STATUSES, read_heartbeat
@@ -54,9 +54,9 @@ def status_report(heartbeat_path: Path, now: datetime) -> StatusReport:
 class CheckData(Protocol):
     def futures_contract(self, today: date | None = None) -> FuturesContract: ...
 
-    def previous_session(
+    def previous_session_levels(
         self, contract: FuturesContract, today: date, lookback_days: int = 10
-    ) -> tuple[date, list[Candle]]: ...
+    ) -> SessionLevels: ...
 
     def nearest_option_expiry(self, today: date | None = None) -> date: ...
 
@@ -107,9 +107,12 @@ def run_checks(
     contract = contracts[0]
 
     def pivots() -> str:
-        day, prev = data.previous_session(contract, today)
-        p = pivots_from_session(prev)
-        return f"{day}: {len(prev)} candles, S1 {p.s1:.1f} P {p.p:.1f} R1 {p.r1:.1f}"
+        levels = data.previous_session_levels(contract, today)
+        p = levels.pivots()
+        return (
+            f"{levels.day}: {levels.describe()}; "
+            f"S1 {p.s1:.1f} P {p.p:.1f} R1 {p.r1:.1f}"
+        )
 
     step("previous session and pivots", pivots)
     step("nearest weekly expiry", lambda: str(data.nearest_option_expiry(today)))

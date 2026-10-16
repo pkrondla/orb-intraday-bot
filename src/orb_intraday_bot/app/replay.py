@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Protocol
 
 from orb_intraday_bot.analysis.backtest import FULL_SESSION_CANDLES, DayResult, split_sessions
-from orb_intraday_bot.analysis.history import History, load_history
+from orb_intraday_bot.analysis.history import PIVOT_LOOKBACK_DAYS, History, load_history
+from orb_intraday_bot.analysis.levels import levels_path, load_range
 from orb_intraday_bot.analysis.stats import (
     TradeRow,
     check_results,
@@ -21,6 +22,7 @@ from orb_intraday_bot.analysis.stats import (
 from orb_intraday_bot.config.settings import StrategyConfig, apply_overrides
 from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.contract import FuturesContract
+from orb_intraday_bot.indicators.pivots import SessionLevels
 from orb_intraday_bot.paper.report import format_closed_position, format_summary, summarize
 
 CSV_HEADER = [
@@ -35,6 +37,10 @@ class ReplayData(Protocol):
     def fetch_candles(
         self, contract: FuturesContract, start: datetime, end: datetime
     ) -> list[Candle]: ...
+
+    def historical_levels(
+        self, contract: FuturesContract, first: date, last: date
+    ) -> dict[date, SessionLevels]: ...
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,7 @@ class PreparedReplay:
     first: date
     last: date
     only: set[date] | None
+    levels: dict[date, SessionLevels] = field(default_factory=dict)
 
 
 def requested_days(
@@ -97,7 +104,12 @@ def prepare_replay(
     only = wanted
     if request.last and wanted is None and not (request.first or request.to):
         only = set(list(split_sessions(history.candles))[-request.last:])
-    return PreparedReplay(run_cfg, contract, history, today, first, last, only)
+    levels = load_range(
+        levels_path(history_path_for(contract.trading_symbol)),
+        lambda a, b: data.historical_levels(contract, a, b),
+        first - timedelta(days=PIVOT_LOOKBACK_DAYS), last, today, refresh=request.refresh,
+    )
+    return PreparedReplay(run_cfg, contract, history, today, first, last, only, levels)
 
 
 def format_replay_report(

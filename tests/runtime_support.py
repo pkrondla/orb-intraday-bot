@@ -15,7 +15,11 @@ from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import FixedClock
 from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.contract import FuturesContract
-from orb_intraday_bot.indicators.pivots import pivots_from_session
+from orb_intraday_bot.indicators.pivots import (
+    SessionLevels,
+    levels_from_candles,
+    pivots_from_session,
+)
 from orb_intraday_bot.options.chain import OptionChain
 from orb_intraday_bot.options.planner import OptionPlanner
 from orb_intraday_bot.runtime.day import TradingDay
@@ -77,6 +81,11 @@ class FakeSource(SyntheticOptions):
         self, contract: FuturesContract, today: date, lookback_days: int = 10
     ) -> tuple[date, list[Candle]]:
         return PREV_DAY, prev_session()
+
+    def previous_session_levels(
+        self, contract: FuturesContract, today: date, lookback_days: int = 10
+    ) -> SessionLevels:
+        return levels_from_candles(PREV_DAY, prev_session())
 
     def session_candles(self, contract: FuturesContract, day: date) -> list[Candle]:
         if self.fail_fetches > 0:

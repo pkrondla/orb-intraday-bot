@@ -33,7 +33,7 @@ from orb_intraday_bot.core.clock import IST, Clock
 from orb_intraday_bot.core.errors import must_halt
 from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.contract import FuturesContract
-from orb_intraday_bot.indicators.pivots import pivots_from_session
+from orb_intraday_bot.indicators.pivots import SessionLevels
 from orb_intraday_bot.options.planner import OptionDataSource, OptionPlanner
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import TradingDay
@@ -55,9 +55,9 @@ _IDLE_STEP_SEC = 20          # longest sleep between heartbeats when nothing is 
 class LiveDataSource(OptionDataSource, Protocol):
     def futures_contract(self, today: date | None = None) -> FuturesContract: ...
 
-    def previous_session(
+    def previous_session_levels(
         self, contract: FuturesContract, today: date, lookback_days: int = 10
-    ) -> tuple[date, list[Candle]]: ...
+    ) -> SessionLevels: ...
 
     def session_candles(self, contract: FuturesContract, day: date) -> list[Candle]: ...
 
@@ -81,8 +81,10 @@ class LiveRunner:
         clock: Clock,
         sleep: Callable[[float], None],
         out: Callable[[str], None],
+        on_levels: Callable[[str, SessionLevels], None] | None = None,
     ) -> None:
         self._cfg = config
+        self._on_levels = on_levels
         self._source = source
         self._store = store
         self._alerts = Alerts(notifier, config.runtime.notify_candle_reports)
@@ -121,15 +123,20 @@ class LiveRunner:
         cfg = self._cfg
         self._beat("starting", "loading the contract and pivots")
         contract = self._source.futures_contract(day)
-        prev_day, prev = self._source.previous_session(contract, day)
-        pivots = pivots_from_session(prev)
+        levels = self._source.previous_session_levels(contract, day)
+        pivots = levels.pivots()
+        if self._on_levels is not None:
+            try:
+                self._on_levels(contract.trading_symbol, levels)
+            except OSError as exc:            # a record for replay; never worth stopping a run
+                log.warning("could not save the pivot inputs: %s", exc)
         self._contract = contract
         trading = TradingDay(
             cfg, day, contract.trading_symbol, pivots, OptionPlanner(cfg, self._source),
             self._store,
         )
         self._day = trading
-        self._out(self._banner(contract, prev_day, pivots.r1, pivots.s1, trading))
+        self._out(self._banner(contract, levels, pivots.r1, pivots.s1, trading))
         log_event(
             log, "run_started", day=day.isoformat(), symbol=contract.trading_symbol,
             version=__version__, strategy_hash=fingerprint(cfg).strategy,
@@ -306,7 +313,7 @@ class LiveRunner:
     def _banner(
         self,
         contract: FuturesContract,
-        prev_day: date,
+        levels: SessionLevels,
         r1: float,
         s1: float,
         trading: TradingDay,
@@ -316,7 +323,7 @@ class LiveRunner:
         lines = [
             f"ORB Intraday Bot v{__version__} - PAPER MODE (no orders are ever placed)",
             f"  {contract.trading_symbol} (expiry {contract.expiry}, lot {contract.lot_size}); "
-            f"pivots from {prev_day}: S1 {s1:.1f}, R1 {r1:.1f}",
+            f"pivots from {levels.day} ({levels.describe()}): S1 {s1:.1f}, R1 {r1:.1f}",
             f"  rules {fp.strategy} (assumptions {fp.assumptions}, runtime {fp.runtime})",
         ]
         if restored:
