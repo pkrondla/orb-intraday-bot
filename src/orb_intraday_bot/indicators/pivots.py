@@ -6,6 +6,11 @@
     R3 = 2P + H - 2L     S3 = 2P + L - 2H
     R4 = 3P + H - 3L     S4 = 3P + L - 3H
     R5 = 4P + H - 4L     S5 = 4P + L - 4H
+
+H, L and C are the previous session's daily-bar values (`SessionLevels`): the high and low include
+the pre-open trade and the close is the exchange's closing price. The same formulas applied to
+3-minute candles (`pivots_from_session`) give levels a few points off TradingView's; that path is
+only the fallback when no `SessionLevels` are available.
 """
 
 from __future__ import annotations

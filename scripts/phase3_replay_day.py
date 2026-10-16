@@ -22,15 +22,13 @@ from orb_intraday_bot.config.settings import load_strategy_config  # noqa: E402
 from orb_intraday_bot.core.clock import IST  # noqa: E402
 from orb_intraday_bot.engine.signal_engine import SignalEngine  # noqa: E402
 from orb_intraday_bot.indicators.opening_range import OpeningRangeTracker  # noqa: E402
-from orb_intraday_bot.indicators.pivots import pivots_from_session  # noqa: E402
 from orb_intraday_bot.patterns.detector import SetupDetector  # noqa: E402
 from orb_intraday_bot.runtime.guard import run_startup_checks  # noqa: E402
 
 
 def replay(md: GrowwMarketData, cfg, day: date, quiet: bool) -> Counter[str]:  # type: ignore[no-untyped-def]
     contract = md.futures_contract(day)
-    _, prev = md.previous_session(contract, day)
-    pivots = pivots_from_session(prev)
+    pivots = md.previous_session_levels(contract, day).pivots()
     candles = md.session_candles(contract, day)
     print(f"\n=== {day} {contract.trading_symbol}: {len(candles)} candles; "
           f"R2={pivots.r2:.1f} S2={pivots.s2:.1f}")

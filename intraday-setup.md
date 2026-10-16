@@ -15,7 +15,7 @@ Items marked **[Assumption]** are not stated in the notes. They are defaults cho
 
 **Chart rule:** always use the Nifty futures chart and futures price. The notes allow the spot chart for freak highs and lows, but this bot never uses it. All levels (ORH, ORL, pivots), signals, stops, targets and zone checks use the futures price. Spot is not used for any decision.
 
-**Contract roll:** the bot uses the current-month Nifty futures contract, as on the "continuous: current contract in front" chart in the notes. It stays on that contract through its expiry day and rolls to the next contract on the first session after expiry. The expiry date comes from the broker's expiry list, not a hard-coded rule. A contract is never changed mid-session. Pivots use the previous session's OHLC of the same contract. A `roll_days_before_expiry` setting (default 0) lets you roll earlier if liquidity thins out near expiry.
+**Contract roll:** the bot uses the current-month Nifty futures contract, as on the "continuous: current contract in front" chart in the notes. It stays on that contract through its expiry day and rolls to the next contract on the first session after expiry. The expiry date comes from the broker's expiry list, not a hard-coded rule. A contract is never changed mid-session. Pivots use the previous session's high, low and closing price of the same contract, as its daily bar shows them (see section 4). A `roll_days_before_expiry` setting (default 0) lets you roll earlier if liquidity thins out near expiry.
 
 ## 2. Opening Range (ORH / ORL)
 
@@ -261,7 +261,7 @@ These are intentional, because the notes win:
 3. The 10-point stop floor.
 4. The Failed Bear Trap and Failed Bull Trap definitions.
 5. The 50% reference leg for fake breakouts and breakdowns.
-6. Pivot type, to be checked against your chart.
+6. Pivot type: settled. Traditional, checked against TradingView on 16 Oct 2026, and the inputs (daily-bar high and low, exchange closing price) now match too (section 4).
 7. Phase 3 detection details (all candle-close based):
    - Retest and confirmation must be on different candles (the order inside one candle is unknown).
    - A candle that breaks the swing but closes back inside the level counts as a failure.

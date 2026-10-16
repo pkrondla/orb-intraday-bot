@@ -20,6 +20,8 @@ orb-bot summary [YYYY-MM-DD]        # trades and P&L from the database
 
 `python -m orb_intraday_bot <command>` works too. Tests: `python -m pytest`.
 
+Pivots match TradingView's "Pivot Points Standard" (Traditional, daily): high and low from the previous session's daily bar (it includes the pre-open trade) and the exchange's closing price, not the last 3-minute candle. The run banner and `check` show the inputs and where the close came from. See `intraday-setup.md` section 4.
+
 Development: `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci` runs every gate CI runs
 (ruff, mypy strict, architecture rules, tests with coverage). See `CONTRIBUTING.md`.
 

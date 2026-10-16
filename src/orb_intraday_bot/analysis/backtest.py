@@ -2,8 +2,10 @@
 
 Option prices are synthetic (a flat premium and delta, see `runtime/synthetic.py`), so the
 futures points are the meaningful result; rupee figures only show the mechanics and the charges.
-Each day gets a fresh in-memory database and the previous session's pivots, exactly as a live
-morning would.
+Each day gets a fresh in-memory database and the previous session's pivots, as a live morning
+would. The pivots come from saved `SessionLevels` (daily-bar high and low and the exchange close,
+as TradingView has them) when a day has them, and from the previous session's 3-minute candles
+otherwise.
 """
 
 from __future__ import annotations

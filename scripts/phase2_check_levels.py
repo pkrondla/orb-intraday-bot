@@ -35,12 +35,19 @@ def main() -> int:
     print(f"Contract: {contract.trading_symbol} (expiry {contract.expiry}, "
           f"lot {contract.lot_size})")
 
-    prev_day, prev = md.previous_session(contract, today)
-    h, low, c = session_ohlc(prev)
-    piv = pivots_from_session(prev)
-    print(f"\nPrevious session {prev_day}: {len(prev)} candles  H={h} L={low} C={c}")
+    # The inputs the bot uses: the daily bar's high and low and the exchange's closing price,
+    # which is what TradingView's daily bar shows.
+    levels = md.previous_session_levels(contract, today)
+    piv = levels.pivots()
+    print(f"\nPrevious session {levels.day}: {levels.describe()}")
     for name, value in reversed(piv.ordered()):
         print(f"  {name:<3} {value:>10.2f}")
+    # For comparison only: the old inputs, from the session's own 3-minute candles.
+    _, prev = md.previous_session(contract, today)
+    h, low, c = session_ohlc(prev)
+    old = pivots_from_session(prev)
+    print(f"  (3-minute candles alone would give H={h} L={low} C={c}: "
+          f"P {old.p:.2f}, R1 {old.r1:.2f}, S1 {old.s1:.2f})")
 
     candles = md.session_candles(contract, today)
     print(f"\nToday {today}: {len(candles)} closed candles")

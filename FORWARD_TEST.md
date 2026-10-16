@@ -48,6 +48,21 @@ Behaviour (judged by you, not pass or fail):
 Performance over 20 sessions is too small a sample to prove an edge. Use it to catch mistakes in
 the bot, not to approve the strategy.
 
+## Change during the test: pivot inputs (16 Oct 2026)
+
+The pivots now match TradingView (previous session's daily-bar high and low, and the exchange's
+closing price; see `intraday-setup.md` section 4). Before this date the bot built them from the
+previous session's 3-minute candles, which put the levels 2 to 12 points off. Consequences:
+
+- The run banner shows the inputs and the close source, for example
+  `H 23095.0 L 22671.0 C 22984.8 (exchange)`. A day whose banner shows `(candle)` or `(vwap)`
+  means the exchange close was unavailable that morning.
+- Each live morning saves its inputs to `data\history\<symbol>.levels.json`, and `reconcile`
+  replays with those same pivots, so live and replay agree on them.
+- `reconcile` for a day run **before** this change replays with the new pivots while the live
+  run used the old ones, so it can show differences that are not bugs. Treat sessions from
+  before 16 Oct as a separate period when judging the criteria above.
+
 ## Known limits
 
 - The streaming feed does not connect from this machine, so the bot polls (every 15 s with a
