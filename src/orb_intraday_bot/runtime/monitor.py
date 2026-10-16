@@ -15,7 +15,10 @@ The watchdog inside the runner raises an alert, once per episode, when the marke
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +26,8 @@ from typing import Any
 
 from orb_intraday_bot.runtime.notify import Notifier
 
+log = logging.getLogger("orb.monitor")
+_HEARTBEAT_ATTEMPTS = 5
 ACTIVE_STATUSES = frozenset({"starting", "waiting", "running"})
 ALIVE_WITHIN_SEC = 120
 CONSECUTIVE_ERRORS_ALERT = 3
@@ -51,7 +56,15 @@ def write_heartbeat(
     open_positions: int,
     errors: int,
     message: str = "",
-) -> None:
+    sleep: Callable[[float], None] | None = None,
+) -> bool:
+    """Write the heartbeat; True if it was written. It never raises for a file-system problem.
+
+    The heartbeat is a monitoring aid, never a reason to stop trading. On Windows, a file that is
+    open elsewhere (OneDrive sync, antivirus, a viewer) makes the atomic rename fail with
+    "access denied", so the rename is retried, then the file is written in place, and if even
+    that fails the miss is logged and the run carries on.
+    """
     payload: dict[str, Any] = {
         "status": status,
         "time": now.isoformat(),
@@ -61,10 +74,23 @@ def write_heartbeat(
         "message": message,
         "pid": os.getpid(),
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload), encoding="utf-8")
-    tmp.replace(path)           # atomic: a reader never sees a half-written file
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for attempt in range(1, _HEARTBEAT_ATTEMPTS + 1):
+            try:
+                tmp.write_text(text, encoding="utf-8")
+                tmp.replace(path)       # atomic: a reader never sees a half-written file
+                return True
+            except OSError:
+                if attempt < _HEARTBEAT_ATTEMPTS:
+                    (sleep or time.sleep)(0.05 * attempt)
+        path.write_text(text, encoding="utf-8")         # not atomic, but better than nothing
+        return True
+    except OSError as exc:
+        log.warning("Heartbeat not written (%s). The run continues.", exc)
+        return False
 
 
 def read_heartbeat(path: Path) -> HeartbeatInfo | None:

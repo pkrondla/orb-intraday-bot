@@ -28,8 +28,11 @@ def make_output(
 
     def out(text: str) -> None:
         print(text, flush=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(text + "\n")
+        try:
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        except OSError:
+            pass            # a locked log file (OneDrive, antivirus) must not stop the run
 
     return out
 
