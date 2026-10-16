@@ -47,7 +47,7 @@ never cancels the other bot's orders (ORB- reference prefix only).
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\orb-bot\scripts\deploy\Rollback-OrbBot.ps1
 ```
 
-Or re-run the CD workflow with the previous tag/sha. Deploy is blocked during market hours and
+Or revert the bad commit on `main` and re-run the CD workflow (it always deploys `main`). Deploy is blocked during market hours and
 while positions are open unless `force=true`.
 
 ## Rotate keys

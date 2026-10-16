@@ -42,7 +42,7 @@ Already done if the Groww bot is deployed:
 CI runs automatically on every push to `main`. Deploy is **manual**:
 
 1. Actions → **CD - Deploy ORB bot to Windows EC2** → Run workflow
-2. Choose the ref (`main`, a tag, or a sha)
+2. There is no ref to choose: it always deploys `main`
 3. Leave `force` as `false` unless you deliberately override the market-hours / open-position guard
 
 The workflow:
@@ -64,7 +64,8 @@ On the host:
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\orb-bot\scripts\deploy\Rollback-OrbBot.ps1
 ```
 
-Or re-run the CD workflow with the previous tag/sha.
+The CD workflow always deploys `main`, so to roll back from GitHub, revert the bad commit on
+`main` and run the workflow again.
 
 ## Local ops on the host
 

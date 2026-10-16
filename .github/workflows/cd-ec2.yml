@@ -3,10 +3,6 @@ name: CD - Deploy ORB bot to Windows EC2
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Git ref to deploy (branch, tag, or sha)"
-        required: true
-        default: "main"
       force:
         description: "Force deploy during market hours or with open positions (true/false)"
         required: false
@@ -32,7 +28,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: main
           fetch-depth: 0
 
       - name: Require CI green on this sha
@@ -67,7 +63,7 @@ jobs:
           WINRM_PASSWORD: ${{ secrets.WINRM_PASSWORD }}
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GIT_REF: ${{ inputs.ref }}
+          GIT_REF: main
           FORCE_DEPLOY: ${{ inputs.force }}
           GROWW_TOTP_TOKEN: ${{ secrets.GROWW_TOTP_TOKEN }}
           GROWW_TOTP_SECRET: ${{ secrets.GROWW_TOTP_SECRET }}
