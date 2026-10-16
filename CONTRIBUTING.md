@@ -15,18 +15,14 @@ put a key with trading permission on a development machine.
 
 ## Branches, commits, pull requests
 
-- `main` is always releasable and is never committed to directly. Work happens on
-  `type/short-name` branches (`feat/`, `fix/`, `refactor/`, `chore/`, `docs/`, `test/`) and is
-  merged by pull request after CI is green.
+- Work is committed **directly on `main`**. Run `scripts\dev.ps1 ci` (ruff, mypy, import-linter,
+  tests, coverage, golden replay) before every push. CI on `main` is the gate.
 - Commit messages: `type(scope): imperative summary`, then a body that says *why*. One logical
-  change per commit.
-- A pull request uses the template. A change is **safety-relevant** if it touches the paper-only
-  guard, broker capabilities, order code, risk limits or the kill switch. Those need a second
-  reviewer, even while the project has one developer (wait a day and review it yourself, with the
-  checklist).
-- Repository settings to apply on GitHub (they cannot be set from the code): protect `main`,
-  require a pull request, require the `Quality gates` and `Dependency audit` checks, require
-  linear history, block force pushes, and turn on secret scanning with push protection.
+  change per commit (or one milestone).
+- A change is **safety-relevant** if it touches the paper-only guard, broker capabilities, order
+  code, risk limits or the kill switch. Pause and re-read the diff before pushing those.
+- Recommended GitHub settings: require the `Quality gates` and `Dependency audit` checks on
+  `main`, block force pushes, and turn on secret scanning with push protection.
 
 ## Definition of done
 

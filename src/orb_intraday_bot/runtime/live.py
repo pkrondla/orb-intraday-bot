@@ -14,13 +14,14 @@ What it does, in plain terms:
   targets are checked on live prices as well as at each candle close.
 - Errors fetching data are retried and alerted (watchdog). An error in the strategy code stops the
   run (positions are saved; restart to continue).
-- It never places an order. There is no order code in the project.
+- Paper mode never places an order. Live mode (disarmed by default) goes through GrowwVenue.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -46,6 +47,9 @@ from orb_intraday_bot.runtime.monitor import (
 from orb_intraday_bot.runtime.notify import Notifier
 from orb_intraday_bot.runtime.report import format_candle_report, format_day_end, format_exit
 from orb_intraday_bot.storage.store import TradeStore
+
+EntriesAllowed = Callable[[], bool]
+FlattenRequested = Callable[[], bool]
 
 log = logging.getLogger("orb.live")
 _CANDLE = timedelta(minutes=3)
@@ -82,21 +86,27 @@ class LiveRunner:
         sleep: Callable[[float], None],
         out: Callable[[str], None],
         on_levels: Callable[[str, SessionLevels], None] | None = None,
+        entries_allowed: EntriesAllowed | None = None,
+        flatten_requested: FlattenRequested | None = None,
     ) -> None:
         self._cfg = config
         self._on_levels = on_levels
+        self._entries_allowed = entries_allowed or (lambda: True)
+        self._flatten_requested = flatten_requested or (lambda: False)
         self._source = source
         self._store = store
         self._alerts = Alerts(notifier, config.runtime.notify_candle_reports)
         self._clock = clock
         self._sleep = sleep
         self._out = out
+        self._data_dir = data_dir
         self._heartbeat = data_dir / config.runtime.heartbeat_file
         self._watchdog = Watchdog(notifier, config.runtime.stall_alert_sec)
         self._day: TradingDay | None = None
         self._contract: FuturesContract | None = None
         self._last_poll: datetime | None = None
         self._status = "starting"
+        self._flattened = False
 
     # -- entry point ---------------------------------------------------------------------
     def run(self) -> RunOutcome:
@@ -202,10 +212,12 @@ class LiveRunner:
         return candles
 
     def _process(self, trading: TradingDay, candle: Candle) -> None:
+        self._maybe_flatten(trading)
         now = self._clock.now()
         age = (now - (candle.start + _CANDLE)).total_seconds()
         fresh = age <= self._cfg.runtime.max_signal_age_sec
-        report = trading.on_candle(candle, allow_open=fresh, catch_up=not fresh)
+        allow = fresh and self._entries_allowed()
+        report = trading.on_candle(candle, allow_open=allow, catch_up=not fresh)
         self._out(format_candle_report(report))
         self._alerts.candle(report)
         log_event(
@@ -250,10 +262,45 @@ class LiveRunner:
             self._out("  " + format_exit(event))
             self._alerts.exit(event)
 
+    def _maybe_flatten(self, trading: TradingDay) -> None:
+        if self._flattened or not self._flatten_requested():
+            return
+        if not trading.paper.open_positions:
+            self._flattened = True
+            return
+        self._out("Flatten requested: closing open positions.")
+        self._alerts.flatten_requested()
+        price = trading.last_candle.close if trading.last_candle else None
+        options: dict[str, float] = {}
+        contract = self._contract
+        if contract is not None and price is not None:
+            try:
+                symbols = [contract.trading_symbol] + sorted(
+                    {p.trading_symbol for p in trading.paper.open_positions}
+                )
+                live = self._source.ltp(symbols)
+                price = live.get(contract.trading_symbol, price)
+                options = {s: v for s, v in live.items() if s != contract.trading_symbol}
+            except Exception as exc:
+                if must_halt(exc):
+                    raise
+                log.warning("Flatten price fetch failed: %s", exc)
+        if price is None:
+            return
+        for event in trading.paper.close_all(self._clock.now(), price, options):
+            self._out("  " + format_exit(event))
+            self._alerts.exit(event)
+        self._flattened = True
+        marker = self._data_dir / "FLATTEN"
+        if marker.exists():
+            with suppress(OSError):
+                marker.unlink()
+
     def _poll_ticks(self) -> None:
         trading, contract = self._day, self._contract
         if trading is None or contract is None:
             return
+        self._maybe_flatten(trading)
         positions = trading.paper.open_positions
         if not positions:
             return

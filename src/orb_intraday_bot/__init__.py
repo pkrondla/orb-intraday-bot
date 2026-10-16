@@ -1,3 +1,3 @@
-"""ORB Intraday Bot - Nifty futures paper-trading bot. Paper only: no orders are ever placed."""
+"""ORB Intraday Bot - Nifty futures paper/shadow/live bot. Live orders are disarmed by default."""
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"

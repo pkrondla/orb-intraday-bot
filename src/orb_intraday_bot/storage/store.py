@@ -16,52 +16,10 @@ from pathlib import Path
 
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.signals import SetupSignal
+from orb_intraday_bot.execution.models import OrderRecord
 from orb_intraday_bot.paper.models import Fill, Position
 from orb_intraday_bot.paper.report import DaySummary, summarize
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS signals (
-    signal_id    TEXT PRIMARY KEY,
-    trade_date   TEXT NOT NULL,
-    candle_start TEXT NOT NULL,
-    setup        TEXT NOT NULL,
-    direction    TEXT NOT NULL,
-    level_name   TEXT NOT NULL,
-    level_value  REAL NOT NULL,
-    entry_price  REAL NOT NULL,
-    sign_id      TEXT NOT NULL,
-    status       TEXT NOT NULL,           -- accepted | rejected | released
-    stage        TEXT NOT NULL DEFAULT '',
-    reason       TEXT NOT NULL DEFAULT '',
-    note         TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS signals_day ON signals (trade_date);
-
-CREATE TABLE IF NOT EXISTS positions (
-    position_id TEXT PRIMARY KEY,
-    trade_date  TEXT NOT NULL,
-    status      TEXT NOT NULL,
-    state       TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS positions_day ON positions (trade_date, status);
-
-CREATE TABLE IF NOT EXISTS fills (
-    position_id TEXT NOT NULL,
-    seq         INTEGER NOT NULL,
-    fill_time   TEXT NOT NULL,
-    reason      TEXT NOT NULL,
-    lots        INTEGER NOT NULL,
-    quantity    INTEGER NOT NULL,
-    fut_price   REAL NOT NULL,
-    opt_price   REAL NOT NULL,
-    source      TEXT NOT NULL,
-    gross       REAL NOT NULL,
-    fut_points  REAL NOT NULL,
-    charges     REAL NOT NULL,
-    PRIMARY KEY (position_id, seq)
-);
-"""
+from orb_intraday_bot.storage.migrations import apply_migrations
 
 
 class TradeStore:
@@ -73,7 +31,7 @@ class TradeStore:
         self._conn.row_factory = sqlite3.Row
         if self._path != ":memory:":
             self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
+        apply_migrations(self._conn)
 
     def close(self) -> None:
         self._conn.close()
@@ -196,6 +154,61 @@ class TradeStore:
     # -- reporting -----------------------------------------------------------------------
     def day_summary(self, day: date) -> DaySummary:
         return summarize(day, self.positions_for_day(day))
+
+    # -- orders and event log ------------------------------------------------------------
+    def save_order(self, record: OrderRecord) -> None:
+        intent = record.intent
+        created = (record.created_at or datetime.now(IST)).isoformat()
+        updated = (record.updated_at or datetime.now(IST)).isoformat()
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO orders (idempotency_key, signal_id, leg, trading_symbol, side,"
+                " quantity, order_type, price, trigger_price, product, status, broker_order_id,"
+                " filled_qty, avg_price, reject_reason, reference_id, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(idempotency_key) DO UPDATE SET"
+                " status=excluded.status, broker_order_id=excluded.broker_order_id,"
+                " filled_qty=excluded.filled_qty, avg_price=excluded.avg_price,"
+                " reject_reason=excluded.reject_reason, updated_at=excluded.updated_at",
+                (
+                    intent.idempotency_key, intent.signal_id, intent.leg.value,
+                    intent.trading_symbol, intent.side, intent.quantity, intent.order_type,
+                    intent.price, intent.trigger_price, intent.product, record.status.value,
+                    record.broker_order_id, record.filled_qty, record.avg_price,
+                    record.reject_reason, intent.reference_id, created, updated,
+                ),
+            )
+            for seq, fill in enumerate(record.fills):
+                conn.execute(
+                    "INSERT OR IGNORE INTO order_fills (idempotency_key, seq, fill_time,"
+                    " quantity, price, broker_order_id) VALUES (?,?,?,?,?,?)",
+                    (
+                        intent.idempotency_key, seq, fill.time.isoformat(),
+                        fill.quantity, fill.price, fill.broker_order_id,
+                    ),
+                )
+
+    def append_event(
+        self,
+        event_type: str,
+        payload: dict[str, object],
+        *,
+        signal_id: str = "",
+        at: datetime | None = None,
+    ) -> None:
+        when = (at or datetime.now(IST)).isoformat()
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO events (event_time, event_type, signal_id, payload) VALUES (?,?,?,?)",
+                (when, event_type, signal_id, json.dumps(payload)),
+            )
+
+    def orders_for_signal(self, signal_id: str) -> list[sqlite3.Row]:
+        return list(
+            self._conn.execute(
+                "SELECT * FROM orders WHERE signal_id=? ORDER BY created_at", (signal_id,)
+            )
+        )
 
 
 def _load(state: str) -> Position:

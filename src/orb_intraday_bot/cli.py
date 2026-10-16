@@ -235,6 +235,30 @@ def cmd_status(_: argparse.Namespace) -> int:
     return report.exit_code
 
 
+def cmd_serve(_: argparse.Namespace) -> int:
+    """Always-on service: sleep until the next session, run it, repeat."""
+    from orb_intraday_bot.app.serve import main as serve_main
+
+    return serve_main()
+
+
+def cmd_watchdog(_: argparse.Namespace) -> int:
+    """Independent dead-man monitor (alert only; never trades)."""
+    from orb_intraday_bot.app.watchdog import main as watchdog_main
+
+    return watchdog_main()
+
+
+def cmd_flatten(_: argparse.Namespace) -> int:
+    """Request a flatten: write data/FLATTEN for the running session to pick up."""
+    ctx = load_context()
+    marker = ctx.data_dir / "FLATTEN"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("cli\n", encoding="utf-8")
+    print(f"Flatten requested ({marker}). The running session will close open positions.")
+    return 0
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     from orb_intraday_bot.runtime.notify import NullNotifier, build_notifier
 
@@ -271,6 +295,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"orb-bot {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="live paper session for today").set_defaults(func=cmd_run)
+    sub.add_parser(
+        "serve", help="always-on service: run each trading day, sleep between sessions"
+    ).set_defaults(func=cmd_serve)
+    sub.add_parser(
+        "watchdog", help="dead-man monitor: Telegram alert if the bot goes silent"
+    ).set_defaults(func=cmd_watchdog)
+    sub.add_parser(
+        "flatten", help="request flatten of open positions (writes data/FLATTEN)"
+    ).set_defaults(func=cmd_flatten)
     replay = sub.add_parser("replay", help="replay past days (synthetic option prices)")
     replay.add_argument("dates", nargs="*", help="YYYY-MM-DD (default: today)")
     replay.add_argument("--from", dest="first", help="first day of a range, YYYY-MM-DD")

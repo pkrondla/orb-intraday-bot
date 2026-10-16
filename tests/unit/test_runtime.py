@@ -262,22 +262,36 @@ def test_telegram_posts_the_message_and_hides_the_token(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     sent: list[tuple[str, bytes]] = []
-    TelegramNotifier("SECRET-TOKEN", "42", post=lambda u, b: sent.append((u, b))).send("hello")
+
+    def capture(url: str, body: bytes) -> bytes:
+        sent.append((url, body))
+        return b'{"ok":true}'
+
+    TelegramNotifier(
+        "SECRET-TOKEN", "42", post=capture, async_outbox=False
+    ).send("hello")
     assert "SECRET-TOKEN" in sent[0][0]
     assert json.loads(sent[0][1]) == {"chat_id": "42", "text": "hello"}
 
-    def failing(url: str, body: bytes) -> None:
+    def failing(url: str, body: bytes) -> bytes:
         raise OSError(f"cannot reach {url}")
 
     with caplog.at_level("WARNING", logger="orb.notify"):
-        TelegramNotifier("SECRET-TOKEN", "42", post=failing).send("hello")      # must not raise
+        TelegramNotifier(
+            "SECRET-TOKEN", "42", post=failing, sleep=lambda _: None, async_outbox=False
+        ).send("hello")      # must not raise
     assert "SECRET-TOKEN" not in caplog.text
     assert "OSError" in caplog.text
 
 
 def test_telegram_truncates_long_messages() -> None:
     sent: list[bytes] = []
-    TelegramNotifier("t", "1", post=lambda u, b: sent.append(b)).send("x" * 10_000)
+
+    def capture(url: str, body: bytes) -> bytes:
+        sent.append(body)
+        return b'{"ok":true}'
+
+    TelegramNotifier("t", "1", post=capture, async_outbox=False).send("x" * 10_000)
     assert len(json.loads(sent[0])["text"]) < 4096
 
 

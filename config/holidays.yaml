@@ -1,0 +1,22 @@
+# NSE trading holidays (India). Add each year's dates here.
+# Format: YYYY-MM-DD. Weekends are skipped automatically; these are weekday closures.
+# Source: NSE circulars. Keep a couple of years ahead when known.
+
+holidays:
+  - "2026-01-26"   # Republic Day
+  - "2026-03-03"   # Holi
+  - "2026-03-26"   # Ram Navami
+  - "2026-03-31"   # Mahavir Jayanti
+  - "2026-04-03"   # Good Friday
+  - "2026-04-14"   # Dr Ambedkar Jayanti
+  - "2026-05-01"   # Maharashtra Day
+  - "2026-05-28"   # Bakri Id
+  - "2026-06-26"   # Muharram (approx; confirm)
+  - "2026-08-15"   # Independence Day
+  - "2026-09-14"   # Ganesh Chaturthi (approx; confirm)
+  - "2026-10-02"   # Gandhi Jayanti
+  - "2026-10-20"   # Dussehra
+  - "2026-11-08"   # Diwali (Laxmi Pujan) - muhurat trading possible; treat as closed for this bot
+  - "2026-11-09"   # Diwali Balipratipada
+  - "2026-11-24"   # Gurunanak Jayanti
+  - "2026-12-25"   # Christmas

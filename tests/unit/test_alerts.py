@@ -38,3 +38,25 @@ def test_day_end_and_error_messages() -> None:
     alerts.stopped_with_error("RuntimeError: bug")
     assert notes.messages[0] == "summary text"
     assert "STOPPED" in notes.messages[1] and "Positions are saved" in notes.messages[1]
+
+
+def test_lifecycle_alerts() -> None:
+    notes = Recorder()
+    alerts = Alerts(notes)
+    alerts.startup("0.9.0", "paper", "abc123")
+    alerts.session_start("banner")
+    alerts.paused()
+    alerts.resumed()
+    alerts.flatten_requested()
+    alerts.kill_switch("daily loss")
+    alerts.armed("live")
+    alerts.disarmed()
+    alerts.deployed("0.9.0", "deadbeef", "paper")
+    alerts.silent(180, "running", "no heartbeat")
+    alerts.shutdown("idle")
+    joined = notes.joined()
+    for word in (
+        "STARTED", "banner", "PAUSED", "RESUMED", "FLATTEN", "KILL SWITCH",
+        "ARMED", "DISARMED", "DEPLOYED", "SILENT", "STOPPED",
+    ):
+        assert word in joined

@@ -13,10 +13,17 @@ orb-bot replay 2026-10-14 --events  # one day, with every signal and exit
 orb-bot sweep --last 60            # compare config variants on the same candles
 orb-bot report                      # forward-test statistics from the database
 orb-bot reconcile                   # today's live run against a replay of the same candles
-orb-bot run                         # live paper session; start before 09:15 IST, it exits after 15:30
+orb-bot run                         # one paper session; start before 09:15 IST, exits after 15:30
+orb-bot serve                       # always-on: run each trading day, sleep between sessions (EC2)
+orb-bot watchdog                    # dead-man Telegram alert if the heartbeat goes silent
+orb-bot flatten                     # request flatten of open positions
 orb-bot status                      # is a run alive
 orb-bot summary [YYYY-MM-DD]        # trades and P&L from the database
 ```
+
+Deploy to the Windows EC2: see `docs/DEPLOY.md`. Ops runbook: `docs/RUNBOOK.md`.
+Live orders require `LIVE_MODE=live`, a separate trading key, `LIVE_ARMED=true`, and a daily
+Telegram `/arm <code>`; the default is paper.
 
 `python -m orb_intraday_bot <command>` works too. Tests: `python -m pytest`.
 

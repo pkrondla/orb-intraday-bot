@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orb-intraday-bot"
-version = "0.9.0"
-description = "ORB Intraday Bot - Nifty futures paper-trading bot (no live orders yet)"
+version = "0.10.0"
+description = "ORB Intraday Bot - Nifty futures paper/shadow/live bot (live disarmed by default)"
 requires-python = ">=3.12"
 dependencies = [
     "growwapi>=1.5.0",
@@ -54,6 +54,9 @@ ignore_missing_imports = true
 [tool.coverage.run]
 source = ["src/orb_intraday_bot"]
 branch = true
+omit = [
+    "src/orb_intraday_bot/__main__.py",
+]
 
 [tool.coverage.report]
 fail_under = 92
@@ -74,7 +77,7 @@ layers = [
     "orb_intraday_bot.analysis",
     "orb_intraday_bot.runtime",
     "orb_intraday_bot.storage",
-    "orb_intraday_bot.paper",
+    "orb_intraday_bot.paper | orb_intraday_bot.execution",
     "orb_intraday_bot.options",
     "orb_intraday_bot.engine",
     "orb_intraday_bot.patterns | orb_intraday_bot.risk",
@@ -95,6 +98,7 @@ source_modules = [
 forbidden_modules = [
     "orb_intraday_bot.adapters",
     "orb_intraday_bot.storage",
+    "orb_intraday_bot.execution",
     "orb_intraday_bot.runtime",
     "orb_intraday_bot.analysis",
     "orb_intraday_bot.app",

@@ -6,6 +6,28 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-16
+
+Unattended paper service with Telegram, EC2 deploy, and live-order foundation (disarmed).
+
+### Added
+- Telegram notifier with retries, outbox, message split; command poller
+  (`/status` `/today` `/positions` `/report` `/pause` `/resume` `/flatten` `/arm` `/disarm`).
+- `orb-bot serve` (daily scheduler, NSE holidays, graceful stop) and `orb-bot watchdog`
+  (dead-man Telegram alert only).
+- GitHub Actions CD to Windows EC2 (WinRM + NSSM services `OrbBot` / `OrbBotWatch`),
+  `docs/DEPLOY.md`, `docs/RUNBOOK.md`, `scripts/deploy/*`.
+- Execution layer: `OrderIntent`, order state machine, `PaperVenue`, `ShadowVenue`,
+  `OrderManager`, SQLite migrations (orders / order_fills / events).
+- Risk engine (`config/risk.yaml`: 1 lot, 3 trades/day, 1% daily loss, halt after 2 losses),
+  kill switch, staged arming (`LIVE_MODE` paper/shadow/live + daily `/arm`).
+- `GrowwTradingClient` + `GrowwVenue` (separate trading key, ORB- reference reconciliation
+  on a shared account). Live ships disarmed.
+
+### Changed
+- Direct commits to `main` are the working method (see `CONTRIBUTING.md`).
+- Pivot inputs match TradingView (from the previous unreleased notes).
+
 ### Changed (pivot inputs now match TradingView; this changes live and replay behaviour)
 - The bot's pivots differed from TradingView's "Pivot Points Standard" (Traditional) by 2 to
   12 points. The formulas were right; the previous session's low and close were not. TradingView's

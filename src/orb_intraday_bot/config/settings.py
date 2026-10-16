@@ -37,6 +37,24 @@ class Settings(BaseSettings):
     # Optional Telegram alerts. Leave empty to disable. Only trade alerts and summaries are sent.
     telegram_bot_token: SecretStr = Field(default=SecretStr(""), alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
+    # Optional dead-man ping URL (e.g. healthchecks.io). Watchdog hits it when healthy.
+    healthcheck_url: str = Field(default="", alias="HEALTHCHECK_URL")
+    # paper | shadow | live. Live still needs LIVE_ARMED and a daily Telegram /arm (see M5).
+    live_mode: Literal["paper", "shadow", "live"] = Field(default="paper", alias="LIVE_MODE")
+    live_armed: bool = Field(default=False, alias="LIVE_ARMED")
+    # Separate Groww trading key (never reuse the data-only key). Required only for live mode.
+    groww_trading_totp_token: SecretStr = Field(
+        default=SecretStr(""), alias="GROWW_TRADING_TOTP_TOKEN"
+    )
+    groww_trading_totp_secret: SecretStr = Field(
+        default=SecretStr(""), alias="GROWW_TRADING_TOTP_SECRET"
+    )
+
+    def has_trading_credentials(self) -> bool:
+        return bool(
+            self.groww_trading_totp_token.get_secret_value()
+            and self.groww_trading_totp_secret.get_secret_value()
+        )
 
     @field_validator("live_trading")
     @classmethod

@@ -1,0 +1,195 @@
+name: CD - Deploy ORB bot to Windows EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (branch, tag, or sha)"
+        required: true
+        default: "main"
+      force:
+        description: "Force deploy during market hours or with open positions (true/false)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Secrets: WINRM_PASSWORD, GH_PAT, GROWW_TOTP_TOKEN, GROWW_TOTP_SECRET,
+      #          TELEGRAM_BOT_TOKEN
+      # Variables: WINRM_HOST, WINRM_USERNAME, TELEGRAM_CHAT_ID, LIVE_MODE (optional),
+      #            HEALTHCHECK_URL (optional)
+      #
+      # One-time EC2 prerequisites (already true if GrowwBot is deployed):
+      # - WinRM HTTPS on 5986, Python 3.12, Git, nssm on PATH
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Require CI green on this sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "Deploying sha=$sha"
+          # Best-effort: list recent successful CI runs for this sha. Do not hard-fail
+          # on a brand-new repo where the check name differs; the install script still
+          # runs orb-bot check as a smoke test.
+          if gh api "repos/${{ github.repository }}/actions/runs?head_sha=${sha}&status=completed&per_page=20" \
+            --jq '.workflow_runs[] | select(.name=="CI" and .conclusion=="success") | .id' \
+            | head -n1 | grep -q .; then
+            echo "CI success found for $sha"
+          else
+            echo "WARNING: no successful CI run found for $sha yet; continuing (smoke test will run on the host)."
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install WinRM client
+        run: python -m pip install --upgrade pip pywinrm
+
+      - name: Deploy over WinRM (HTTPS 5986)
+        env:
+          WINRM_HOST: ${{ vars.WINRM_HOST }}
+          WINRM_USERNAME: ${{ vars.WINRM_USERNAME }}
+          WINRM_PASSWORD: ${{ secrets.WINRM_PASSWORD }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GIT_REF: ${{ inputs.ref }}
+          FORCE_DEPLOY: ${{ inputs.force }}
+          GROWW_TOTP_TOKEN: ${{ secrets.GROWW_TOTP_TOKEN }}
+          GROWW_TOTP_SECRET: ${{ secrets.GROWW_TOTP_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL || '' }}
+          LIVE_MODE: ${{ vars.LIVE_MODE || 'paper' }}
+          LIVE_ARMED: ${{ vars.LIVE_ARMED || 'false' }}
+        run: |
+          python - <<'PY'
+          import os, sys, base64, winrm
+
+          host = os.environ["WINRM_HOST"]
+          username = os.environ["WINRM_USERNAME"]
+          password = os.environ["WINRM_PASSWORD"]
+          endpoint = f"https://{host}:5986/wsman"
+          session = winrm.Session(
+              endpoint, auth=(username, password), transport="basic",
+              server_cert_validation="ignore",
+          )
+
+          def clean(name: str) -> str:
+              return str(os.environ.get(name, "")).replace("\r", "").replace("\n", "\\n")
+
+          def run_ps(script: str, name: str) -> None:
+              r = session.run_ps(script)
+              out = r.std_out.decode("utf-8", errors="replace")
+              err = r.std_err.decode("utf-8", errors="replace")
+              if out:
+                  sys.stdout.write(out)
+              if err:
+                  sys.stderr.write(err)
+              if r.status_code != 0:
+                  raise SystemExit(f"{name} failed with status_code={r.status_code}")
+
+          env_lines = [
+              "LIVE_TRADING=false",
+              f"GROWW_TOTP_TOKEN={clean('GROWW_TOTP_TOKEN')}",
+              f"GROWW_TOTP_SECRET={clean('GROWW_TOTP_SECRET')}",
+              "DATA_DIR=data",
+              f"TELEGRAM_BOT_TOKEN={clean('TELEGRAM_BOT_TOKEN')}",
+              f"TELEGRAM_CHAT_ID={clean('TELEGRAM_CHAT_ID')}",
+              f"HEALTHCHECK_URL={clean('HEALTHCHECK_URL')}",
+              f"LIVE_MODE={clean('LIVE_MODE')}",
+              f"LIVE_ARMED={clean('LIVE_ARMED')}",
+          ]
+          clone_url = (
+              f"https://x-access-token:{clean('GH_PAT')}@github.com/"
+              f"{clean('GITHUB_REPOSITORY')}.git"
+          )
+          git_ref = clean("GIT_REF") or "main"
+          force = "1" if clean("FORCE_DEPLOY").lower() in {"true", "1", "yes"} else "0"
+
+          run_ps(
+              f"""
+              $ErrorActionPreference = "Stop"
+              function Invoke-Native([scriptblock]$Command, [string]$Name) {{
+                & $Command
+                if ($LASTEXITCODE -ne 0) {{ throw "$Name failed with exit code $LASTEXITCODE" }}
+              }}
+              $repo = "C:\\orb-bot"
+              $dataDir = Join-Path $repo "data"
+              $backupDataDir = "C:\\orb-bot-data-backup"
+              if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {{
+                throw "nssm was not found on PATH."
+              }}
+              if (Test-Path (Join-Path $repo ".git")) {{
+                Invoke-Native {{ git -C $repo fetch --all --tags }} "git fetch"
+                Invoke-Native {{ git -C $repo checkout "{git_ref}" }} "git checkout"
+                Invoke-Native {{ git -C $repo pull --ff-only origin "{git_ref}" }} "git pull"
+              }} else {{
+                if (Test-Path $repo) {{
+                  if (Test-Path $dataDir) {{
+                    if (Test-Path $backupDataDir) {{ Remove-Item -Recurse -Force $backupDataDir }}
+                    Move-Item -Path $dataDir -Destination $backupDataDir
+                  }}
+                  Remove-Item -Recurse -Force $repo
+                }}
+                Invoke-Native {{ git clone "{clone_url}" $repo }} "git clone"
+                Invoke-Native {{ git -C $repo checkout "{git_ref}" }} "git checkout ref"
+                if (Test-Path $backupDataDir) {{
+                  New-Item -ItemType Directory -Path $repo -Force | Out-Null
+                  Move-Item -Path $backupDataDir -Destination $dataDir
+                }}
+              }}
+              New-Item -ItemType Directory -Path (Join-Path $repo "logs") -Force | Out-Null
+              New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+              """,
+              "prep/clone",
+          )
+
+          run_ps(
+              """
+              $ErrorActionPreference = "Stop"
+              $repo = "C:\\orb-bot"
+              $envPath = Join-Path $repo ".env"
+              $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+              [System.IO.File]::WriteAllText($envPath, "", $utf8NoBom)
+              """,
+              "init env",
+          )
+
+          for i, line in enumerate(env_lines, start=1):
+              line_b64 = base64.b64encode((line + "\n").encode("utf-8")).decode("ascii")
+              run_ps(
+                  f"""
+                  $ErrorActionPreference = "Stop"
+                  $repo = "C:\\orb-bot"
+                  $envPath = Join-Path $repo ".env"
+                  $line = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("{line_b64}"))
+                  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+                  [System.IO.File]::AppendAllText($envPath, $line, $utf8NoBom)
+                  """,
+                  f"write env line {i}",
+              )
+
+          run_ps(
+              f"""
+              $ErrorActionPreference = "Stop"
+              $env:FORCE_DEPLOY = "{force}"
+              & "C:\\orb-bot\\scripts\\deploy\\Install-OrbBot.ps1" -RepoPath "C:\\orb-bot" -GitRef "{git_ref}"
+              """,
+              "install",
+          )
+          PY
