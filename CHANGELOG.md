@@ -6,6 +6,40 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-17
+
+Dry run and live order path. Real orders stay off unless `DRY_RUN=false`.
+
+### Added
+- `DRY_RUN` setting (default `true`). With it true the bot runs exactly as live trading and only
+  the broker order call is skipped (`DryRunVenue` fills against real bid/ask quotes). `DRY_RUN=false`
+  sends real orders and needs `LIVE_MODE=live`, `LIVE_ARMED=true`, credentials and the daily `/arm`.
+- `runtime/executor.py` (`LiveExecutor`): pre-trade risk gate (limits, spread, price sanity,
+  funds), entry limit order with a 10 s timeout then cancel (never chased), partial fills sold
+  back, broker-side protective stop kept in step with the position, exits (limit just under the
+  bid, then market), partial-sale bookkeeping so nothing is sold twice, reconciliation with the
+  broker, alerts and structured logs.
+- Square-off at `risk.square_off_time` (15:20) for dry-run and live positions; no entries after it.
+- `GrowwAccountReader` (funds and positions), `GrowwQuoteSource` (bid/ask), `AccountReadView`
+  (the trading client with every order method removed).
+- Schema v3: `orders.mode` and `events.mode` (`paper`, `dry_run`, `live`).
+- `RiskEngine.block_entries` (blocks entries without a flatten) and `RiskEngine.rebuild`
+  (today's counters after a restart). New risk limits for order timing in `config/risk.yaml`.
+
+### Changed
+- `LIVE_TRADING` is removed; `DRY_RUN` replaces it. The startup guard now refuses
+  `DRY_RUN=false` unless live mode, armed, and credentialed.
+- `/arm` is valid for one trading day only, and operator commands (`/arm`, `/pause`,
+  `/flatten`) are now also handled while a session is running (before, only between sessions).
+- A flatten that cannot sell is retried on every poll instead of being marked done. A session
+  that ends with an open position raises a CRITICAL alert.
+
+### Fixed
+- `GrowwVenue` read the ordered quantity and the limit price as the fill; a cancel was assumed
+  to have worked; a timeout while placing could leave an order untracked. The venue now reads
+  `filled_quantity` and `average_fill_price`, confirms a cancel from the order status, and looks a
+  timed-out order up by its reference before calling it rejected.
+
 ## [0.10.0] - 2026-10-16
 
 Unattended paper service with Telegram, EC2 deploy, and live-order foundation (disarmed).

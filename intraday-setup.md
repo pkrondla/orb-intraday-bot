@@ -8,7 +8,7 @@ Items marked **[Assumption]** are not stated in the notes. They are defaults cho
 
 **Scope**
 - Instrument: **Nifty futures only** (current-month contract), using 3-minute candles. Bank Nifty is out of scope.
-- Trades: paper only. `LIVE_TRADING = false`, and no order is ever sent to a broker.
+- Trades: paper by default. A broker order is sent only with `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=false` and a daily Telegram `/arm`. With `DRY_RUN=true` (the default) the same pipeline runs but the broker order step is skipped (see `docs/RUNBOOK.md`).
 - The bot records signals, tracks exits and calculates P&L.
 - A long signal buys a CE option. A short signal buys a PE option.
 - Every 3-minute candle produces a clear report to the user.

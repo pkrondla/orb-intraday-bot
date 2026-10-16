@@ -154,3 +154,27 @@ class GrowwTradingClient:
 
     def __dir__(self) -> list[str]:
         return sorted(ALLOWED_METHODS)
+
+
+READ_METHODS: frozenset[str] = ALLOWED_METHODS - ORDER_METHODS
+
+
+class AccountReadView:
+    """The trading client with every order method removed (what the dry run gets).
+
+    Funds and positions can be read with the real credentials, which also proves they work, but
+    nothing reachable through this object can place, change or cancel an order.
+    """
+
+    def __init__(self, client: GrowwTradingClient) -> None:
+        self._client = client
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name in READ_METHODS:
+            return getattr(self._client, name)
+        raise ForbiddenTradingCall(f"'{name}' is not available in a dry run.")
+
+    def __dir__(self) -> list[str]:
+        return sorted(READ_METHODS)

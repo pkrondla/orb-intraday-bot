@@ -16,7 +16,7 @@ from pathlib import Path
 
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.signals import SetupSignal
-from orb_intraday_bot.execution.models import OrderRecord
+from orb_intraday_bot.execution.models import OrderIntent, OrderLeg, OrderRecord, OrderStatus
 from orb_intraday_bot.paper.models import Fill, Position
 from orb_intraday_bot.paper.report import DaySummary, summarize
 from orb_intraday_bot.storage.migrations import apply_migrations
@@ -164,18 +164,20 @@ class TradeStore:
             conn.execute(
                 "INSERT INTO orders (idempotency_key, signal_id, leg, trading_symbol, side,"
                 " quantity, order_type, price, trigger_price, product, status, broker_order_id,"
-                " filled_qty, avg_price, reject_reason, reference_id, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " filled_qty, avg_price, reject_reason, reference_id, created_at, updated_at,"
+                " mode)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(idempotency_key) DO UPDATE SET"
                 " status=excluded.status, broker_order_id=excluded.broker_order_id,"
                 " filled_qty=excluded.filled_qty, avg_price=excluded.avg_price,"
-                " reject_reason=excluded.reject_reason, updated_at=excluded.updated_at",
+                " reject_reason=excluded.reject_reason, updated_at=excluded.updated_at,"
+                " mode=excluded.mode",
                 (
                     intent.idempotency_key, intent.signal_id, intent.leg.value,
                     intent.trading_symbol, intent.side, intent.quantity, intent.order_type,
                     intent.price, intent.trigger_price, intent.product, record.status.value,
                     record.broker_order_id, record.filled_qty, record.avg_price,
-                    record.reject_reason, intent.reference_id, created, updated,
+                    record.reject_reason, intent.reference_id, created, updated, record.mode,
                 ),
             )
             for seq, fill in enumerate(record.fills):
@@ -195,12 +197,14 @@ class TradeStore:
         *,
         signal_id: str = "",
         at: datetime | None = None,
+        mode: str = "",
     ) -> None:
         when = (at or datetime.now(IST)).isoformat()
         with self._tx() as conn:
             conn.execute(
-                "INSERT INTO events (event_time, event_type, signal_id, payload) VALUES (?,?,?,?)",
-                (when, event_type, signal_id, json.dumps(payload)),
+                "INSERT INTO events (event_time, event_type, signal_id, payload, mode)"
+                " VALUES (?,?,?,?,?)",
+                (when, event_type, signal_id, json.dumps(payload), mode),
             )
 
     def orders_for_signal(self, signal_id: str) -> list[sqlite3.Row]:
@@ -209,6 +213,61 @@ class TradeStore:
                 "SELECT * FROM orders WHERE signal_id=? ORDER BY created_at", (signal_id,)
             )
         )
+
+    def orphan_entries(self, day: date, mode: str) -> list[str]:
+        """Signals whose entry order filled but that have no position on record.
+
+        That only happens if the process died between the fill and saving the position. The
+        shares are held at the broker with nothing tracking them, so it must be looked at.
+        """
+        rows = self._conn.execute(
+            "SELECT o.signal_id FROM orders o"
+            " LEFT JOIN positions p ON p.position_id = o.signal_id"
+            " WHERE o.leg='ENTRY' AND o.status='FILLED' AND o.mode=?"
+            " AND substr(o.created_at,1,10)=? AND p.position_id IS NULL",
+            (mode, day.isoformat()),
+        )
+        return [str(r["signal_id"]) for r in rows]
+
+    def attempts_used(self, signal_id: str, leg: str) -> int:
+        """How many orders this signal already has for `leg`: the next attempt number is +1."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE signal_id=? AND leg=?", (signal_id, leg)
+        ).fetchone()
+        return int(row["n"])
+
+    def load_order(self, idempotency_key: str) -> OrderRecord | None:
+        """Rebuild an order from its row (after a restart), so it can be polled or cancelled."""
+        row = self._conn.execute(
+            "SELECT * FROM orders WHERE idempotency_key=?", (idempotency_key,)
+        ).fetchone()
+        if row is None:
+            return None
+        signal_id, leg, attempt = str(row["idempotency_key"]).rsplit(":", 2)
+        intent = OrderIntent(
+            signal_id=signal_id,
+            leg=OrderLeg(leg),
+            trading_symbol=row["trading_symbol"],
+            side=row["side"],
+            quantity=int(row["quantity"]),
+            order_type=row["order_type"],
+            price=row["price"],
+            trigger_price=row["trigger_price"],
+            product=row["product"],
+            attempt=int(attempt),
+        )
+        record = OrderRecord(
+            intent=intent,
+            status=OrderStatus(row["status"]),
+            broker_order_id=row["broker_order_id"],
+            filled_qty=int(row["filled_qty"]),
+            avg_price=float(row["avg_price"]),
+            reject_reason=row["reject_reason"],
+            mode=row["mode"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+        return record
 
 
 def _load(state: str) -> Position:

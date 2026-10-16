@@ -1,7 +1,12 @@
-"""Groww execution venue.
+"""Groww execution venue: the real broker order step.
 
-Places LIMIT entries with price protection, attaches broker-side stop/target protection,
-and reconciles only orders whose reference_id starts with ORB- (shared-account safe).
+Every order is a plain `place_order` call (LIMIT, MARKET or SL), tagged with an `ORB-` reference
+id so the bot only ever reconciles its own orders on a shared account. The protective stop is an
+ordinary stop-loss-limit sell that stays at the exchange; the bot manages every other exit itself.
+
+Response fields follow the Groww API: `order_status` (NEW, ACKED, TRIGGER_PENDING, APPROVED,
+EXECUTED, COMPLETED, REJECTED, FAILED, CANCELLED, CANCELLATION_REQUESTED, ...),
+`filled_quantity` and `average_fill_price`.
 """
 
 from __future__ import annotations
@@ -21,13 +26,17 @@ from orb_intraday_bot.execution.models import (
 
 log = logging.getLogger("orb.groww.venue")
 
+_TERMINAL = {OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELLED}
+_FILLED_STATUSES = {"COMPLETE", "COMPLETED", "FILLED", "EXECUTED"}
+_REJECTED_STATUSES = {"REJECTED", "FAILED"}
+_CANCELLED_STATUSES = {"CANCELLED", "CANCELED"}
+
 
 class TradingApi(Protocol):
     """Minimal surface the venue needs. GrowwTradingClient and fakes implement this."""
 
     def place_order(self, **kwargs: Any) -> dict[str, Any]: ...
     def cancel_order(self, **kwargs: Any) -> dict[str, Any]: ...
-    def create_smart_order(self, **kwargs: Any) -> dict[str, Any]: ...
     def get_order_status(self, **kwargs: Any) -> dict[str, Any]: ...
     def get_order_status_by_reference(self, **kwargs: Any) -> dict[str, Any]: ...
     def get_order_list(self, **kwargs: Any) -> Any: ...
@@ -41,26 +50,27 @@ def _as_dict(payload: Any) -> dict[str, Any]:
 
 
 def _extract_order_id(payload: dict[str, Any]) -> str:
-    for key in ("groww_order_id", "order_id", "smart_order_id", "id"):
+    for key in ("groww_order_id", "order_id", "id"):
         if payload.get(key):
             return str(payload[key])
     nested = payload.get("payload") or payload.get("data") or {}
     if isinstance(nested, dict):
-        for key in ("groww_order_id", "order_id", "smart_order_id", "id"):
+        for key in ("groww_order_id", "order_id", "id"):
             if nested.get(key):
                 return str(nested[key])
     return ""
 
 
 def _extract_status(payload: dict[str, Any]) -> str:
-    for key in ("order_status", "status", "smart_order_status"):
+    for key in ("order_status", "status"):
         if payload.get(key):
             return str(payload[key]).upper()
     return ""
 
 
 def _extract_avg_price(payload: dict[str, Any]) -> float:
-    for key in ("average_price", "avg_price", "price", "filled_price"):
+    # `price` is deliberately not read: it is the order's limit price, not what it filled at.
+    for key in ("average_fill_price", "average_price", "avg_price", "filled_price"):
         try:
             value = float(payload.get(key) or 0)
         except (TypeError, ValueError):
@@ -71,7 +81,8 @@ def _extract_avg_price(payload: dict[str, Any]) -> float:
 
 
 def _extract_filled_qty(payload: dict[str, Any]) -> int:
-    for key in ("filled_quantity", "filled_qty", "quantity"):
+    # `quantity` is deliberately not read: it is the ordered quantity, not what was filled.
+    for key in ("filled_quantity", "filled_qty"):
         try:
             value = int(payload.get(key) or 0)
         except (TypeError, ValueError):
@@ -92,6 +103,7 @@ class GrowwVenue:
         entry_price_protection_pct: float = 0.02,
         fill_wait_sec: float = 2.0,
         fill_polls: int = 5,
+        cancel_polls: int = 3,
     ) -> None:
         self._client = client
         self._product = product
@@ -100,22 +112,25 @@ class GrowwVenue:
         self._sleep = sleep or (lambda _: None)
         self._fill_wait_sec = fill_wait_sec
         self._fill_polls = fill_polls
+        self._cancel_polls = cancel_polls
         self._orders: dict[str, OrderRecord] = {}
 
     def submit(self, intent: OrderIntent) -> OrderRecord:
         now = self._clock.now().astimezone(IST)
-        record = OrderRecord(intent=intent, created_at=now, updated_at=now)
+        record = OrderRecord(intent=intent, created_at=now, updated_at=now, mode="live")
         record.transition(OrderStatus.SENT, at=now)
         try:
-            if intent.leg in {OrderLeg.STOP, OrderLeg.T1, OrderLeg.T2}:
-                payload = self._place_protection(intent)
-            else:
-                payload = self._place_entry_or_exit(intent)
+            payload = self._place(intent)
         except Exception as exc:
-            record.transition(OrderStatus.REJECTED, at=now)
-            record.reject_reason = f"{type(exc).__name__}: {exc}"
-            self._orders[intent.idempotency_key] = record
-            return record
+            # A timeout does not prove the order never reached the broker. Look it up by its
+            # reference before calling it rejected, or a live order could go untracked.
+            payload = self._lookup_by_reference(intent)
+            if not _extract_order_id(payload):
+                record.transition(OrderStatus.REJECTED, at=now)
+                record.reject_reason = f"{type(exc).__name__}: {exc}"
+                self._orders[intent.idempotency_key] = record
+                return record
+            log.warning("order call failed but the order exists at the broker: %s", exc)
 
         order_id = _extract_order_id(_as_dict(payload))
         record.broker_order_id = order_id
@@ -126,28 +141,37 @@ class GrowwVenue:
             self._orders[intent.idempotency_key] = record
             return record
 
-        # Poll for fill on entry / flatten / eod.
-        if intent.leg in {OrderLeg.ENTRY, OrderLeg.FLATTEN, OrderLeg.EOD}:
+        if intent.leg is not OrderLeg.PROTECT:
             self._await_fill(record)
         self._orders[intent.idempotency_key] = record
         return record
 
     def cancel(self, record: OrderRecord) -> OrderRecord:
-        if record.status in {OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELLED}:
+        """Ask the broker to cancel, then confirm the outcome from the order's own status.
+
+        The order is only marked cancelled when the broker says so. If it filled before the cancel
+        landed, the record ends FILLED. If the outcome is still unknown after a few polls the
+        record stays open, and the caller must not assume either way.
+        """
+        if record.status in _TERMINAL:
             return record
-        now = self._clock.now().astimezone(IST)
-        try:
-            if record.broker_order_id:
-                self._client.cancel_order(
-                    groww_order_id=record.broker_order_id, segment="FNO"
-                )
-            record.transition(OrderStatus.CANCELLED, at=now)
-        except Exception as exc:
-            log.warning("cancel failed: %s", type(exc).__name__)
+        if record.broker_order_id:
+            try:
+                self._client.cancel_order(groww_order_id=record.broker_order_id, segment="FNO")
+            except Exception as exc:
+                log.warning("cancel request failed: %s: %s", type(exc).__name__, exc)
+        for attempt in range(max(self._cancel_polls, 1)):
+            self.poll(record)
+            if record.status in _TERMINAL:
+                break
+            if attempt < self._cancel_polls - 1:
+                self._sleep(self._fill_wait_sec)
         self._orders[record.intent.idempotency_key] = record
         return record
 
     def poll(self, record: OrderRecord) -> OrderRecord:
+        if record.status in _TERMINAL:
+            return record
         if not record.broker_order_id and not record.intent.reference_id:
             return record
         try:
@@ -201,7 +225,17 @@ class GrowwVenue:
                 out.append(row)
         return out
 
-    def _place_entry_or_exit(self, intent: OrderIntent) -> dict[str, Any]:
+    def _lookup_by_reference(self, intent: OrderIntent) -> dict[str, Any]:
+        try:
+            return _as_dict(
+                self._client.get_order_status_by_reference(
+                    segment="FNO", order_reference_id=intent.reference_id
+                )
+            )
+        except Exception:
+            return {}
+
+    def _place(self, intent: OrderIntent) -> dict[str, Any]:
         price = intent.price or 0.0
         if intent.order_type == "LIMIT" and intent.side == "BUY" and price <= 0:
             # Protect: fetch LTP and pad.
@@ -223,45 +257,10 @@ class GrowwVenue:
             kwargs["trigger_price"] = float(intent.trigger_price)
         return _as_dict(self._client.place_order(**kwargs))
 
-    def _place_protection(self, intent: OrderIntent) -> dict[str, Any]:
-        """Broker-side OCO / SL after an entry fill."""
-        stop = float(intent.trigger_price or intent.price or 0.0)
-        target = float(intent.price or 0.0)
-        return _as_dict(
-            self._client.create_smart_order(
-                smart_order_type="OCO",
-                reference_id=intent.reference_id,
-                segment="FNO",
-                trading_symbol=intent.trading_symbol,
-                quantity=intent.quantity,
-                net_position_quantity=intent.quantity,
-                transaction_type="SELL",
-                product_type=intent.product or self._product,
-                exchange="NSE",
-                duration="DAY",
-                target={
-                    "trigger_price": target,
-                    "price": None,
-                    "order_type": "MARKET",
-                }
-                if target > 0
-                else None,
-                stop_loss={
-                    "trigger_price": stop,
-                    "price": stop,
-                    "order_type": "SL",
-                }
-                if stop > 0
-                else None,
-            )
-        )
-
     def _await_fill(self, record: OrderRecord) -> None:
         for _ in range(self._fill_polls):
             self.poll(record)
-            if record.status in {
-                OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELLED
-            }:
+            if record.status in _TERMINAL:
                 return
             self._sleep(self._fill_wait_sec)
         # Leave as ACKNOWLEDGED / PARTIAL if not filled yet.
@@ -285,7 +284,9 @@ class GrowwVenue:
             )
             record.filled_qty = filled
             record.avg_price = avg
-        if status in {"COMPLETE", "COMPLETED", "FILLED", "EXECUTED"}:
+        if status in _FILLED_STATUSES or (
+            filled >= record.intent.quantity > 0 and record.filled_qty >= record.intent.quantity
+        ):
             if record.status is not OrderStatus.FILLED:
                 if record.filled_qty <= 0:
                     record.filled_qty = record.intent.quantity
@@ -302,18 +303,19 @@ class GrowwVenue:
                             )
                         )
                 record.transition(OrderStatus.FILLED, at=now)
-        elif status in {"REJECTED", "FAILED"}:
+        elif status in _REJECTED_STATUSES:
             if record.status is not OrderStatus.REJECTED:
                 record.transition(OrderStatus.REJECTED, at=now)
-                record.reject_reason = status
-        elif (
-            status in {"CANCELLED", "CANCELED"}
-            and record.status not in {OrderStatus.CANCELLED, OrderStatus.FILLED}
-        ):
+                record.reject_reason = (
+                    str(payload.get("remark") or status)[:200] if payload else status
+                )
+        elif status in _CANCELLED_STATUSES and record.status not in {
+            OrderStatus.CANCELLED,
+            OrderStatus.FILLED,
+        }:
             record.transition(OrderStatus.CANCELLED, at=now)
         elif (
-            filled > 0
-            and filled < record.intent.quantity
+            0 < filled < record.intent.quantity
             and record.status is OrderStatus.ACKNOWLEDGED
         ):
             record.transition(OrderStatus.PARTIAL, at=now)

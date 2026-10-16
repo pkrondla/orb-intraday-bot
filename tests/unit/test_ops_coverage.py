@@ -25,7 +25,6 @@ from tests.runtime_support import RUN_CFG, Harness, Recorder, at
 def _ctx(tmp_path: Path) -> AppContext:
     return AppContext(
         Settings.model_construct(
-            live_trading=False,
             data_dir=tmp_path,
             telegram_bot_token=SecretStr(""),
             telegram_chat_id="",

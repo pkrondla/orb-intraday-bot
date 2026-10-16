@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime
+from datetime import time as dtime
 from pathlib import Path
 
 from orb_intraday_bot import __version__
@@ -19,11 +20,17 @@ from orb_intraday_bot.app.context import AppContext, build_market_data, load_con
 from orb_intraday_bot.app.forward import NothingToDo, day_summary_text, reconcile_day
 from orb_intraday_bot.config.fingerprint import fingerprint
 from orb_intraday_bot.core.clock import IST, Clock, SystemClock
+from orb_intraday_bot.paper.models import Position
 from orb_intraday_bot.risk.engine import RiskEngine
-from orb_intraday_bot.risk.limits import load_risk_limits
+from orb_intraday_bot.risk.limits import RiskLimits, load_risk_limits
 from orb_intraday_bot.runtime.alerts import Alerts
-from orb_intraday_bot.runtime.arming import resolve_mode
+from orb_intraday_bot.runtime.arming import (
+    configured_mode_label,
+    describe_order_mode,
+    resolve_mode,
+)
 from orb_intraday_bot.runtime.calendar import load_holidays, next_session_start
+from orb_intraday_bot.runtime.executor import LiveExecutor
 from orb_intraday_bot.runtime.live import LiveRunner, RunOutcome
 from orb_intraday_bot.runtime.logs import new_run_id
 from orb_intraday_bot.runtime.notify import Notifier, build_notifier
@@ -146,9 +153,15 @@ def handle_command(
             reply("Flatten code mismatch. Send /flatten again for a new code.")
         return
     if command.kind is CommandKind.ARM:
-        if bus.confirm_arm(command.arg):
-            alerts.armed("live")
-            reply("Armed for today.")
+        if bus.confirm_arm(command.arg, now.astimezone(IST).date()):
+            today = now.astimezone(IST).date()
+            decision = resolve_mode(
+                ctx.settings,
+                armed_today=bus.is_armed(today),
+                trading_credentials_present=ctx.settings.has_trading_credentials(),
+            )
+            alerts.armed(describe_order_mode(decision.order_mode))
+            reply(f"Armed for today. Orders: {describe_order_mode(decision.order_mode)}.")
         else:
             # First /arm without a pending code, or wrong code: issue a new one.
             code = bus.begin_arm()
@@ -200,7 +213,50 @@ def run_one_session(
             log.warning("could not save levels: %s", exc)
 
     flatten_marker = ctx.data_dir / "FLATTEN"
-    state.risk.reset_day(clock.now().astimezone(IST).date())
+    today = clock.now().astimezone(IST).date()
+    state.risk.reset_day(today)
+    alerts = Alerts(notifier)
+    restore_risk(state.risk, store, today)
+    executor = build_executor(
+        ctx, store=store, risk=state.risk, clock=clock, sleep=sleep, notify=alerts.order_event
+    )
+
+    def executor_enabled() -> bool:
+        """Armed today and the executor's order mode is the one the arming resolves to."""
+        if executor is None:
+            return False
+        decision = resolve_mode(
+            ctx.settings,
+            armed_today=state.bus.is_armed(clock.now().astimezone(IST).date()),
+            trading_credentials_present=ctx.settings.has_trading_credentials(),
+        )
+        return decision.order_mode == executor.mode
+
+    def on_open(position: Position) -> None:
+        state.risk.record_open()
+
+    def on_close(position: Position) -> None:
+        was_halted = state.risk.state.halted
+        state.risk.record_close(position.net_option_pnl)
+        if state.risk.state.halted and not was_halted:
+            alerts.kill_switch(state.risk.state.halt_reason)
+
+    def reply(text: str) -> None:
+        notifier.send(text)
+
+    def on_idle() -> None:
+        drain_commands(ctx, alerts, state, reply, clock.now())
+
+    if executor is not None and not executor_enabled() and ctx.settings.live_mode == "live":
+        decision = resolve_mode(
+            ctx.settings,
+            armed_today=False,
+            trading_credentials_present=ctx.settings.has_trading_credentials(),
+        )
+        alerts.order_event(
+            f"Not armed today: running as PAPER. {decision.reason}. "
+            "Send /arm and confirm the code to enable orders."
+        )
 
     def entries_allowed() -> bool:
         if state.bus.paused or state.risk.state.halted:
@@ -229,11 +285,94 @@ def run_one_session(
         on_levels=save_levels,
         entries_allowed=entries_allowed,
         flatten_requested=flatten_requested,
+        executor=executor,
+        executor_enabled=executor_enabled,
+        on_open=on_open,
+        on_close=on_close,
+        square_off_at=parse_clock_time(state.risk.limits.square_off_time),
+        on_idle=on_idle,
     )
     try:
         return runner.run()
     finally:
         store.close()
+
+
+def parse_clock_time(text: str) -> dtime:
+    hour, minute = (int(part) for part in text.split(":"))
+    return dtime(hour, minute)
+
+
+def restore_risk(risk: RiskEngine, store: TradeStore, day: date) -> None:
+    """After a restart: today's trades and P&L come back from the database.
+
+    Only positions handled by the executor (dry run or live) count; paper positions never did.
+    """
+    todays = [p for p in store.positions_for_day(day) if p.order_mode != "paper"]
+    closed = sorted((p for p in todays if not p.is_open), key=lambda p: p.closed_at or p.opened_at)
+    risk.rebuild(
+        trades_today=len(todays),
+        open_positions=sum(1 for p in todays if p.is_open),
+        closed_pnls=[p.net_option_pnl for p in closed],
+    )
+
+
+def build_executor(
+    ctx: AppContext,
+    *,
+    store: TradeStore,
+    risk: RiskEngine,
+    clock: Clock,
+    sleep: SleepFunc,
+    notify: Callable[[str], None],
+) -> LiveExecutor | None:
+    """The executor for this session, or None for plain paper mode.
+
+    Real orders (live mode with DRY_RUN=false) go to Groww. Otherwise the dry-run venue fills
+    against real bid/ask quotes and no order is ever sent. Everything else is identical.
+    """
+    from orb_intraday_bot.adapters.groww.account import GrowwAccountReader
+    from orb_intraday_bot.adapters.groww.factory import (
+        build_readonly_client,
+        build_trading_client,
+    )
+    from orb_intraday_bot.adapters.groww.quotes import GrowwQuoteSource
+    from orb_intraday_bot.adapters.groww.trading_client import AccountReadView
+    from orb_intraday_bot.adapters.groww.venue import GrowwVenue
+    from orb_intraday_bot.execution.account import AccountReader, DryRunAccount
+    from orb_intraday_bot.execution.dry_run_venue import DryRunVenue
+    from orb_intraday_bot.execution.quotes import QuoteSource
+    from orb_intraday_bot.execution.venue import ExecutionVenue
+
+    settings = ctx.settings
+    if settings.live_mode == "paper":
+        return None
+    limits: RiskLimits = risk.limits
+    quotes: QuoteSource
+    venue: ExecutionVenue
+    account: AccountReader
+    if settings.live_mode == "live" and not settings.dry_run:
+        mode = "live"
+        client = build_trading_client(settings)
+        quotes = GrowwQuoteSource(client, clock=clock)
+        venue = GrowwVenue(
+            client, clock, sleep, product=limits.product, fill_wait_sec=limits.order_poll_sec,
+            fill_polls=0,
+        )
+        account = GrowwAccountReader(client)
+    else:
+        mode = "dry_run"
+        quotes = GrowwQuoteSource(build_readonly_client(settings), clock=clock)
+        dry_venue = DryRunVenue(quotes, clock)
+        venue = dry_venue
+        funds: AccountReader | None = None
+        if settings.has_trading_credentials():
+            funds = GrowwAccountReader(AccountReadView(build_trading_client(settings)))
+        account = DryRunAccount(dry_venue, funds)
+    return LiveExecutor(
+        mode=mode, venue=venue, quotes=quotes, account=account, limits=limits, clock=clock,
+        sleep=sleep, risk=risk, store=store, notify=notify,
+    )
 
 
 def post_session_report(ctx: AppContext, alerts: Alerts, day: date) -> None:
@@ -280,14 +419,7 @@ def serve_loop(
     )
     state = ServeState(bus=CommandBus(), risk=risk)
     holidays = load_holidays() if holidays is None else holidays
-    arming = resolve_mode(
-        ctx.settings,
-        armed_today=state.bus.armed_today,
-        trading_credentials_present=ctx.settings.has_trading_credentials(),
-    )
-    mode = arming.mode
-    if arming.mode != ctx.settings.live_mode:
-        alerts.day_end(f"Arming: {arming.reason}")
+    mode = configured_mode_label(ctx.settings)
 
     def reply(text: str) -> None:
         notifier.send(text)

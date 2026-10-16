@@ -240,18 +240,19 @@ def test_check_reports_a_failing_step_and_stops_if_login_fails(
 
 
 # ---- context and the safety gate ---------------------------------------------------------
-def test_load_context_refuses_to_start_with_live_trading_on(
+def test_load_context_refuses_real_orders_outside_live_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LIVE_TRADING", "true")
-    with pytest.raises(Exception, match="LIVE_TRADING"):
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("LIVE_MODE", "paper")
+    with pytest.raises(Exception, match="DRY_RUN=false needs LIVE_MODE=live"):
         load_context()
 
 
 def test_load_context_reads_the_config_and_resolves_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     ctx = load_context()
     assert ctx.data_dir == tmp_path

@@ -11,4 +11,13 @@ max_data_staleness_sec: 120
 square_off_time: "15:20"            # MIS square-off before close
 product: MIS
 entry_order_type: LIMIT
-entry_price_protection_pct: 0.02    # limit = LTP * (1 + this) for buys
+entry_price_protection_pct: 0.02    # buy limit = ask * (1 + this); skip if ask is already above
+                                    # plan price * (1 + this)
+
+# How orders are worked. The dry run uses exactly the same values.
+entry_fill_timeout_sec: 10          # not filled by then: cancel and skip the trade (never chase)
+exit_fill_timeout_sec: 6            # exit limit not filled by then: cancel, sell at market
+exit_price_protection_pct: 0.03     # exit limit = bid * (1 - this)
+stop_limit_buffer_pct: 0.05         # broker stop-loss limit = trigger * (1 - this)
+order_poll_sec: 1.0
+reconcile_interval_sec: 60          # compare the bot's positions with the broker's

@@ -1,18 +1,24 @@
-"""The paper engine: opens paper positions from planned trades and runs their exits.
+"""The position engine: opens positions from planned trades and runs their exits.
 
-Nothing here talks to a broker. It records what would have happened. All prices come in as
-arguments (closed candles, live polls, option LTPs), and time comes from the data, so replay and
-live use the same code.
+Without an executor this is the paper engine: nothing here talks to a broker, it records what
+would have happened. All prices come in as arguments (closed candles, live polls, option LTPs),
+and time comes from the data, so replay and live use the same code.
+
+With an executor (the dry run or live trading) the rules are exactly the same, but each entry and
+each exit is carried out by the executor, and the position records the price it really got. The
+executor also keeps a protective stop-loss at the broker; if that stop is executed, the engine
+books it here.
 
 Opening a position (at the close of the signal candle):
-  entry premium = the option LTP at signal time (plus the configured slippage), the buy charges
-  are booked immediately, and the signal id is the position id, so the same signal can never
-  open twice (also across restarts, through the store).
+  entry premium = the option LTP at signal time (plus the configured slippage), or, with an
+  executor, the price the buy order filled at. The buy charges are booked immediately, and the
+  signal id is the position id, so the same signal can never open twice (also across restarts,
+  through the store).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, time, timedelta
 
 from orb_intraday_bot.config.fingerprint import fingerprint
@@ -20,24 +26,39 @@ from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.models import Candle, Direction
 from orb_intraday_bot.engine.signal_engine import PlannedTrade
-from orb_intraday_bot.options.pricing import OptionPlan
+from orb_intraday_bot.options.pricing import OptionPlan, book_lots_at_t1
 from orb_intraday_bot.paper.charges import order_charges
 from orb_intraday_bot.paper.exits import (
     Bar,
     ExitEvent,
+    book_broker_stop,
     close_at_end_of_day,
     evaluate_bar,
     modeled_option_price,
 )
-from orb_intraday_bot.paper.models import Position
-from orb_intraday_bot.paper.ports import PositionRepository
+from orb_intraday_bot.paper.models import ExitReason, Position
+from orb_intraday_bot.paper.ports import PositionExecutor, PositionRepository
+
+PositionHook = Callable[[Position], None]
 
 
 class PaperEngine:
-    def __init__(self, config: StrategyConfig, store: PositionRepository | None = None) -> None:
+    def __init__(
+        self,
+        config: StrategyConfig,
+        store: PositionRepository | None = None,
+        executor: PositionExecutor | None = None,
+        executor_enabled: Callable[[], bool] | None = None,
+        on_open: PositionHook | None = None,
+        on_close: PositionHook | None = None,
+    ) -> None:
         self._cfg = config
         self._strategy_hash = fingerprint(config).strategy
         self._store = store
+        self._executor = executor
+        self._executor_enabled = executor_enabled or (lambda: True)
+        self._on_open = on_open
+        self._on_close = on_close
         self._open: dict[str, Position] = {}
         self._closed: list[Position] = []
         h, m = (int(x) for x in config.session.close.split(":"))
@@ -66,9 +87,27 @@ class PaperEngine:
             or (self._store is not None and self._store.has_position(position_id))
         )
 
+    def _entry_executor(self) -> PositionExecutor | None:
+        """The executor for a new entry, if execution is on right now (armed, not paper)."""
+        if self._executor is not None and self._executor_enabled():
+            return self._executor
+        return None
+
+    def _executor_for(self, position: Position) -> PositionExecutor | None:
+        """A position is always closed the way it was opened (never a dry-run exit on a live
+        position, or the reverse)."""
+        executor = self._executor
+        if executor is not None and position.order_mode == executor.mode:
+            return executor
+        return None
+
     # -- opening -------------------------------------------------------------------------
     def open(self, trade: PlannedTrade, plan: OptionPlan, opened_at: datetime) -> Position | None:
-        """Open a paper position, or return None if this signal already has one."""
+        """Open a position, or return None if this signal already has one.
+
+        With an executor this places the buy and raises `EntryNotFilledError` if nothing was
+        bought (the caller releases the trade).
+        """
         signal = trade.signal
         position_id = signal.signal_id
         if position_id in self._open or any(p.position_id == position_id for p in self._closed):
@@ -77,9 +116,28 @@ class PaperEngine:
             return None
 
         tick = plan.contract.tick_size
-        slip = self._cfg.paper.slippage_option_points
-        entry = round(round((plan.entry_ltp + slip) / tick) * tick, 4)
-        quantity = plan.lots * plan.contract.lot_size
+        executor = self._entry_executor()
+        if executor is None:
+            slip = self._cfg.paper.slippage_option_points
+            entry = round(round((plan.entry_ltp + slip) / tick) * tick, 4)
+            lots, order_id, order_mode = plan.lots, "", "paper"
+            sl_exit, t1_option, t2_option = plan.sl, plan.t1, plan.t2
+            t1_book_lots = plan.t1_book_lots
+        else:
+            done = executor.enter(trade, plan, opened_at)
+            entry = round(round(done.price / tick) * tick, 4)
+            lots, order_id, order_mode = done.lots, done.order_id, executor.mode
+            # Keep the planned distances (stop, T1, T2 in option points) from the real fill.
+            shift = entry - plan.entry_ltp
+            sl_exit = max(tick, round(round((plan.sl + shift) / tick) * tick, 4))
+            t1_option = round(round((plan.t1 + shift) / tick) * tick, 4)
+            t2_option = round(round((plan.t2 + shift) / tick) * tick, 4)
+            t1_book_lots = (
+                plan.t1_book_lots
+                if lots == plan.lots
+                else book_lots_at_t1(lots, self._cfg.targets.t1_book_fraction)
+            )
+        quantity = lots * plan.contract.lot_size
         position = Position(
             position_id=position_id,
             setup=signal.setup.value,
@@ -102,12 +160,12 @@ class PaperEngine:
             close_exit_level=trade.stop.close_exit_level,
             t1=trade.targets.t1,
             t2=trade.targets.t2,
-            sl_exit=plan.sl,
-            t1_option=plan.t1,
-            t2_option=plan.t2,
-            lots=plan.lots,
-            t1_book_lots=plan.t1_book_lots,
-            remaining_lots=plan.lots,
+            sl_exit=sl_exit,
+            t1_option=t1_option,
+            t2_option=t2_option,
+            lots=lots,
+            t1_book_lots=t1_book_lots,
+            remaining_lots=lots,
             breakeven_after_t1=self._cfg.targets.move_sl_to_entry_after_t1,
             strategy_hash=self._strategy_hash,
             flags=list(plan.flags),
@@ -117,9 +175,18 @@ class PaperEngine:
                 f"T1: {trade.targets.t1_basis}",
                 f"T2: {trade.targets.t2_basis}",
             ],
+            order_mode=order_mode,
+            planned_entry=plan.entry_ltp,
+            entry_order_id=order_id,
         )
         self._open[position_id] = position
         self._save(position, opened_at)
+        if executor is not None:
+            # Saved first: if anything below fails, the filled entry is on record.
+            executor.protect(position, opened_at)
+            self._save(position, opened_at)
+            if self._on_open is not None:
+                self._on_open(position)
         return position
 
     # -- running exits -------------------------------------------------------------------
@@ -132,21 +199,22 @@ class PaperEngine:
         bar = Bar(
             candle.start, candle.open, candle.high, candle.low, candle.close, is_candle=True
         )
-        events: list[ExitEvent] = []
         close_at = candle.start + timedelta(minutes=self._cfg.session.candle_minutes)
+        events = self._apply_broker_stops(close_at, candle.close)
         end_of_day = close_at >= datetime.combine(
             candle.start.date(), self._close_time, tzinfo=IST
         )
         for position in list(self._open.values()):
             if position.last_candle is not None and candle.start <= position.last_candle:
                 continue            # already applied (a restart replaying the day's candles)
+            executor = self._executor_for(position)
             ltp = (option_ltps or {}).get(position.trading_symbol)
-            events += evaluate_bar(position, bar, ltp, self._cfg.paper)
+            events += evaluate_bar(position, bar, ltp, self._cfg.paper, executor)
             if position.is_open:
                 position.last_candle = candle.start
             if position.is_open and end_of_day:
                 events += close_at_end_of_day(
-                    position, close_at, candle.close, ltp, self._cfg.paper
+                    position, close_at, candle.close, ltp, self._cfg.paper, executor
                 )
             self._after(position, close_at)
         return events
@@ -156,10 +224,12 @@ class PaperEngine:
     ) -> list[ExitEvent]:
         """Apply a live price poll (futures LTP and option LTPs) to every open position."""
         bar = Bar.tick(time_, futures_price)
-        events: list[ExitEvent] = []
+        events = self._apply_broker_stops(time_, futures_price)
         for position in list(self._open.values()):
             ltp = (option_ltps or {}).get(position.trading_symbol)
-            events += evaluate_bar(position, bar, ltp, self._cfg.paper)
+            events += evaluate_bar(
+                position, bar, ltp, self._cfg.paper, self._executor_for(position)
+            )
             self._after(position, time_)
         return events
 
@@ -168,12 +238,24 @@ class PaperEngine:
         time_: datetime,
         futures_price: float,
         option_ltps: Mapping[str, float] | None = None,
+        reason: ExitReason = ExitReason.EOD,
+        executed_only: bool = False,
     ) -> list[ExitEvent]:
-        """End of day (or shutdown at the session end): close everything still open."""
+        """Close everything still open: end of day, the square-off time, or a flatten.
+
+        With an executor a position whose sale fails stays open (check `open_positions`) and the
+        caller tries again. `executed_only` leaves simulated (paper) positions alone: the
+        square-off time applies only to positions that hold real or dry-run orders.
+        """
         events: list[ExitEvent] = []
         for position in list(self._open.values()):
+            if executed_only and self._executor_for(position) is None:
+                continue
             ltp = (option_ltps or {}).get(position.trading_symbol)
-            events += close_at_end_of_day(position, time_, futures_price, ltp, self._cfg.paper)
+            events += close_at_end_of_day(
+                position, time_, futures_price, ltp, self._cfg.paper,
+                self._executor_for(position), reason,
+            )
             self._after(position, time_)
         return events
 
@@ -189,10 +271,42 @@ class PaperEngine:
         return out
 
     # -- internals -----------------------------------------------------------------------
+    def _apply_broker_stops(self, now: datetime, futures_price: float) -> list[ExitEvent]:
+        """Book any protective stop that the broker executed since the last look."""
+        events: list[ExitEvent] = []
+        executor = self._executor
+        if executor is None:
+            return events
+        watched = [
+            p for p in self._open.values() if p.order_mode == executor.mode and p.stop_order_id
+        ]
+        if not watched:
+            return events
+        for stop in executor.poll_stops(watched, now):
+            position = self._open.get(stop.position_id)
+            if position is None:
+                continue
+            events.append(
+                book_broker_stop(
+                    position, now, stop.price, stop.quantity, futures_price, executor.mode,
+                    self._cfg.paper,
+                )
+            )
+            position.stop_order_id = ""
+            position.stop_quantity = 0
+            self._after(position, now)
+        return events
+
     def _after(self, position: Position, now: datetime) -> None:
         if not position.is_open:
             self._open.pop(position.position_id, None)
             self._closed.append(position)
+            if self._on_close is not None and position.order_mode != "paper":
+                self._on_close(position)
+        else:
+            executor = self._executor_for(position)
+            if executor is not None:
+                executor.protect(position, now)     # keeps the broker stop in step (T1, partial)
         self._save(position, now)
 
     def _save(self, position: Position, now: datetime) -> None:

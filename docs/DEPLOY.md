@@ -1,6 +1,6 @@
 # Deploy the ORB bot to Windows EC2
 
-The paper (and later live) bot runs on the same Windows EC2 as `GrowwBot`, in a separate
+The bot (paper, dry run, or live) runs on the same Windows EC2 as `GrowwBot`, in a separate
 directory and as separate NSSM services. Nothing of `GrowwBot` is touched.
 
 ## One-time EC2 prerequisites
@@ -34,8 +34,25 @@ Already done if the Groww bot is deployed:
 | `WINRM_USERNAME` | Windows user (for example `Administrator`) |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat id |
 | `LIVE_MODE` | `paper` (default), `shadow`, or `live` |
-| `LIVE_ARMED` | `false` until you intentionally arm live |
+| `LIVE_ARMED` | `false` until you intentionally arm live (also needed for the dry run) |
+| `DRY_RUN` | `true` (default): the whole live pipeline, but no order is sent to the broker. `false`: real orders |
 | `HEALTHCHECK_URL` | Optional healthchecks.io ping URL |
+
+### The dry run (what to set before the first live market day)
+
+| Variable | Value |
+|---|---|
+| `LIVE_MODE` | `live` |
+| `LIVE_ARMED` | `true` |
+| `DRY_RUN` | `true` |
+
+Then send `/arm` to the Telegram bot each morning before 09:15 and reply with the code it gives
+you. The arm is for that day only. Without it the day runs as plain paper trading and the bot
+tells you so. With these settings **no order can reach Groww**: the order step is replaced by a
+simulation that fills against the real bid/ask. See `docs/RUNBOOK.md` for what to check.
+
+Real orders need all of: `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=false`, Groww credentials,
+and the daily `/arm`. If `DRY_RUN=false` is set without the others the bot refuses to start.
 
 ## Deploy
 

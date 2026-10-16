@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Any
 
@@ -32,7 +33,7 @@ _HELP = (
     "/pause - stop opening new trades (exits still run)\n"
     "/resume - allow new trades again\n"
     "/flatten - close everything (reply /flatten <code> to confirm)\n"
-    "/arm <code> - arm live trading for today (when LIVE_MODE=live)\n"
+    "/arm <code> - arm live trading for today (when LIVE_MODE=live); expires at midnight\n"
     "/disarm - cancel today's arm\n"
     "/help - this list"
 )
@@ -101,6 +102,7 @@ class CommandBus:
         self._arm_code: str | None = None
         self.paused = False
         self.armed_today = False
+        self.armed_day: date | None = None
 
     def put(self, command: Command) -> None:
         self._queue.put(command)
@@ -133,18 +135,26 @@ class CommandBus:
             self._arm_code = code
         return code
 
-    def confirm_arm(self, code: str) -> bool:
+    def confirm_arm(self, code: str, day: date | None = None) -> bool:
+        """Accept the arm code. `day` is the trading day it is valid for (None = not tracked)."""
         with self._lock:
             ok = bool(self._arm_code) and code.strip().lower() == self._arm_code
             if ok:
                 self._arm_code = None
                 self.armed_today = True
+                self.armed_day = day
             return ok
+
+    def is_armed(self, day: date) -> bool:
+        """True if /arm was confirmed for `day`. An arm never carries over to another day."""
+        with self._lock:
+            return self.armed_today and (self.armed_day is None or self.armed_day == day)
 
     def disarm(self) -> None:
         with self._lock:
             self._arm_code = None
             self.armed_today = False
+            self.armed_day = None
 
 
 def _urllib_get(url: str) -> bytes:  # pragma: no cover - network

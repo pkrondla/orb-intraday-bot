@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -25,7 +25,6 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    live_trading: bool = Field(default=False, alias="LIVE_TRADING")
     # TOTP token + TOTP secret. The bot generates the 6-digit code and refreshes the token itself.
     groww_totp_token: SecretStr = Field(default=SecretStr(""), alias="GROWW_TOTP_TOKEN")
     groww_totp_secret: SecretStr = Field(default=SecretStr(""), alias="GROWW_TOTP_SECRET")
@@ -39,9 +38,12 @@ class Settings(BaseSettings):
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     # Optional dead-man ping URL (e.g. healthchecks.io). Watchdog hits it when healthy.
     healthcheck_url: str = Field(default="", alias="HEALTHCHECK_URL")
-    # paper | shadow | live. Live still needs LIVE_ARMED and a daily Telegram /arm (see M5).
+    # paper | shadow | live. Live still needs LIVE_ARMED and a daily Telegram /arm.
     live_mode: Literal["paper", "shadow", "live"] = Field(default="paper", alias="LIVE_MODE")
     live_armed: bool = Field(default=False, alias="LIVE_ARMED")
+    # True (the default) runs the whole live pipeline but skips the broker order step: orders are
+    # simulated from real bid/ask quotes. False sends real orders (live mode only).
+    dry_run: bool = Field(default=True, alias="DRY_RUN")
     # Optional override for live trading. Empty = reuse GROWW_TOTP_TOKEN / GROWW_TOTP_SECRET.
     groww_trading_totp_token: SecretStr = Field(
         default=SecretStr(""), alias="GROWW_TRADING_TOTP_TOKEN"
@@ -60,16 +62,6 @@ class Settings(BaseSettings):
             and self.groww_totp_secret.get_secret_value()
         )
         return bool(trading or shared)
-
-    @field_validator("live_trading")
-    @classmethod
-    def _live_trading_must_be_false(cls, value: bool) -> bool:
-        if value:
-            raise ValueError(
-                "LIVE_TRADING=true is not supported. "
-                "This bot is paper-only and never places orders."
-            )
-        return value
 
 
 class InstrumentConfig(BaseModel):

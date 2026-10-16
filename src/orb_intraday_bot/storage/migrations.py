@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _MIGRATIONS: dict[int, str] = {
     1: """
@@ -102,6 +102,11 @@ _MIGRATIONS: dict[int, str] = {
         );
         CREATE INDEX IF NOT EXISTS events_time ON events (event_time);
         CREATE INDEX IF NOT EXISTS events_type ON events (event_type);
+        """,
+    3: """
+        ALTER TABLE orders ADD COLUMN mode TEXT NOT NULL DEFAULT 'paper';
+        ALTER TABLE events ADD COLUMN mode TEXT NOT NULL DEFAULT '';
+        CREATE INDEX IF NOT EXISTS orders_mode ON orders (mode);
         """,
 }
 

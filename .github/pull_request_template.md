@@ -13,7 +13,7 @@
 - [ ] `scripts/dev.ps1 ci` passes locally (ruff, mypy, import-linter, tests with coverage)
 - [ ] New behaviour has tests; new failure modes have a test that triggers them
 - [ ] No secrets, tokens, `.env` or `data/` content in the diff
-- [ ] `LIVE_TRADING` default and the paper-only guard are untouched, or the change is explained below
+- [ ] `DRY_RUN` still defaults to true, and nothing but `DRY_RUN=false` can reach a broker order call, or the change is explained below
 - [ ] `PROGRESS.md` and `CHANGELOG.md` updated
 
 ## Evidence

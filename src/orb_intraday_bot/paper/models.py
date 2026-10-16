@@ -26,6 +26,9 @@ class ExitReason(StrEnum):
     T1 = "T1"                          # partial booking
     T2 = "T2"                          # final target / mandatory pivot exit
     EOD = "EOD"                        # end of day
+    SQUARE_OFF = "SQUARE_OFF"          # the intraday square-off time (before the broker's own)
+    FLATTEN = "FLATTEN"                # an operator or kill-switch flatten
+    BROKER_STOP = "BROKER_STOP"        # the protective stop-loss at the broker was executed
 
 
 class PositionStatus(StrEnum):
@@ -99,6 +102,19 @@ class Position:
     flags: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     fills: list[Fill] = field(default_factory=list)
+    # How the position was handled: "paper" (simulated), "dry_run" (the live pipeline with the
+    # broker order step skipped) or "live" (real orders). The same fields are kept in all modes.
+    order_mode: str = "paper"
+    planned_entry: float = 0.0        # the option price the plan was made at (fill vs plan)
+    entry_order_id: str = ""          # broker (or dry-run) order id of the entry
+    stop_order_id: str = ""           # id of the protective stop-loss order at the broker
+    stop_order_key: str = ""          # the bot's own idempotency key for that order
+    stop_trigger: float = 0.0         # trigger price the protective stop was placed with
+    stop_quantity: int = 0            # quantity the protective stop covers
+    # Part of an exit that was sold at the broker but not yet booked (the sale did not complete).
+    # The retry sells only what is left, so nothing is ever sold twice.
+    unbooked_qty: int = 0
+    unbooked_value: float = 0.0       # rupees received for those units (price x quantity)
 
     # -- derived -------------------------------------------------------------------------
     @property

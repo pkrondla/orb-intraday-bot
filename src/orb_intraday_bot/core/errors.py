@@ -60,6 +60,19 @@ class BrokerRejectionError(BotError):
     reaction: ClassVar[Reaction] = Reaction.REJECT_SIGNAL
 
 
+class EntryNotFilledError(TradePlanError):
+    """The entry did not happen: vetoed by risk, rejected, or not filled in time (reason inside).
+
+    The trade is released and the day carries on. Nothing is left open at the broker.
+    """
+
+
+class ExitFailedError(BotError):
+    """An exit order did not complete. The position is still open; the exit is retried."""
+
+    reaction: ClassVar[Reaction] = Reaction.RETRY
+
+
 class RiskBreachError(BotError):
     """A risk limit was hit. Reserved for Phase 16."""
 

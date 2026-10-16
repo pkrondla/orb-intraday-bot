@@ -40,6 +40,7 @@ from orb_intraday_bot.app.replay import (
     write_trades_csv,
 )
 from orb_intraday_bot.core.clock import IST, SystemClock
+from orb_intraday_bot.runtime.arming import configured_mode_label
 from orb_intraday_bot.runtime.day import CandleReport
 from orb_intraday_bot.storage.store import TradeStore
 
@@ -264,7 +265,8 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     ctx = load_context()
     print("ORB Intraday Bot - connection check (read-only)")
-    print("  OK    paper mode: LIVE_TRADING is false, no order methods reachable")
+    print(f"  OK    mode: {configured_mode_label(ctx.settings)}")
+    print("  OK    the market-data client has no order methods")
 
     def show(step: CheckStep) -> None:
         print(step.line())

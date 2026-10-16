@@ -22,7 +22,6 @@ from tests.runtime_support import Recorder
 
 def _ctx(tmp_path: Path) -> AppContext:
     settings = Settings.model_construct(
-        live_trading=False,
         data_dir=tmp_path,
         telegram_bot_token=SecretStr(""),
         telegram_chat_id="",
@@ -108,7 +107,6 @@ def test_watchdog_ping_when_healthy(tmp_path: Path) -> None:
     # Settings is frozen dataclass-like via pydantic - AppContext has settings as field
     # Rebuild with healthcheck
     settings = Settings.model_construct(
-        live_trading=False,
         data_dir=tmp_path,
         telegram_bot_token=SecretStr(""),
         telegram_chat_id="",

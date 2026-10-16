@@ -2,7 +2,7 @@
 
 ## Python paper-trading bot (`orb_intraday_bot`)
 
-Paper only: it never places an order (`LIVE_TRADING` must stay false, and the broker client is read-only). It trades Nifty futures signals and tracks the matching CE/PE option as a paper position. The rules are in `intraday-setup.md`; progress is in `PROGRESS.md`.
+Paper by default: with the default settings it never places an order. It trades Nifty futures signals and tracks the matching CE/PE option as a paper position. With `LIVE_MODE=live`, `LIVE_ARMED=true` and a daily Telegram `/arm`, it runs the full order pipeline instead: with `DRY_RUN=true` (the default) everything happens as in live trading except the call that sends the order to the broker; with `DRY_RUN=false` real orders are sent. See `docs/RUNBOOK.md`. The rules are in `intraday-setup.md`; progress is in `PROGRESS.md`.
 
 Setup: `pip install -e .[dev]`, copy `.env.example` to `.env` and fill in the data-only Groww credentials (and optionally Telegram).
 

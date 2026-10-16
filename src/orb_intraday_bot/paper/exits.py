@@ -25,12 +25,17 @@ touch inside a closed candle) the option price is modelled from the futures pric
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
 from orb_intraday_bot.config.settings import PaperConfig
+from orb_intraday_bot.core.errors import ExitFailedError
 from orb_intraday_bot.paper.charges import order_charges
 from orb_intraday_bot.paper.models import ExitReason, Fill, Position, PositionStatus
+from orb_intraday_bot.paper.ports import PositionExecutor
+
+log = logging.getLogger("orb.exits")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,10 +95,38 @@ def _book(
     option_ltp: float | None,
     cfg: PaperConfig,
     use_live: bool,
+    executor: PositionExecutor | None = None,
 ) -> Fill:
     lots = min(lots, position.remaining_lots)
     quantity = lots * position.lot_size
-    price, source = _exit_price(position, futures_price, option_ltp, cfg, use_live)
+    if executor is None:
+        price, source = _exit_price(position, futures_price, option_ltp, cfg, use_live)
+    else:
+        # The executor really sells (or dry-runs the sale) and reports what it got. It raises
+        # ExitFailedError before anything below runs, so a failed sale leaves the position as it
+        # was and the exit is simply tried again on the next poll.
+        done = executor.sell(position, lots, reason.value, time)
+        price, source = done.price, done.source
+        if done.reason is not None:
+            reason = ExitReason(done.reason)
+        if done.quantity != quantity:
+            quantity = done.quantity
+            lots = min(max(quantity // position.lot_size, 1), position.remaining_lots)
+    return _record(position, time, reason, lots, quantity, futures_price, price, source, cfg)
+
+
+def _record(
+    position: Position,
+    time: datetime,
+    reason: ExitReason,
+    lots: int,
+    quantity: int,
+    futures_price: float,
+    price: float,
+    source: str,
+    cfg: PaperConfig,
+) -> Fill:
+    """Write one exit fill into the position and close it when no lots are left."""
     fill = Fill(
         time=time,
         reason=reason,
@@ -114,6 +147,24 @@ def _book(
     return fill
 
 
+def book_broker_stop(
+    position: Position,
+    time: datetime,
+    price: float,
+    quantity: int,
+    futures_price: float,
+    source: str,
+    cfg: PaperConfig,
+) -> ExitEvent:
+    """Record that the protective stop-loss at the broker was executed (not ordered by the bot)."""
+    lots = min(max(quantity // position.lot_size, 1), position.remaining_lots)
+    fill = _record(
+        position, time, ExitReason.BROKER_STOP, lots, lots * position.lot_size, futures_price,
+        price, source, cfg,
+    )
+    return ExitEvent(position.position_id, time, _describe(position, fill), fill)
+
+
 def _describe(position: Position, fill: Fill) -> str:
     return (
         f"{position.trading_symbol} {fill.reason.value}: sold {fill.lots} lot(s) at "
@@ -124,20 +175,43 @@ def _describe(position: Position, fill: Fill) -> str:
 
 
 def evaluate_bar(
-    position: Position, bar: Bar, option_ltp: float | None, cfg: PaperConfig
+    position: Position,
+    bar: Bar,
+    option_ltp: float | None,
+    cfg: PaperConfig,
+    executor: PositionExecutor | None = None,
 ) -> list[ExitEvent]:
-    """Apply the exit rules to one bar. Mutates the position and returns what happened."""
+    """Apply the exit rules to one bar. Mutates the position and returns what happened.
+
+    With an executor, a sale that fails is logged and left for the next bar or poll (the position
+    keeps its state), and what already happened on this bar is still returned.
+    """
     # `opened_at` is the close of the signal candle; earlier bars belong to the signal itself.
     if not position.is_open or bar.time < position.opened_at:
         return []
     events: list[ExitEvent] = []
+    try:
+        _evaluate(position, bar, option_ltp, cfg, executor, events)
+    except ExitFailedError as exc:
+        log.warning("exit not completed for %s: %s", position.trading_symbol, exc)
+    return events
+
+
+def _evaluate(
+    position: Position,
+    bar: Bar,
+    option_ltp: float | None,
+    cfg: PaperConfig,
+    executor: PositionExecutor | None,
+    events: list[ExitEvent],
+) -> None:
     d = position.sign
     live = not bar.is_candle       # a poll's option LTP is current; a candle's touch is not
 
     def close_all(reason: ExitReason, fut_price: float, use_live: bool) -> None:
         fill = _book(
             position, bar.time, reason, position.remaining_lots, fut_price, option_ltp, cfg,
-            use_live,
+            use_live, executor,
         )
         events.append(ExitEvent(position.position_id, bar.time, _describe(position, fill), fill))
 
@@ -148,23 +222,24 @@ def evaluate_bar(
         gap_fill = min(bar.open, stop) if d > 0 else max(bar.open, stop)
         reason = ExitReason.BREAKEVEN_STOP if position.stop_at_entry else ExitReason.HARD_STOP
         close_all(reason, gap_fill, live)
-        return events
+        return
     if option_ltp is not None and option_ltp <= position.active_option_stop:
         close_all(ExitReason.OPTION_STOP, bar.close, True)
-        return events
+        return
 
     # 2. Targets. T2 closes everything left; T1 books part and moves the stop to cost.
     if not position.t1_done and _reached(bar, position.t1, d):
         t1_fill_price = max(bar.open, position.t1) if d > 0 else min(bar.open, position.t1)
-        position.t1_done = True
         if position.t1_book_lots > 0:
+            # Booked before t1_done is set: if the sale fails, T1 is still pending next poll.
             fill = _book(
                 position, bar.time, ExitReason.T1, position.t1_book_lots, t1_fill_price,
-                option_ltp, cfg, live,
+                option_ltp, cfg, live, executor,
             )
             events.append(
                 ExitEvent(position.position_id, bar.time, _describe(position, fill), fill)
             )
+        position.t1_done = True
         if position.breakeven_after_t1:
             position.stop_at_entry = True
             events.append(
@@ -178,14 +253,13 @@ def evaluate_bar(
     if position.is_open and _reached(bar, position.t2, d):
         t2_fill_price = max(bar.open, position.t2) if d > 0 else min(bar.open, position.t2)
         close_all(ExitReason.T2, t2_fill_price, live)
-        return events
+        return
 
     # 3. A candle close back beyond the level (close-based stops only).
     if bar.is_candle and position.close_exit_level is not None and position.is_open:
         level = position.close_exit_level
         if (d > 0 and bar.close < level) or (d < 0 and bar.close > level):
             close_all(ExitReason.CLOSE_STOP, bar.close, True)
-    return events
 
 
 def _reached(bar: Bar, level: float, d: float) -> bool:
@@ -193,13 +267,26 @@ def _reached(bar: Bar, level: float, d: float) -> bool:
 
 
 def close_at_end_of_day(
-    position: Position, time: datetime, futures_price: float, option_ltp: float | None,
+    position: Position,
+    time: datetime,
+    futures_price: float,
+    option_ltp: float | None,
     cfg: PaperConfig,
+    executor: PositionExecutor | None = None,
+    reason: ExitReason = ExitReason.EOD,
 ) -> list[ExitEvent]:
+    """Close what is left (end of day, square-off or a flatten, by `reason`).
+
+    A sale that fails with an executor leaves the position open and is retried by the caller.
+    """
     if not position.is_open:
         return []
-    fill = _book(
-        position, time, ExitReason.EOD, position.remaining_lots, futures_price, option_ltp, cfg,
-        True,
-    )
+    try:
+        fill = _book(
+            position, time, reason, position.remaining_lots, futures_price, option_ltp, cfg,
+            True, executor,
+        )
+    except ExitFailedError as exc:
+        log.warning("close not completed for %s: %s", position.trading_symbol, exc)
+        return []
     return [ExitEvent(position.position_id, time, _describe(position, fill), fill)]

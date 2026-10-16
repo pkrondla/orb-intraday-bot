@@ -1,4 +1,4 @@
-"""The live paper session: one trading day, started once (for example at 09:10 IST).
+"""The live session: one trading day, started once (for example at 09:10 IST).
 
     start -> wait for the open -> every 3 minutes fetch the closed candle -> report -> ...
           -> 15:30 end of day, summary, exit
@@ -14,7 +14,9 @@ What it does, in plain terms:
   targets are checked on live prices as well as at each candle close.
 - Errors fetching data are retried and alerted (watchdog). An error in the strategy code stops the
   run (positions are saved; restart to continue).
-- Paper mode never places an order. Live mode (disarmed by default) goes through GrowwVenue.
+- Paper mode never places an order. With an executor (the dry run, or live trading when armed
+  today) each entry and exit goes through the same order pipeline; only the final broker call
+  differs. At the square-off time (15:20) those positions are closed and no entry is opened.
 """
 
 from __future__ import annotations
@@ -36,8 +38,11 @@ from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.contract import FuturesContract
 from orb_intraday_bot.indicators.pivots import SessionLevels
 from orb_intraday_bot.options.planner import OptionDataSource, OptionPlanner
+from orb_intraday_bot.paper.models import ExitReason, Position
 from orb_intraday_bot.runtime.alerts import Alerts
+from orb_intraday_bot.runtime.arming import describe_order_mode
 from orb_intraday_bot.runtime.day import TradingDay
+from orb_intraday_bot.runtime.executor import LiveExecutor
 from orb_intraday_bot.runtime.logs import log_event
 from orb_intraday_bot.runtime.monitor import (
     Watchdog,
@@ -50,6 +55,7 @@ from orb_intraday_bot.storage.store import TradeStore
 
 EntriesAllowed = Callable[[], bool]
 FlattenRequested = Callable[[], bool]
+PositionHook = Callable[[Position], None]
 
 log = logging.getLogger("orb.live")
 _CANDLE = timedelta(minutes=3)
@@ -88,8 +94,21 @@ class LiveRunner:
         on_levels: Callable[[str, SessionLevels], None] | None = None,
         entries_allowed: EntriesAllowed | None = None,
         flatten_requested: FlattenRequested | None = None,
+        *,
+        executor: LiveExecutor | None = None,
+        executor_enabled: Callable[[], bool] | None = None,
+        on_open: PositionHook | None = None,
+        on_close: PositionHook | None = None,
+        square_off_at: time | None = None,
+        on_idle: Callable[[], None] | None = None,
     ) -> None:
         self._cfg = config
+        self._on_idle = on_idle
+        self._executor = executor
+        self._executor_enabled = executor_enabled or (lambda: executor is not None)
+        self._on_open = on_open
+        self._on_close = on_close
+        self._square_off_at = square_off_at
         self._on_levels = on_levels
         self._entries_allowed = entries_allowed or (lambda: True)
         self._flatten_requested = flatten_requested or (lambda: False)
@@ -107,6 +126,7 @@ class LiveRunner:
         self._last_poll: datetime | None = None
         self._status = "starting"
         self._flattened = False
+        self._flatten_announced = False
 
     # -- entry point ---------------------------------------------------------------------
     def run(self) -> RunOutcome:
@@ -144,8 +164,13 @@ class LiveRunner:
         trading = TradingDay(
             cfg, day, contract.trading_symbol, pivots, OptionPlanner(cfg, self._source),
             self._store,
+            executor=self._executor,
+            executor_enabled=self._executor_enabled,
+            on_open=self._on_open,
+            on_close=self._on_close,
         )
         self._day = trading
+        self._start_executor(trading)
         self._out(self._banner(contract, levels, pivots.r1, pivots.s1, trading))
         log_event(
             log, "run_started", day=day.isoformat(), symbol=contract.trading_symbol,
@@ -216,8 +241,9 @@ class LiveRunner:
         now = self._clock.now()
         age = (now - (candle.start + _CANDLE)).total_seconds()
         fresh = age <= self._cfg.runtime.max_signal_age_sec
-        allow = fresh and self._entries_allowed()
+        allow = fresh and self._entries_allowed() and not self._past_square_off()
         report = trading.on_candle(candle, allow_open=allow, catch_up=not fresh)
+        self._maybe_square_off(trading)
         self._out(format_candle_report(report))
         self._alerts.candle(report)
         log_event(
@@ -234,6 +260,13 @@ class LiveRunner:
         log_event(
             log, "run_finished", day=day.isoformat(), trades=len(trading.positions_today()),
         )
+        left = trading.paper.open_positions
+        if left:
+            symbols = ", ".join(sorted({p.trading_symbol for p in left}))
+            self._alerts.order_event(
+                f"CRITICAL: the session ended with {len(left)} position(s) still open "
+                f"({symbols}). Check the broker and close them by hand."
+            )
         self._beat("finished", "session complete")
         return RunOutcome(0, "session complete")
 
@@ -268,8 +301,44 @@ class LiveRunner:
         if not trading.paper.open_positions:
             self._flattened = True
             return
-        self._out("Flatten requested: closing open positions.")
-        self._alerts.flatten_requested()
+        if not self._flatten_announced:
+            self._flatten_announced = True
+            self._out("Flatten requested: closing open positions.")
+            self._alerts.flatten_requested()
+        # With real or dry-run orders a sale can fail; the flatten then stays pending and is
+        # retried on the next poll instead of being marked done.
+        if not self._close_open(trading, ExitReason.FLATTEN):
+            return
+        self._flattened = True
+        marker = self._data_dir / "FLATTEN"
+        if marker.exists():
+            with suppress(OSError):
+                marker.unlink()
+
+    def _past_square_off(self) -> bool:
+        """True from the square-off time on, while orders are being carried out (not paper)."""
+        if self._executor is None or self._square_off_at is None or not self._executor_enabled():
+            return False
+        return self._clock.now().astimezone(IST).time() >= self._square_off_at
+
+    def _maybe_square_off(self, trading: TradingDay) -> None:
+        """At the square-off time close every position that holds real or dry-run orders.
+
+        Paper positions are left to the normal 15:30 close. A failed sale is retried on the
+        next poll, and `_finish` raises an alert if anything is still open at the end.
+        """
+        if not self._past_square_off() or not self._executed_open(trading):
+            return
+        self._close_open(trading, ExitReason.SQUARE_OFF, executed_only=True)
+
+    @staticmethod
+    def _executed_open(trading: TradingDay) -> list[Position]:
+        return [p for p in trading.paper.open_positions if p.order_mode != "paper"]
+
+    def _close_open(
+        self, trading: TradingDay, reason: ExitReason, *, executed_only: bool = False
+    ) -> bool:
+        """Close positions at the latest prices. True when none of them remain open."""
         price = trading.last_candle.close if trading.last_candle else None
         options: dict[str, float] = {}
         contract = self._contract
@@ -284,23 +353,52 @@ class LiveRunner:
             except Exception as exc:
                 if must_halt(exc):
                     raise
-                log.warning("Flatten price fetch failed: %s", exc)
+                log.warning("%s price fetch failed: %s", reason.value, exc)
         if price is None:
-            return
-        for event in trading.paper.close_all(self._clock.now(), price, options):
+            return False
+        for event in trading.paper.close_all(
+            self._clock.now(), price, options, reason, executed_only
+        ):
             self._out("  " + format_exit(event))
             self._alerts.exit(event)
-        self._flattened = True
-        marker = self._data_dir / "FLATTEN"
-        if marker.exists():
-            with suppress(OSError):
-                marker.unlink()
+        remaining = (
+            self._executed_open(trading) if executed_only else trading.paper.open_positions
+        )
+        return not remaining
+
+    def _start_executor(self, trading: TradingDay) -> None:
+        """At session start: re-arm protective stops and check the books after a restart."""
+        executor = self._executor
+        if executor is None:
+            return
+        try:
+            executor.startup(trading.paper.open_positions, self._clock.now())
+        except Exception as exc:
+            if must_halt(exc):
+                raise
+            log.warning("executor startup failed: %s", exc, exc_info=True)
+
+    def _reconcile(self, trading: TradingDay) -> None:
+        executor = self._executor
+        if executor is None:
+            return
+        positions = trading.paper.open_positions
+        if not (self._executor_enabled() or any(p.order_mode == executor.mode for p in positions)):
+            return
+        try:
+            executor.maybe_reconcile(positions, self._clock.now())
+        except Exception as exc:
+            if must_halt(exc):
+                raise
+            log.warning("reconciliation failed: %s", exc, exc_info=True)
 
     def _poll_ticks(self) -> None:
         trading, contract = self._day, self._contract
         if trading is None or contract is None:
             return
         self._maybe_flatten(trading)
+        self._maybe_square_off(trading)
+        self._reconcile(trading)
         positions = trading.paper.open_positions
         if not positions:
             return
@@ -332,6 +430,8 @@ class LiveRunner:
             now = self._clock.now()
             if now >= target:
                 return
+            if self._on_idle is not None:
+                self._on_idle()          # operator commands (/arm, /pause, /flatten) mid-session
             self._poll_ticks()
             remaining = (target - self._clock.now()).total_seconds()
             if remaining <= 0:
@@ -367,8 +467,14 @@ class LiveRunner:
     ) -> str:
         restored = trading.paper.open_positions
         fp = fingerprint(self._cfg)
+        executor = self._executor
+        mode_label = (
+            "PAPER MODE (no orders are ever placed)"
+            if executor is None
+            else f"{describe_order_mode(executor.mode)} when armed today, paper otherwise"
+        )
         lines = [
-            f"ORB Intraday Bot v{__version__} - PAPER MODE (no orders are ever placed)",
+            f"ORB Intraday Bot v{__version__} - {mode_label}",
             f"  {contract.trading_symbol} (expiry {contract.expiry}, lot {contract.lot_size}); "
             f"pivots from {levels.day} ({levels.describe()}): S1 {s1:.1f}, R1 {r1:.1f}",
             f"  rules {fp.strategy} (assumptions {fp.assumptions}, runtime {fp.runtime})",

@@ -17,10 +17,12 @@ was not running is recorded as rejected ("stale") and never opened at an old pri
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from orb_intraday_bot.config.settings import StrategyConfig
+from orb_intraday_bot.core.errors import EntryNotFilledError
 from orb_intraday_bot.core.events import LevelSet
 from orb_intraday_bot.core.models import Candle, Zone
 from orb_intraday_bot.core.signals import PatternEvent, SetupSignal
@@ -30,9 +32,10 @@ from orb_intraday_bot.indicators.pivots import Pivots
 from orb_intraday_bot.options.planner import OptionPlanner
 from orb_intraday_bot.options.pricing import OptionPlan, OptionPlanError
 from orb_intraday_bot.options.selector import OptionSelectionError
-from orb_intraday_bot.paper.engine import PaperEngine
+from orb_intraday_bot.paper.engine import PaperEngine, PositionHook
 from orb_intraday_bot.paper.exits import ExitEvent
 from orb_intraday_bot.paper.models import Position
+from orb_intraday_bot.paper.ports import PositionExecutor
 from orb_intraday_bot.paper.report import DaySummary, summarize
 from orb_intraday_bot.patterns.detector import SetupDetector
 from orb_intraday_bot.storage.store import TradeStore
@@ -79,6 +82,11 @@ class TradingDay:
         pivots: Pivots | None,
         planner: OptionPlanner,
         store: TradeStore | None = None,
+        *,
+        executor: PositionExecutor | None = None,
+        executor_enabled: Callable[[], bool] | None = None,
+        on_open: PositionHook | None = None,
+        on_close: PositionHook | None = None,
     ) -> None:
         self._cfg = config
         self.day = day
@@ -89,7 +97,9 @@ class TradingDay:
         self.tracker = OpeningRangeTracker()
         self.detector = SetupDetector(config, pivots)
         self.signals = SignalEngine(config, pivots)
-        self.paper = PaperEngine(config, store)
+        self.paper = PaperEngine(
+            config, store, executor, executor_enabled, on_open, on_close
+        )
         self.last_candle: Candle | None = None
 
     # -- candles -------------------------------------------------------------------------
@@ -155,7 +165,15 @@ class TradingDay:
             if self._store is not None:
                 self._store.set_signal_status(sig.signal_id, "released", "option", str(exc))
             return SignalOutcome(sig, "rejected", str(exc), "option", trade)
-        position = self.paper.open(trade, plan, candle.start + timedelta(minutes=3))
+        try:
+            position = self.paper.open(trade, plan, candle.start + timedelta(minutes=3))
+        except EntryNotFilledError as exc:
+            # The buy order did not happen (risk gate, rejected, not filled in time). Nothing is
+            # open at the broker; the signal is released and never entered late.
+            self.signals.release(trade)
+            if self._store is not None:
+                self._store.set_signal_status(sig.signal_id, "released", "entry", str(exc))
+            return SignalOutcome(sig, "rejected", str(exc), "entry", trade, plan)
         if position is None:
             return SignalOutcome(sig, "skipped", "position already exists", "", trade, plan)
         return SignalOutcome(sig, "opened", "", "", trade, plan, position)

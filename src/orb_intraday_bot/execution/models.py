@@ -13,7 +13,9 @@ from typing import Any
 
 
 class OrderLeg(StrEnum):
-    ENTRY = "ENTRY"
+    ENTRY = "ENTRY"        # buy the option
+    PROTECT = "PROTECT"    # broker-side stop-loss that stays at the exchange as a safety net
+    EXIT = "EXIT"          # a bot-managed sell (stop, target, close-stop, square-off, flatten)
     STOP = "STOP"
     T1 = "T1"
     T2 = "T2"
@@ -105,6 +107,7 @@ class OrderRecord:
     filled_qty: int = 0
     avg_price: float = 0.0
     reject_reason: str = ""
+    mode: str = "paper"          # paper | dry_run | live: how the order was handled
     created_at: datetime | None = None
     updated_at: datetime | None = None
     fills: list[FillReport] = field(default_factory=list)

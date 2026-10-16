@@ -6,6 +6,7 @@ request flatten) on daily loss or loss streak.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -35,6 +36,10 @@ class RiskState:
     loss_streak: int = 0
     halted: bool = False
     halt_reason: str = ""
+    # No new entries, but open positions are left alone (unlike `halted`, which also flattens).
+    # Used when the bot's books and the broker's disagree: selling could make things worse.
+    entries_blocked: bool = False
+    block_reason: str = ""
 
 
 @dataclass
@@ -47,6 +52,26 @@ class RiskEngine:
         if self.state.day == day:
             return
         self.state = RiskState(day=day)
+
+    def rebuild(
+        self, *, trades_today: int, open_positions: int, closed_pnls: Sequence[float]
+    ) -> None:
+        """Restore today's counters after a restart. `closed_pnls` is in closing order.
+
+        The limits are applied again, so a day that already breached one stays halted.
+        """
+        self.state.trades_today = trades_today
+        self.state.open_positions = open_positions
+        self.state.realized_pnl_inr = 0.0
+        self.state.loss_streak = 0
+        for pnl in closed_pnls:
+            self.state.realized_pnl_inr += pnl
+            self.state.loss_streak = self.state.loss_streak + 1 if pnl < 0 else 0
+        limit = self.limits.daily_loss_limit_inr(self.capital_inr)
+        if self.state.realized_pnl_inr <= -limit:
+            self.trip(f"daily loss limit hit ({self.state.realized_pnl_inr:.0f} <= -{limit:.0f})")
+        elif self.state.loss_streak >= self.limits.loss_streak_halt:
+            self.trip(f"loss streak {self.state.loss_streak}")
 
     def record_open(self) -> None:
         self.state.trades_today += 1
@@ -72,6 +97,13 @@ class RiskEngine:
     def clear_halt(self) -> None:
         self.state.halted = False
         self.state.halt_reason = ""
+        self.state.entries_blocked = False
+        self.state.block_reason = ""
+
+    def block_entries(self, reason: str) -> None:
+        """Stop opening trades without touching open positions (needs a human to look)."""
+        self.state.entries_blocked = True
+        self.state.block_reason = reason
 
     def check_entry(
         self,
@@ -85,6 +117,8 @@ class RiskEngine:
     ) -> RiskDecision:
         if self.state.halted:
             return RiskDecision.deny(f"halted: {self.state.halt_reason}")
+        if self.state.entries_blocked:
+            return RiskDecision.deny(f"entries blocked: {self.state.block_reason}")
         if lots < 1:
             return RiskDecision.deny("lots < 1")
         if lots > self.limits.max_lots_per_trade:

@@ -23,6 +23,13 @@ class RiskLimits(BaseModel):
     product: str = "MIS"
     entry_order_type: str = "LIMIT"
     entry_price_protection_pct: float = Field(default=0.02, ge=0, le=0.2)
+    # How a live order is worked (also used, identically, by the dry run).
+    entry_fill_timeout_sec: float = Field(default=10.0, ge=1, le=120)   # then cancel and skip
+    exit_fill_timeout_sec: float = Field(default=6.0, ge=1, le=120)     # then a market sell
+    exit_price_protection_pct: float = Field(default=0.03, ge=0, le=0.5)  # limit below the bid
+    stop_limit_buffer_pct: float = Field(default=0.05, ge=0, le=0.5)    # stop limit below trigger
+    order_poll_sec: float = Field(default=1.0, ge=0.2, le=10)
+    reconcile_interval_sec: float = Field(default=60.0, ge=10, le=600)
 
     def daily_loss_limit_inr(self, capital_inr: float) -> float:
         return capital_inr * self.daily_loss_limit_pct

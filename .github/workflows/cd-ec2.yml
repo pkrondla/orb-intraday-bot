@@ -20,7 +20,7 @@ jobs:
       # Secrets: WINRM_PASSWORD, GH_PAT, GROWW_TOTP_TOKEN, GROWW_TOTP_SECRET,
       #          TELEGRAM_BOT_TOKEN
       # Variables: WINRM_HOST, WINRM_USERNAME, TELEGRAM_CHAT_ID, LIVE_MODE (optional),
-      #            HEALTHCHECK_URL (optional)
+      #            LIVE_ARMED, DRY_RUN (default true), HEALTHCHECK_URL (optional)
       #
       # One-time EC2 prerequisites (already true if GrowwBot is deployed):
       # - WinRM HTTPS on 5986, Python 3.12, Git, nssm on PATH
@@ -72,6 +72,7 @@ jobs:
           HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL || '' }}
           LIVE_MODE: ${{ vars.LIVE_MODE || 'paper' }}
           LIVE_ARMED: ${{ vars.LIVE_ARMED || 'false' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
         run: |
           python - <<'PY'
           import os, sys, base64, winrm
@@ -100,7 +101,6 @@ jobs:
                   raise SystemExit(f"{name} failed with status_code={r.status_code}")
 
           env_lines = [
-              "LIVE_TRADING=false",
               f"GROWW_TOTP_TOKEN={clean('GROWW_TOTP_TOKEN')}",
               f"GROWW_TOTP_SECRET={clean('GROWW_TOTP_SECRET')}",
               "DATA_DIR=data",
@@ -109,6 +109,7 @@ jobs:
               f"HEALTHCHECK_URL={clean('HEALTHCHECK_URL')}",
               f"LIVE_MODE={clean('LIVE_MODE')}",
               f"LIVE_ARMED={clean('LIVE_ARMED')}",
+              f"DRY_RUN={clean('DRY_RUN')}",
           ]
           clone_url = (
               f"https://x-access-token:{clean('GH_PAT')}@github.com/"

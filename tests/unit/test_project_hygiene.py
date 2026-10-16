@@ -37,13 +37,16 @@ def test_secrets_and_runtime_data_are_git_ignored() -> None:
     assert "!.env.example" in ignored
 
 
-def test_env_example_ships_with_live_trading_off_and_no_secrets() -> None:
+def test_env_example_ships_as_a_dry_run_with_no_secrets() -> None:
     values = {}
     for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#") and "=" in line:
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()
-    assert values["LIVE_TRADING"] == "false"
+    assert values["DRY_RUN"] == "true"
+    assert values["LIVE_MODE"] == "paper"
+    assert values["LIVE_ARMED"] == "false"
+    assert "LIVE_TRADING" not in values
     for secret in ("GROWW_TOTP_TOKEN", "GROWW_TOTP_SECRET", "TELEGRAM_BOT_TOKEN"):
         assert values[secret] == ""
 
