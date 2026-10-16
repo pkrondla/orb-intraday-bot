@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from orb_intraday_bot import __version__
 from orb_intraday_bot.adapters.groww.market_data import GrowwMarketData
 from orb_intraday_bot.analysis.history import History
 from orb_intraday_bot.config import Settings
@@ -442,6 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="orb-bot", description="ORB Intraday Bot (paper trading only, never places orders)"
     )
+    parser.add_argument("--version", action="version", version=f"orb-bot {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="live paper session for today").set_defaults(func=cmd_run)
     replay = sub.add_parser("replay", help="replay past days (synthetic option prices)")

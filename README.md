@@ -20,6 +20,9 @@ orb-bot summary [YYYY-MM-DD]        # trades and P&L from the database
 
 `python -m orb_intraday_bot <command>` works too. Tests: `python -m pytest`.
 
+Development: `powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci` runs every gate CI runs
+(ruff, mypy strict, architecture rules, tests with coverage). See `CONTRIBUTING.md`.
+
 The sections below describe the original Pine Script indicator.
 
 ## Overview

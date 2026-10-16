@@ -1,0 +1,100 @@
+"""Repository hygiene: the things that, if broken, only show up on a deploy or in a leak."""
+
+from __future__ import annotations
+
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from orb_intraday_bot import __version__, cli
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def pyproject() -> dict[str, object]:
+    with (ROOT / "pyproject.toml").open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def test_package_version_matches_pyproject() -> None:
+    project = pyproject()["project"]
+    assert isinstance(project, dict)
+    assert project["version"] == __version__
+
+
+def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.build_parser().parse_args(["--version"])
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.strip() == f"orb-bot {__version__}"
+
+
+def test_secrets_and_runtime_data_are_git_ignored() -> None:
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    for pattern in (".env", "data/", ".venv/", ".mypy_cache/"):
+        assert pattern in ignored
+    assert "!.env.example" in ignored
+
+
+def test_env_example_ships_with_live_trading_off_and_no_secrets() -> None:
+    values = {}
+    for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            values[key.strip()] = value.strip()
+    assert values["LIVE_TRADING"] == "false"
+    for secret in ("GROWW_TOTP_TOKEN", "GROWW_TOTP_SECRET", "TELEGRAM_BOT_TOKEN"):
+        assert values[secret] == ""
+
+
+def test_lock_files_pin_every_line_and_include_the_broker_sdk() -> None:
+    for name in ("requirements.lock", "requirements-dev.lock"):
+        lines = [
+            line for line in (ROOT / name).read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
+        assert lines, name
+        assert all("==" in line for line in lines), f"{name} has an unpinned line"
+        assert any(line.lower().startswith("growwapi==") for line in lines)
+    dev = (ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
+    for tool in ("pytest==", "ruff==", "mypy==", "import-linter=="):
+        assert tool in dev
+
+
+def test_every_dev_tool_in_pyproject_is_locked() -> None:
+    project = pyproject()["project"]
+    assert isinstance(project, dict)
+    dev = project["optional-dependencies"]["dev"]    # type: ignore[index]
+    locked = (
+        (ROOT / "requirements-dev.lock").read_text(encoding="utf-8").lower().replace("_", "-")
+    )
+    for requirement in dev:
+        name = requirement.split(">")[0].split("=")[0].strip().lower().replace("_", "-")
+        assert f"{name}==" in locked, f"{name} missing from requirements-dev.lock"
+
+
+def test_import_contracts_are_configured() -> None:
+    tool = pyproject()["tool"]
+    assert isinstance(tool, dict)
+    contracts = tool["importlinter"]["contracts"]
+    names = " ".join(c["name"] for c in contracts)
+    assert "Layers" in names and "Strategy core" in names and "Groww SDK" in names
+
+
+def test_ci_pre_commit_and_contributing_files_exist() -> None:
+    for path in (
+        ".github/workflows/ci.yml",
+        ".github/pull_request_template.md",
+        ".github/dependabot.yml",
+        ".pre-commit-config.yaml",
+        "CONTRIBUTING.md",
+        "CHANGELOG.md",
+        "scripts/dev.ps1",
+    ):
+        assert (ROOT / path).is_file(), path
+
+
+def test_ci_runs_every_quality_gate() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    for gate in ("ruff check", "mypy", "lint-imports", "pytest", "pip-audit"):
+        assert gate in ci, gate

@@ -1,0 +1,49 @@
+# Install once:  pre-commit install --hook-type pre-commit --hook-type pre-push
+# The local hooks use the active Python, so activate the project's virtual environment first.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ["--maxkb=1500"]
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+
+  - repo: local
+    hooks:
+      - id: forbid-secret-files
+        name: never commit .env files or runtime data
+        language: fail
+        entry: Secrets and runtime data must not be committed (use .env.example for templates).
+        files: '(^|/)\.env($|\.(?!example$))|^data/|\.sqlite3?$'
+
+      - id: ruff
+        name: ruff
+        language: system
+        entry: python -m ruff check
+        types: [python]
+
+      - id: mypy
+        name: mypy (strict)
+        language: system
+        entry: python -m mypy src
+        pass_filenames: false
+        types: [python]
+
+      - id: import-linter
+        name: architecture rules
+        language: system
+        entry: lint-imports
+        pass_filenames: false
+        types: [python]
+
+      - id: tests
+        name: tests (pre-push)
+        language: system
+        entry: python -m pytest -q -x
+        pass_filenames: false
+        stages: [pre-push]
