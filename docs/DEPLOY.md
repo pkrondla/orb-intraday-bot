@@ -14,6 +14,10 @@ Already done if the Groww bot is deployed:
 
 ## GitHub configuration
 
+The deploy job runs in the GitHub Actions environment named `prod`, so add the secrets and
+variables below under Settings > Environments > prod (repository-level ones are also read).
+If you rename the environment, change `environment:` in `.github/workflows/cd-ec2.yml`.
+
 ### Secrets
 
 | Name | Purpose |
