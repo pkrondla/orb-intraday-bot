@@ -79,7 +79,7 @@ jobs:
 
           required = [
               "WINRM_HOST", "WINRM_USERNAME", "WINRM_PASSWORD", "GH_PAT",
-              "GROWW_TOTP_TOKEN", "GROWW_TOTP_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+              "GROWW_TOTP_TOKEN", "GROWW_TOTP_SECRET",
           ]
           missing = [n for n in required if not os.environ.get(n, "").strip()]
           if missing:
