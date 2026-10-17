@@ -6,10 +6,12 @@ param(
     [string]$PythonExe = "",
     [string]$ServiceName = "OrbBot",
     [string]$WatchServiceName = "OrbBotWatch",
-    [string]$GitRef = "main"
+    [string]$GitRef = "main",
+    [switch]$SkipGit
 )
 
 $ErrorActionPreference = "Stop"
+Write-Host "Install-OrbBot.ps1: Invoke-Native uses -Label (NSSM service-name fix)"
 
 function Invoke-Native([scriptblock]$Command, [string]$Label) {
     # The label must not be called $Name: scriptblocks look up $Name here and would
@@ -61,12 +63,14 @@ if (Test-Path $currentFile) {
 $env:GCM_CREDENTIAL_STORE = "none"
 $env:GCM_INTERACTIVE = "never"
 
-if (Test-Path (Join-Path $RepoPath ".git")) {
-    Invoke-Native { git -C $RepoPath fetch --all --tags } "git fetch"
-    Invoke-Native { git -C $RepoPath checkout $GitRef } "git checkout"
-    Invoke-Native { git -C $RepoPath pull --ff-only origin $GitRef } "git pull"
-} else {
-    throw "Repo not found at $RepoPath. Clone it first (the CD workflow does this)."
+if (-not $SkipGit) {
+    if (Test-Path (Join-Path $RepoPath ".git")) {
+        Invoke-Native { git -C $RepoPath fetch --all --tags } "git fetch"
+        Invoke-Native { git -C $RepoPath checkout $GitRef } "git checkout"
+        Invoke-Native { git -C $RepoPath pull --ff-only origin $GitRef } "git pull"
+    } else {
+        throw "Repo not found at $RepoPath. Clone it first (the CD workflow does this)."
+    }
 }
 
 $sha = (git -C $RepoPath rev-parse HEAD).Trim()
