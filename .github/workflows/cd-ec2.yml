@@ -205,7 +205,7 @@ jobs:
               $ErrorActionPreference = "Stop"
               $path = "C:\\orb-bot\\scripts\\deploy\\Install-OrbBot.ps1"
               $text = Get-Content -LiteralPath $path -Raw
-              if ($text -notmatch '\[string\]\$Label\)') {
+              if ($text.IndexOf('[string]$Label)') -lt 0) {
                 throw 'Host install script is still the broken Invoke-Native $Name version after git reset.'
               }
               Write-Host "Host install script has the Label fix"
