@@ -32,9 +32,11 @@ def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_secrets_and_runtime_data_are_git_ignored() -> None:
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    for pattern in (".env", "data/", ".venv/", ".mypy_cache/"):
+    for pattern in (".env", "/data/", ".venv/", ".mypy_cache/"):
         assert pattern in ignored
     assert "!.env.example" in ignored
+    # A bare "data/" would also hide the source package src/orb_intraday_bot/data.
+    assert "data/" not in ignored
 
 
 def test_env_example_ships_as_a_dry_run_with_no_secrets() -> None:
