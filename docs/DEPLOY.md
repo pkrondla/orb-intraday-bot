@@ -58,8 +58,7 @@ Real orders need all of: `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=false` an
 CI runs automatically on every push to `main`. Deploy is **manual**:
 
 1. Actions → **CD - Deploy ORB bot to Windows EC2** → Run workflow
-2. There is no ref to choose: it always deploys `main`
-3. Leave `force` as `false` unless you deliberately override the market-hours / open-position guard
+2. There is no ref to choose and no option to set: it always deploys `main`, at any time
 
 The workflow:
 
@@ -69,8 +68,9 @@ The workflow:
 4. Installs / restarts NSSM services `OrbBot` (`orb-bot serve`) and `OrbBotWatch` (`orb-bot watchdog`)
 5. Runs `orb-bot check` as a smoke test
 
-Deploy is refused between 09:00 and 15:45 IST, and while the database has open positions,
-unless `force=true`.
+Deploy is allowed at any time, including during market hours and with open positions. The
+services restart; open positions are restored from SQLite, their broker stops are re-armed and
+the books are reconciled. The bot does not watch the market for the few seconds the restart takes.
 
 ## Rollback
 

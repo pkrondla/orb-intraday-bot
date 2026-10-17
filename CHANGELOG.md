@@ -27,6 +27,9 @@ More Telegram commands for the operator.
 - No Telegram command asks for a confirmation code any more. `/flatten`, `/exit`,
   `/clearhalt` and `/restart` run as soon as the authorized chat sends them. `/help` lists
   every command with its purpose.
+- The deploy workflow no longer refuses to run between 09:00 and 15:45 IST or while positions are
+  open, and the `force` input is gone. A deploy restarts the services, which restore open
+  positions, re-arm broker stops and reconcile.
 
 ### Fixed
 - A flatten request made while nothing was open used to mark the flatten as done for the whole

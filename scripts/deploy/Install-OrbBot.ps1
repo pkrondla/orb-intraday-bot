@@ -1,5 +1,6 @@
 # Server-side install/update for the ORB bot on Windows EC2.
-# Called from the GitHub Actions WinRM deploy. Idempotent.
+# Called from the GitHub Actions WinRM deploy. Idempotent. It deploys at any time, including during
+# market hours: the bot restores open positions from SQLite on start and their broker stops stay.
 param(
     [string]$RepoPath = "C:\orb-bot",
     [string]$PythonExe = "",
@@ -32,40 +33,11 @@ function Resolve-Python {
     throw "Python 3.12 not found. Install it system-wide or pass -PythonExe."
 }
 
-function Test-MarketHoursBlocked {
-    # Refuse deploy 09:00-15:45 IST unless the caller set FORCE_DEPLOY=1.
-    if ($env:FORCE_DEPLOY -eq "1") { return $false }
-    $ist = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId(
-        [DateTime]::UtcNow, "India Standard Time"
-    )
-    $t = $ist.TimeOfDay
-    return ($t -ge [TimeSpan]::Parse("09:00") -and $t -lt [TimeSpan]::Parse("15:45"))
-}
-
-function Test-OpenPositions {
-    param([string]$DbPath)
-    if (-not (Test-Path $DbPath)) { return $false }
-    $py = Resolve-Python -Preferred $PythonExe
-    $code = @"
-import sqlite3, sys
-conn = sqlite3.connect(r'$DbPath')
-row = conn.execute("SELECT COUNT(*) FROM positions WHERE status='OPEN'").fetchone()
-sys.exit(0 if (row and row[0] == 0) else 2)
-"@
-    & $py -c $code
-    return ($LASTEXITCODE -ne 0)
-}
-
-if (Test-MarketHoursBlocked) {
-    throw "Deploy blocked during market hours (09:00-15:45 IST). Set FORCE_DEPLOY=1 to override."
-}
-
 $python = Resolve-Python -Preferred $PythonExe
 $logsDir = Join-Path $RepoPath "logs"
 $dataDir = Join-Path $RepoPath "data"
 $deployDir = Join-Path $RepoPath "deploy"
 $venvPython = Join-Path $RepoPath ".venv\Scripts\python.exe"
-$dbPath = Join-Path $dataDir "paper_trades.sqlite"
 
 if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
     throw "nssm was not found on PATH."
@@ -74,10 +46,6 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
-
-if (Test-OpenPositions -DbPath $dbPath) {
-    throw "Deploy blocked: open positions in $dbPath. Flatten first or set FORCE_DEPLOY=1."
-}
 
 # Record previous ref for rollback.
 $prevFile = Join-Path $deployDir "previous_ref.txt"

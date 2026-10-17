@@ -2,11 +2,6 @@ name: CD - Deploy ORB bot to Windows EC2
 
 on:
   workflow_dispatch:
-    inputs:
-      force:
-        description: "Force deploy during market hours or with open positions (true/false)"
-        required: false
-        default: "false"
 
 permissions:
   contents: read
@@ -64,7 +59,6 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GIT_REF: main
-          FORCE_DEPLOY: ${{ inputs.force }}
           GROWW_TOTP_TOKEN: ${{ secrets.GROWW_TOTP_TOKEN }}
           GROWW_TOTP_SECRET: ${{ secrets.GROWW_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -116,7 +110,6 @@ jobs:
               f"{clean('GITHUB_REPOSITORY')}.git"
           )
           git_ref = clean("GIT_REF") or "main"
-          force = "1" if clean("FORCE_DEPLOY").lower() in {"true", "1", "yes"} else "0"
 
           run_ps(
               f"""
@@ -184,7 +177,6 @@ jobs:
           run_ps(
               f"""
               $ErrorActionPreference = "Stop"
-              $env:FORCE_DEPLOY = "{force}"
               & "C:\\orb-bot\\scripts\\deploy\\Install-OrbBot.ps1" -RepoPath "C:\\orb-bot" -GitRef "{git_ref}"
               """,
               "install",

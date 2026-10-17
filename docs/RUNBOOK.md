@@ -68,8 +68,11 @@ never cancels the other bot's orders (ORB- reference prefix only).
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\orb-bot\scripts\deploy\Rollback-OrbBot.ps1
 ```
 
-Or revert the bad commit on `main` and re-run the CD workflow (it always deploys `main`). Deploy is blocked during market hours and
-while positions are open unless `force=true`.
+Or revert the bad commit on `main` and re-run the CD workflow (it always deploys `main`). A deploy can run at any time, including during
+market hours or with positions open: the service restarts, restores open positions from SQLite,
+re-arms their broker stops and reconciles. It misses nothing already saved, but the bot is not
+watching the market for the few seconds the restart takes, so avoid it in the middle of a fast
+move when a position is open.
 
 ## Rotate keys
 
