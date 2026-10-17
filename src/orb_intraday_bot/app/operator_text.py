@@ -94,6 +94,7 @@ def mode_text(
     *,
     stopped_today: bool,
     executor_mode: str | None,
+    dry_run_source: str = "",
 ) -> str:
     creds = settings.has_trading_credentials()
     decision = resolve_mode(settings, trading_credentials_present=creds)
@@ -102,7 +103,8 @@ def mode_text(
         f"Configured: {configured_mode_label(settings)}",
         f"LIVE_MODE={settings.live_mode}  LIVE_ARMED={str(settings.live_armed).lower()}  "
         f"DRY_RUN={str(settings.dry_run).lower()}  trading credentials: "
-        f"{'yes' if creds else 'no'}",
+        f"{'yes' if creds else 'no'}"
+        + (f"\nDRY_RUN is {dry_run_source} (change it with /dryrun)" if dry_run_source else ""),
         f"Resolved: {describe_order_mode(decision.order_mode)} - {decision.reason}",
         f"Session executor: {describe_order_mode(executor_mode)}"
         if executor_mode

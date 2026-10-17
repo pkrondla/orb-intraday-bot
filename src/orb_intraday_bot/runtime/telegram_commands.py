@@ -50,6 +50,8 @@ _HELP = (
     "/reconcile - check the bot's books against the broker now\n"
     "/clearhalt - clear the kill switch / entry block so new entries are allowed\n"
     "/restart - restart the service (open positions and broker stops are kept)\n"
+    "/dryrun [on|off] - show or switch DRY_RUN: off = REAL orders, on = no orders reach the "
+    "broker (restarts the bot; only with no open position)\n"
     "/help - this list"
 )
 
@@ -76,6 +78,7 @@ class CommandKind(StrEnum):
     RECONCILE = "reconcile"
     CLEARHALT = "clearhalt"
     RESTART = "restart"
+    DRYRUN = "dryrun"
     FLATTEN = "flatten"
     HELP = "help"
     UNKNOWN = "unknown"
@@ -123,6 +126,7 @@ def parse_command(text: str) -> Command:
         "reconcile": CommandKind.RECONCILE,
         "clearhalt": CommandKind.CLEARHALT,
         "restart": CommandKind.RESTART,
+        "dryrun": CommandKind.DRYRUN,
         "stop": CommandKind.STOP_TODAY,
         "pause": CommandKind.STOP_TODAY,
         "start": CommandKind.START_TODAY,

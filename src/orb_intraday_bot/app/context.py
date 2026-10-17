@@ -8,6 +8,7 @@ from pathlib import Path
 from orb_intraday_bot.adapters.groww.market_data import GrowwMarketData
 from orb_intraday_bot.config import Settings
 from orb_intraday_bot.config.settings import _PROJECT_ROOT, StrategyConfig, load_strategy_config
+from orb_intraday_bot.runtime.dry_run_switch import apply_override
 from orb_intraday_bot.runtime.guard import run_startup_checks
 
 
@@ -32,8 +33,9 @@ def _resolve(path: Path) -> Path:
 def load_context() -> AppContext:
     """Read `.env` and the strategy YAML, and refuse to continue unless the safety checks pass."""
     settings = Settings()
-    run_startup_checks(settings)
     settings.data_dir = _resolve(settings.data_dir)
+    apply_override(settings, settings.data_dir)       # a saved /dryrun on|off replaces DRY_RUN
+    run_startup_checks(settings)
     cfg = load_strategy_config(_resolve(settings.strategy_config_path))
     return AppContext(settings, cfg, settings.data_dir)
 

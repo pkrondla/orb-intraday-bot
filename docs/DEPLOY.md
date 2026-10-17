@@ -51,6 +51,8 @@ day send `/stop` to the Telegram bot; `/start` allows it again that day. A stop 
 day only and is remembered across a restart. With these settings **no order can reach Groww**: the order step is replaced by a
 simulation that fills against the real bid/ask. See `docs/RUNBOOK.md` for what to check.
 
+`/dryrun off` on Telegram switches to real orders without a deploy (and `/dryrun on` back). It saves the choice on the server, so it wins over the `DRY_RUN` variable until you change it again.
+
 Real orders need all of: `LIVE_MODE=live`, `LIVE_ARMED=true`, `DRY_RUN=false` and Groww credentials. If `DRY_RUN=false` is set without the others the bot refuses to start.
 
 ## Deploy
@@ -100,4 +102,4 @@ Logs: `C:\orb-bot\logs\orb-bot.log`, `orb-bot-error.log`, `orb-watch.log`.
 Create a **new** bot with @BotFather (do not reuse the Groww bot token). Message it once,
 then read your chat id from `https://api.telegram.org/bot<token>/getUpdates`. Commands:
 
-`/help` lists them; the full list is in `docs/RUNBOOK.md`. Status: `/status` `/mode` `/version` `/risk` `/funds` `/log`. Today: `/today` `/pnl` `/positions` `/progress` `/signals` `/orders` `/levels` `/report`. Control: `/stop` `/start` `/exit` `/flatten` `/rearm` `/reconcile` `/clearhalt` `/restart`.
+`/help` lists them; the full list is in `docs/RUNBOOK.md`. Status: `/status` `/mode` `/version` `/risk` `/funds` `/log`. Today: `/today` `/pnl` `/positions` `/progress` `/signals` `/orders` `/levels` `/report`. Control: `/stop` `/start` `/exit` `/flatten` `/rearm` `/reconcile` `/clearhalt` `/restart` `/dryrun`.

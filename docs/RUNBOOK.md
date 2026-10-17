@@ -19,7 +19,7 @@ Telegram commands (authorized chat only). `/help` lists them.
 |---|---|
 | Status | `/status` (heartbeat, order mode, today's trading state, risk), `/mode`, `/version`, `/risk`, `/funds`, `/log [n]` |
 | Today | `/today`, `/pnl [day\|week\|month]`, `/positions`, `/progress` (stops, targets and broker stop per position), `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`, `/report` |
-| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart` |
+| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/dryrun [on\|off]` |
 
 - `/stop`: no new entries for the rest of today (open positions are still managed). It ends by
   itself at midnight and survives a restart. `/start` allows entries again the same day.
@@ -32,6 +32,12 @@ Telegram commands (authorized chat only). `/help` lists them.
 - `/clearhalt` clears the kill switch or a reconciliation entry block. Check the broker first.
 - `/restart` ends the session and the service; NSSM starts it again. Open positions and their
   broker stops are restored on startup.
+- `/dryrun` shows DRY_RUN and where it comes from. `/dryrun off` switches to REAL orders and
+  `/dryrun on` back to a dry run. No code is asked. It saves the choice in `data/DRY_RUN_OVERRIDE`,
+  restarts the bot, and refuses while a position is open (close it first) or when real orders are not
+  possible (LIVE_MODE not live, LIVE_ARMED false, no credentials). The choice replaces the GitHub
+  `DRY_RUN` value and survives a redeploy until you change it with `/dryrun` again; `/mode` and the
+  startup message say which one is in force.
 - `/log` shows the last lines of today's log with tokens and secrets masked.
 - Every control command leaves an `operator_command` line in the JSONL log.
 
@@ -78,7 +84,8 @@ move when a position is open.
 
 1. Create a new Groww API key (or keep using the existing `GROWW_TOTP_*` key).
 2. Update GitHub Secrets (`GROWW_TOTP_*`; optionally `GROWW_TRADING_TOTP_*` to override).
-3. Redeploy (or edit `C:\orb-bot\.env` and `nssm restart OrbBot`).
+3. Redeploy (or edit `C:\orb-bot\.env` and 
+ssm restart OrbBot`).
 4. Revoke the old key in Groww.
 
 ## Staged rollout checklist

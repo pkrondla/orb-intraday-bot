@@ -32,6 +32,12 @@ from orb_intraday_bot.runtime.arming import (
     resolve_mode,
 )
 from orb_intraday_bot.runtime.calendar import load_holidays, next_session_start
+from orb_intraday_bot.runtime.dry_run_switch import (
+    ignored_override_note,
+    real_orders_blocker,
+    source_text,
+    write_override,
+)
 from orb_intraday_bot.runtime.executor import LiveExecutor
 from orb_intraday_bot.runtime.live import LiveRunner, RunOutcome
 from orb_intraday_bot.runtime.logs import log_event, new_run_id
@@ -117,6 +123,7 @@ _CONTROL_KINDS = frozenset(
         CommandKind.RECONCILE,
         CommandKind.CLEARHALT,
         CommandKind.RESTART,
+        CommandKind.DRYRUN,
     }
 )
 _NO_SESSION = (
@@ -200,6 +207,7 @@ def _handle_report_command(
                 state.risk,
                 stopped_today=state.bus.is_stopped(day),
                 executor_mode=executor.mode if executor is not None else None,
+                dry_run_source=source_text(ctx.settings, ctx.data_dir),
             )
         )
     elif kind is CommandKind.VERSION:
@@ -274,6 +282,61 @@ def _handle_exit(
         reply(f"{symbol}: closed (the exit message has the prices).")
 
 
+def _handle_dryrun(
+    command: Command, *, ctx: AppContext, state: ServeState, reply: Callable[[str], None]
+) -> None:
+    """/dryrun [on|off|status]: show or switch DRY_RUN. A switch restarts the bot."""
+    settings = ctx.settings
+    word = command.arg.strip().lower()
+    now_text = "ON (a dry run: no order reaches Groww)" if settings.dry_run else "OFF (REAL orders)"
+    if word in ("", "status"):
+        reply(
+            f"DRY_RUN is {now_text}, {source_text(settings, ctx.data_dir)}.\n"
+            "/dryrun on = no orders reach the broker. /dryrun off = real orders."
+        )
+        return
+    if word not in ("on", "off"):
+        reply("Usage: /dryrun [on|off|status]")
+        return
+    dry = word == "on"
+    if dry == settings.dry_run:
+        reply(f"DRY_RUN is already {now_text}. Nothing changed.")
+        return
+    if not dry:
+        blocker = real_orders_blocker(settings)
+        if blocker:
+            reply(f"Real orders cannot be turned on: {blocker}. Nothing changed.")
+            return
+    if state.runner is not None:
+        held = state.runner.open_positions()
+    elif ctx.database_path.exists():
+        store = TradeStore(ctx.database_path)
+        try:
+            held = store.open_positions()
+        finally:
+            store.close()
+    else:
+        held = []
+    held = [p for p in held if p.order_mode != "paper"]
+    if held:
+        symbols = ", ".join(sorted({p.trading_symbol for p in held}))
+        reply(
+            f"Not switched: {symbols} is still open and was opened under the current setting. "
+            f"Close it first (/exit or /flatten), then send /dryrun {word} again."
+        )
+        return
+    write_override(ctx.data_dir, dry_run=dry)
+    reply(
+        "DRY_RUN is now ON: no order will reach the broker. Restarting the bot to apply it."
+        if dry
+        else "DRY_RUN is now OFF: the next entry sends a REAL order to Groww. Restarting the "
+        "bot to apply it. Send /dryrun on to go back."
+    )
+    state.stop_requested = True
+    if state.runner is not None:
+        state.runner.request_stop()
+
+
 def _handle_action_command(
     command: Command,
     *,
@@ -336,6 +399,8 @@ def _handle_action_command(
         state.stop_requested = True
         if runner is not None:
             runner.request_stop()
+    elif kind is CommandKind.DRYRUN:
+        _handle_dryrun(command, ctx=ctx, state=state, reply=reply)
     else:
         return False
     return True
@@ -694,6 +759,8 @@ def serve_loop(
     state.bus.stopped_day = read_stopped_day(ctx.data_dir)    # a /stop survives a restart
     holidays = load_holidays() if holidays is None else holidays
     mode = configured_mode_label(ctx.settings)
+    if ctx.settings.live_mode != "paper":
+        mode += f" [DRY_RUN {source_text(ctx.settings, ctx.data_dir)}]"
 
     def reply(text: str) -> None:
         notifier.send(text)
@@ -703,6 +770,9 @@ def serve_loop(
         poller.start()
 
     alerts.startup(__version__, mode, fingerprint(ctx.cfg).strategy)
+    ignored = ignored_override_note(ctx.settings, ctx.data_dir)
+    if ignored:
+        alerts.order_event(f"ORB bot: {ignored}")
     sessions = 0
     exit_code = 0
     try:
