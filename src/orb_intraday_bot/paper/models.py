@@ -28,6 +28,7 @@ class ExitReason(StrEnum):
     EOD = "EOD"                        # end of day
     SQUARE_OFF = "SQUARE_OFF"          # the intraday square-off time (before the broker's own)
     FLATTEN = "FLATTEN"                # an operator or kill-switch flatten
+    MANUAL = "MANUAL"                  # the operator closed this one position (/exit)
     BROKER_STOP = "BROKER_STOP"        # the protective stop-loss at the broker was executed
 
 

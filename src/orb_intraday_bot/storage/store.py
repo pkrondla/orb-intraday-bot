@@ -214,6 +214,15 @@ class TradeStore:
             )
         )
 
+    def orders_for_day(self, day: date) -> list[sqlite3.Row]:
+        """Every order created on `day` (any mode), oldest first."""
+        return list(
+            self._conn.execute(
+                "SELECT * FROM orders WHERE substr(created_at,1,10)=? ORDER BY created_at",
+                (day.isoformat(),),
+            )
+        )
+
     def orphan_entries(self, day: date, mode: str) -> list[str]:
         """Signals whose entry order filled but that have no position on record.
 

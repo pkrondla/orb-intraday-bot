@@ -457,6 +457,18 @@ class LiveExecutor:
                 self._risk.block_entries("reconciliation mismatch")
         return problems
 
+    def available_margin(self) -> float | None:
+        """Cash available to buy options (for the operator's /funds), or None if unknown."""
+        return self._safe_margin()
+
+    def held_quantities(self) -> dict[str, int] | None:
+        """Net quantity per symbol as the broker (or the dry-run ledger) shows it."""
+        try:
+            return self._account.net_quantities()
+        except Exception:  # noqa: BLE001 - a lookup for a report must never raise
+            log.warning("could not read the broker positions", exc_info=True)
+            return None
+
     def _mine(self, positions: Sequence[Position]) -> list[Position]:
         return [p for p in positions if p.is_open and p.order_mode == self.mode]
 

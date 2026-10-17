@@ -174,10 +174,10 @@ def test_a_flatten_whose_sale_fails_stays_pending_and_is_retried(tmp_path: Path)
     assert isinstance(s.venue, _SellsRest)
     s.venue.block_sells = True
     runner._maybe_flatten(trading)
-    assert position.is_open and not runner._flattened and marker.exists()
+    assert position.is_open and runner._flatten_announced and marker.exists()
     s.venue.block_sells = False
     runner._maybe_flatten(trading)
-    assert not position.is_open and runner._flattened and not marker.exists()
+    assert not position.is_open and not runner._flatten_announced and not marker.exists()
     assert [f.reason for f in position.fills] == [ExitReason.FLATTEN]
 
 def test_a_square_off_whose_sale_fails_is_retried_on_the_next_poll(tmp_path: Path) -> None:

@@ -13,10 +13,28 @@ NSSM services on the EC2 host:
 | `OrbBot` | `orb-bot serve` | Sleep until the next session, run it, reconcile, repeat |
 | `OrbBotWatch` | `orb-bot watchdog` | Telegram alert if the heartbeat goes silent (never trades) |
 
-Telegram commands (authorized chat only): `/status` `/today` `/positions` `/report`
-`/stop` `/start` `/flatten` `/help`. `/stop` means no new entries for the rest of today (open
-positions are still managed; `/flatten` closes them). It ends by itself at midnight and survives a
-restart. `/start` allows entries again the same day. `/pause` and `/resume` are the same commands.
+Telegram commands (authorized chat only). `/help` lists them.
+
+| Group | Commands |
+|---|---|
+| Status | `/status` (heartbeat, order mode, today's trading state, risk), `/mode`, `/version`, `/risk`, `/funds`, `/log [n]` |
+| Today | `/today`, `/pnl [day\|week\|month]`, `/positions`, `/progress` (stops, targets and broker stop per position), `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`, `/report` |
+| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart` |
+
+- `/stop`: no new entries for the rest of today (open positions are still managed). It ends by
+  itself at midnight and survives a restart. `/start` allows entries again the same day.
+  `/pause` and `/resume` are the same commands.
+- `/exit <symbol>` closes one open position (the full symbol, or a unique part such as `24500CE`).
+  When the sale is a real order the bot first replies with a one-time code to send back.
+- `/flatten`, `/clearhalt` and `/restart` also ask for a one-time code first.
+- `/rearm` puts the broker-side stop back on open positions that lost it. `/reconcile` checks the
+  bot's books against the broker (or the dry-run ledger) now. `/exit`, `/rearm` and `/reconcile`
+  work while a session is running; between sessions they say so.
+- `/clearhalt` clears the kill switch or a reconciliation entry block. Check the broker first.
+- `/restart` ends the session and the service; NSSM starts it again. Open positions and their
+  broker stops are restored on startup.
+- `/log` shows the last lines of today's log with tokens and secrets masked.
+- Every control command leaves an `operator_command` line in the JSONL log.
 
 ## Restart
 

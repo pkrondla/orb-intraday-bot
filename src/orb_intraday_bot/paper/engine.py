@@ -18,7 +18,7 @@ Opening a position (at the close of the signal candle):
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, time, timedelta
 
 from orb_intraday_bot.config.fingerprint import fingerprint
@@ -240,15 +240,19 @@ class PaperEngine:
         option_ltps: Mapping[str, float] | None = None,
         reason: ExitReason = ExitReason.EOD,
         executed_only: bool = False,
+        position_ids: Collection[str] | None = None,
     ) -> list[ExitEvent]:
         """Close everything still open: end of day, the square-off time, or a flatten.
 
         With an executor a position whose sale fails stays open (check `open_positions`) and the
         caller tries again. `executed_only` leaves simulated (paper) positions alone: the
         square-off time applies only to positions that hold real or dry-run orders.
+        `position_ids` limits the close to those positions (the operator's /exit).
         """
         events: list[ExitEvent] = []
         for position in list(self._open.values()):
+            if position_ids is not None and position.position_id not in position_ids:
+                continue
             if executed_only and self._executor_for(position) is None:
                 continue
             ltp = (option_ltps or {}).get(position.trading_symbol)
@@ -258,6 +262,19 @@ class PaperEngine:
             )
             self._after(position, time_)
         return events
+
+    def protect_all(self, now: datetime) -> list[Position]:
+        """Put the broker-side stop back on every executed position that has none (or a wrong
+        one). Returns the positions it looked at; the stop fields say what was placed."""
+        looked: list[Position] = []
+        for position in list(self._open.values()):
+            executor = self._executor_for(position)
+            if executor is None:
+                continue
+            executor.protect(position, now)
+            self._save(position, now)
+            looked.append(position)
+        return looked
 
     def mark_to_market(
         self, futures_price: float, option_ltps: Mapping[str, float] | None = None

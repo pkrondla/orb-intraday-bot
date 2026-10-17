@@ -22,7 +22,7 @@ What it does, in plain terms:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -60,6 +60,10 @@ PositionHook = Callable[[Position], None]
 log = logging.getLogger("orb.live")
 _CANDLE = timedelta(minutes=3)
 _IDLE_STEP_SEC = 20          # longest sleep between heartbeats when nothing is open
+
+
+class StopRun(Exception):
+    """Raised inside the session when the operator asks the service to stop (/restart)."""
 
 
 class LiveDataSource(OptionDataSource, Protocol):
@@ -125,8 +129,52 @@ class LiveRunner:
         self._contract: FuturesContract | None = None
         self._last_poll: datetime | None = None
         self._status = "starting"
-        self._flattened = False
         self._flatten_announced = False
+        self._stop_requested = False
+
+    # -- operator interface --------------------------------------------------------------
+    # These run on the session's own thread (the operator commands are drained in `_wait_until`),
+    # so they never race the candle processing.
+    @property
+    def executor(self) -> LiveExecutor | None:
+        return self._executor
+
+    @property
+    def trading_day(self) -> TradingDay | None:
+        return self._day
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    def request_stop(self) -> None:
+        """End the session at the next opportunity. Open positions stay in the database."""
+        self._stop_requested = True
+
+    def open_positions(self) -> list[Position]:
+        return self._day.paper.open_positions if self._day is not None else []
+
+    def exit_positions(self, position_ids: Collection[str]) -> list[Position]:
+        """Close these positions now (the operator's /exit). Returns those still open."""
+        trading = self._day
+        if trading is None:
+            return []
+        self._close_open(trading, ExitReason.MANUAL, position_ids=position_ids)
+        return [p for p in trading.paper.open_positions if p.position_id in position_ids]
+
+    def protect_open_positions(self) -> list[Position]:
+        """Make sure every executed position has its broker-side stop (the operator's /rearm)."""
+        trading = self._day
+        if trading is None or self._executor is None:
+            return []
+        return trading.paper.protect_all(self._clock.now())
+
+    def reconcile_now(self) -> list[str] | None:
+        """Check the books against the broker now. None if there is nothing to check against."""
+        trading, executor = self._day, self._executor
+        if trading is None or executor is None:
+            return None
+        return executor.reconcile(trading.paper.open_positions, self._clock.now())
 
     # -- entry point ---------------------------------------------------------------------
     def run(self) -> RunOutcome:
@@ -135,6 +183,10 @@ class LiveRunner:
             return RunOutcome(3, "Another run is alive (fresh heartbeat). Not starting a second.")
         try:
             return self._run_day(now.date())
+        except StopRun:
+            self._beat("stopped", "stopped on request")
+            self._out("Stopped on request. Open positions stay in the database.")
+            return RunOutcome(130, "stopped on request")
         except KeyboardInterrupt:
             self._beat("stopped", "stopped by the user")
             self._out(
@@ -296,10 +348,12 @@ class LiveRunner:
             self._alerts.exit(event)
 
     def _maybe_flatten(self, trading: TradingDay) -> None:
-        if self._flattened or not self._flatten_requested():
+        if not self._flatten_requested():
             return
         if not trading.paper.open_positions:
-            self._flattened = True
+            # Nothing to close: the request is spent. It must not linger (a later /flatten, or
+            # tomorrow's first trade, would otherwise be flattened or ignored by mistake).
+            self._clear_flatten_marker()
             return
         if not self._flatten_announced:
             self._flatten_announced = True
@@ -309,7 +363,10 @@ class LiveRunner:
         # retried on the next poll instead of being marked done.
         if not self._close_open(trading, ExitReason.FLATTEN):
             return
-        self._flattened = True
+        self._flatten_announced = False
+        self._clear_flatten_marker()
+
+    def _clear_flatten_marker(self) -> None:
         marker = self._data_dir / "FLATTEN"
         if marker.exists():
             with suppress(OSError):
@@ -336,7 +393,12 @@ class LiveRunner:
         return [p for p in trading.paper.open_positions if p.order_mode != "paper"]
 
     def _close_open(
-        self, trading: TradingDay, reason: ExitReason, *, executed_only: bool = False
+        self,
+        trading: TradingDay,
+        reason: ExitReason,
+        *,
+        executed_only: bool = False,
+        position_ids: Collection[str] | None = None,
     ) -> bool:
         """Close positions at the latest prices. True when none of them remain open."""
         price = trading.last_candle.close if trading.last_candle else None
@@ -357,13 +419,15 @@ class LiveRunner:
         if price is None:
             return False
         for event in trading.paper.close_all(
-            self._clock.now(), price, options, reason, executed_only
+            self._clock.now(), price, options, reason, executed_only, position_ids
         ):
             self._out("  " + format_exit(event))
             self._alerts.exit(event)
         remaining = (
             self._executed_open(trading) if executed_only else trading.paper.open_positions
         )
+        if position_ids is not None:
+            remaining = [p for p in remaining if p.position_id in position_ids]
         return not remaining
 
     def _start_executor(self, trading: TradingDay) -> None:
@@ -427,11 +491,15 @@ class LiveRunner:
     def _wait_until(self, target: datetime) -> None:
         interval = self._cfg.runtime.poll_interval_sec
         while True:
+            if self._stop_requested:
+                raise StopRun()
             now = self._clock.now()
             if now >= target:
                 return
             if self._on_idle is not None:
                 self._on_idle()          # operator commands (/stop, /start, /flatten) mid-session
+            if self._stop_requested:
+                raise StopRun()
             self._poll_ticks()
             remaining = (target - self._clock.now()).total_seconds()
             if remaining <= 0:
@@ -468,11 +536,10 @@ class LiveRunner:
         restored = trading.paper.open_positions
         fp = fingerprint(self._cfg)
         executor = self._executor
-        mode_label = (
-            "PAPER MODE (no orders are ever placed)"
-            if executor is None
-            else f"{describe_order_mode(executor.mode)} when armed today, paper otherwise"
-        )
+        if executor is None or not self._executor_enabled():
+            mode_label = "PAPER MODE (no orders are ever placed)"
+        else:
+            mode_label = describe_order_mode(executor.mode)
         lines = [
             f"ORB Intraday Bot v{__version__} - {mode_label}",
             f"  {contract.trading_symbol} (expiry {contract.expiry}, lot {contract.lot_size}); "

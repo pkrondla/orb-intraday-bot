@@ -100,4 +100,4 @@ Logs: `C:\orb-bot\logs\orb-bot.log`, `orb-bot-error.log`, `orb-watch.log`.
 Create a **new** bot with @BotFather (do not reuse the Groww bot token). Message it once,
 then read your chat id from `https://api.telegram.org/bot<token>/getUpdates`. Commands:
 
-`/status` `/today` `/positions` `/report` `/stop` `/start` `/flatten` `/help` (`/pause` and `/resume` still work as the same commands)
+`/help` lists them; the full list is in `docs/RUNBOOK.md`. Status: `/status` `/mode` `/version` `/risk` `/funds` `/log`. Today: `/today` `/pnl` `/positions` `/progress` `/signals` `/orders` `/levels` `/report`. Control: `/stop` `/start` `/exit` `/flatten` `/rearm` `/reconcile` `/clearhalt` `/restart`.

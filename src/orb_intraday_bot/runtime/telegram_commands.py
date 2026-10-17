@@ -26,13 +26,31 @@ _TIMEOUT_SEC = 35          # long-poll timeout + a little slack
 _POLL_TIMEOUT = 25
 _HELP = (
     "ORB bot commands:\n"
-    "/status - is the bot alive and what is it doing\n"
+    "Status\n"
+    "/status - alive? mode, risk, today's trading state\n"
+    "/mode - mode and the settings behind it\n"
+    "/version - version and rule fingerprints\n"
+    "/risk - limits, kill switch, entry blocks\n"
+    "/funds - capital and available margin\n"
+    "/log [n] - last n log lines (default 15)\n"
+    "Trading today\n"
     "/today - today's trades and P&L\n"
+    "/pnl [day|week|month] - P&L over a period\n"
     "/positions - open positions\n"
+    "/progress - stops, targets and broker stop per open position\n"
+    "/signals - today's signals and what happened to each\n"
+    "/orders - today's orders and fills\n"
+    "/levels - today's pivots and opening range\n"
     "/report - forward-test statistics\n"
+    "Control\n"
     "/stop - no new trades for the rest of today (exits still run); trading restarts tomorrow\n"
     "/start - allow new trades again today\n"
+    "/exit <symbol> - close one position (live orders: reply with the code)\n"
     "/flatten - close everything (reply /flatten <code> to confirm)\n"
+    "/rearm - put the broker-side stop back on open positions\n"
+    "/reconcile - check the bot's books against the broker now\n"
+    "/clearhalt - clear the kill switch / entry block (reply with the code)\n"
+    "/restart - restart the service (reply with the code)\n"
     "/help - this list"
 )
 
@@ -44,6 +62,21 @@ class CommandKind(StrEnum):
     REPORT = "report"
     STOP_TODAY = "stop_today"
     START_TODAY = "start_today"
+    RISK = "risk"
+    ORDERS = "orders"
+    SIGNALS = "signals"
+    LEVELS = "levels"
+    FUNDS = "funds"
+    PNL = "pnl"
+    PROGRESS = "progress"
+    MODE = "mode"
+    VERSION = "version"
+    LOG = "log"
+    EXIT = "exit"
+    REARM = "rearm"
+    RECONCILE = "reconcile"
+    CLEARHALT = "clearhalt"
+    RESTART = "restart"
     FLATTEN = "flatten"
     FLATTEN_CONFIRM = "flatten_confirm"
     HELP = "help"
@@ -76,6 +109,22 @@ def parse_command(text: str) -> Command:
         "today": CommandKind.TODAY,
         "positions": CommandKind.POSITIONS,
         "report": CommandKind.REPORT,
+        "risk": CommandKind.RISK,
+        "orders": CommandKind.ORDERS,
+        "signals": CommandKind.SIGNALS,
+        "levels": CommandKind.LEVELS,
+        "funds": CommandKind.FUNDS,
+        "pnl": CommandKind.PNL,
+        "progress": CommandKind.PROGRESS,
+        "mode": CommandKind.MODE,
+        "version": CommandKind.VERSION,
+        "log": CommandKind.LOG,
+        "logs": CommandKind.LOG,
+        "exit": CommandKind.EXIT,
+        "rearm": CommandKind.REARM,
+        "reconcile": CommandKind.RECONCILE,
+        "clearhalt": CommandKind.CLEARHALT,
+        "restart": CommandKind.RESTART,
         "stop": CommandKind.STOP_TODAY,
         "pause": CommandKind.STOP_TODAY,
         "start": CommandKind.START_TODAY,
@@ -94,6 +143,7 @@ class CommandBus:
         self._queue: queue.Queue[Command] = queue.Queue()
         self._lock = threading.Lock()
         self._flatten_code: str | None = None
+        self._codes: dict[str, str] = {}
         # The day (IST) on which the operator sent /stop. Trading is on by default every day and
         # a stop expires by itself: it only ever applies to the day it names.
         self.stopped_day: date | None = None
@@ -121,6 +171,21 @@ class CommandBus:
             ok = bool(self._flatten_code) and code.strip().lower() == self._flatten_code
             if ok:
                 self._flatten_code = None
+            return ok
+
+    def begin_confirm(self, action: str) -> str:
+        """A one-time code for a risky command. A new request for the same action replaces it."""
+        code = secrets.token_hex(2)
+        with self._lock:
+            self._codes[action] = code
+        return code
+
+    def confirm(self, action: str, code: str) -> bool:
+        with self._lock:
+            expected = self._codes.get(action)
+            ok = bool(expected) and code.strip().lower() == expected
+            if ok:
+                del self._codes[action]
             return ok
 
     def stop_for(self, day: date) -> None:

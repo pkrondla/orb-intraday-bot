@@ -6,6 +6,30 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-17
+
+More Telegram commands for the operator.
+
+### Added
+- Status: `/mode` (settings and what they resolve to), `/version`, `/risk` (limits, kill switch,
+  entry block, `/stop` state), `/funds` (capital and available margin), `/log [n]` (tail of
+  today's log with secrets masked). `/status` now also shows the order mode, today's trading
+  state, the session state and the risk counters.
+- Today: `/pnl [day|week|month]`, `/progress` (stops, targets, broker stop per position),
+  `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`.
+- Control: `/exit <symbol>` (one position; a real sale asks for a one-time code), `/rearm`
+  (re-place a missing broker stop), `/reconcile` (check the books now), `/clearhalt` (clear the
+  kill switch or entry block, with a code) and `/restart` (graceful service restart, with a code).
+- `ExitReason.MANUAL` for `/exit`. Every control command writes an `operator_command` log line.
+- `TradeStore.orders_for_day`, `PaperEngine.protect_all`, and `close_all(position_ids=...)`.
+
+### Fixed
+- A flatten request made while nothing was open used to mark the flatten as done for the whole
+  session and leave the `FLATTEN` marker behind, so a later `/flatten` did nothing and the next
+  day's first trade could be flattened at once. A request with nothing to close is now spent and
+  the marker removed.
+- The session banner said "when armed today, paper otherwise" (a leftover of the daily `/arm`).
+
 ## [0.11.0] - 2026-10-17
 
 Dry run and live order path. Real orders stay off unless `DRY_RUN=false`.

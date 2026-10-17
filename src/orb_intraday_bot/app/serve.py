@@ -16,10 +16,13 @@ from datetime import time as dtime
 from pathlib import Path
 
 from orb_intraday_bot import __version__
+from orb_intraday_bot.app import operator_text as ot
 from orb_intraday_bot.app.context import AppContext, build_market_data, load_context
 from orb_intraday_bot.app.forward import NothingToDo, day_summary_text, reconcile_day
 from orb_intraday_bot.config.fingerprint import fingerprint
 from orb_intraday_bot.core.clock import IST, Clock, SystemClock
+from orb_intraday_bot.execution.account import AccountReader
+from orb_intraday_bot.indicators.pivots import SessionLevels
 from orb_intraday_bot.paper.models import Position
 from orb_intraday_bot.risk.engine import RiskEngine
 from orb_intraday_bot.risk.limits import RiskLimits, load_risk_limits
@@ -31,7 +34,7 @@ from orb_intraday_bot.runtime.arming import (
 from orb_intraday_bot.runtime.calendar import load_holidays, next_session_start
 from orb_intraday_bot.runtime.executor import LiveExecutor
 from orb_intraday_bot.runtime.live import LiveRunner, RunOutcome
-from orb_intraday_bot.runtime.logs import new_run_id
+from orb_intraday_bot.runtime.logs import log_event, new_run_id
 from orb_intraday_bot.runtime.notify import Notifier, build_notifier
 from orb_intraday_bot.runtime.output import make_output
 from orb_intraday_bot.runtime.telegram_commands import (
@@ -57,6 +60,12 @@ class ServeState:
     bus: CommandBus
     risk: RiskEngine
     stop_requested: bool = False
+    # The running session, for the commands that act on it (/exit, /rearm, /reconcile, ...).
+    # None between sessions.
+    runner: LiveRunner | None = None
+    # The pivot inputs the last session loaded, and the day they are for (for /levels).
+    levels: tuple[str, SessionLevels] | None = None
+    levels_day: date | None = None
 
 
 SleepFunc = Callable[[float], None]
@@ -98,6 +107,262 @@ def should_stop(data_dir: Path, state: ServeState) -> bool:
     return stop_file_path(data_dir).exists()
 
 
+_CONTROL_KINDS = frozenset(
+    {
+        CommandKind.STOP_TODAY,
+        CommandKind.START_TODAY,
+        CommandKind.FLATTEN_CONFIRM,
+        CommandKind.EXIT,
+        CommandKind.REARM,
+        CommandKind.RECONCILE,
+        CommandKind.CLEARHALT,
+        CommandKind.RESTART,
+    }
+)
+_NO_SESSION = (
+    "No session is running. This works while a session runs (about 09:00 to 15:30 IST on a "
+    "market day)."
+)
+
+
+def _read_store(
+    ctx: AppContext, reply: Callable[[str], None], build: Callable[[TradeStore], str]
+) -> None:
+    if not ctx.database_path.exists():
+        reply("No database yet.")
+        return
+    store = TradeStore(ctx.database_path)
+    try:
+        reply(build(store))
+    finally:
+        store.close()
+
+
+def build_funds_reader(ctx: AppContext) -> AccountReader:
+    """A read-only view of the trading account, for /funds outside a session."""
+    from orb_intraday_bot.adapters.groww.account import GrowwAccountReader
+    from orb_intraday_bot.adapters.groww.factory import build_trading_client
+    from orb_intraday_bot.adapters.groww.trading_client import AccountReadView
+
+    return GrowwAccountReader(AccountReadView(build_trading_client(ctx.settings)))
+
+
+def funds_reply(ctx: AppContext, state: ServeState) -> str:
+    settings = ctx.settings
+    risk = state.risk
+    executor = state.runner.executor if state.runner is not None else None
+    margin: float | None = None
+    held: dict[str, int] | None = None
+    held_label = ""
+    note = "Available option margin: unknown (the funds lookup failed)"
+    if executor is not None:
+        margin = executor.available_margin()
+        held = executor.held_quantities()
+        held_label = "Broker positions" if executor.mode == "live" else "Dry-run ledger"
+    elif settings.live_mode == "paper":
+        note = "Available option margin: not read in paper mode (the account is never touched)"
+    elif not settings.has_trading_credentials():
+        note = "Available option margin: not read (no trading credentials configured)"
+    else:
+        try:
+            margin = build_funds_reader(ctx).available_option_margin()
+        except Exception as exc:  # noqa: BLE001 - a report command must always answer
+            note = f"Available option margin: could not be read ({type(exc).__name__})"
+    return ot.funds_text(
+        capital_inr=risk.capital_inr,
+        daily_loss_limit_inr=risk.limits.daily_loss_limit_inr(risk.capital_inr),
+        mode_label=configured_mode_label(settings),
+        margin=margin,
+        margin_note=note,
+        held=held,
+        held_label=held_label,
+    )
+
+
+def _handle_report_command(
+    command: Command,
+    *,
+    ctx: AppContext,
+    state: ServeState,
+    reply: Callable[[str], None],
+    day: date,
+) -> bool:
+    """The read-only commands. True if `command` was one of them."""
+    kind = command.kind
+    runner = state.runner
+    executor = runner.executor if runner is not None else None
+    if kind is CommandKind.RISK:
+        reply(ot.risk_text(state.risk, stopped_today=state.bus.is_stopped(day)))
+    elif kind is CommandKind.MODE:
+        reply(
+            ot.mode_text(
+                ctx.settings,
+                state.risk,
+                stopped_today=state.bus.is_stopped(day),
+                executor_mode=executor.mode if executor is not None else None,
+            )
+        )
+    elif kind is CommandKind.VERSION:
+        reply(ot.version_text(ctx.cfg))
+    elif kind is CommandKind.FUNDS:
+        reply(funds_reply(ctx, state))
+    elif kind is CommandKind.LOG:
+        reply(ot.log_tail(ctx.data_dir, day, ot.parse_log_lines(command.arg)))
+    elif kind is CommandKind.ORDERS:
+        _read_store(ctx, reply, lambda store: ot.orders_text(store, day))
+    elif kind is CommandKind.SIGNALS:
+        _read_store(ctx, reply, lambda store: ot.signals_text(store, day))
+    elif kind is CommandKind.PNL:
+        period = ot.parse_pnl_period(command.arg)
+        if period is None:
+            reply("Usage: /pnl [day|week|month]")
+        else:
+            _read_store(ctx, reply, lambda store: ot.pnl_text(store, period, day))
+    elif kind is CommandKind.PROGRESS:
+        if runner is not None and runner.trading_day is not None:
+            reply(ot.progress_text(runner.open_positions()))
+        else:
+            _read_store(ctx, reply, lambda store: ot.progress_text(store.open_positions()))
+    elif kind is CommandKind.LEVELS:
+        trading = runner.trading_day if runner is not None else None
+        loaded = state.levels if state.levels_day == day else None
+        last = trading.last_candle if trading is not None else None
+        reply(
+            ot.levels_text(
+                loaded[0] if loaded else None,
+                loaded[1] if loaded else None,
+                trading.tracker.orh if trading is not None else None,
+                trading.tracker.orl if trading is not None else None,
+                last.close if last is not None else None,
+            )
+        )
+    else:
+        return False
+    return True
+
+
+def _handle_exit(
+    command: Command, *, state: ServeState, reply: Callable[[str], None]
+) -> None:
+    """/exit <symbol> [code]: close one position. A real (live) sell needs the code."""
+    runner = state.runner
+    if runner is None:
+        reply(_NO_SESSION)
+        return
+    open_ = runner.open_positions()
+    listing = ", ".join(sorted({p.trading_symbol for p in open_})) or "none"
+    parts = command.arg.split()
+    if not parts:
+        reply(f"Usage: /exit <symbol>. Open positions: {listing}")
+        return
+    matches = ot.match_positions(open_, parts[0])
+    symbols = sorted({p.trading_symbol for p in matches})
+    if not symbols:
+        reply(f"No open position matches {parts[0]}. Open positions: {listing}")
+        return
+    if len(symbols) > 1:
+        reply(f"{parts[0]} matches more than one position: {', '.join(symbols)}. Be more exact.")
+        return
+    symbol = symbols[0]
+    action = f"exit:{symbol}"
+    if any(p.order_mode == "live" for p in matches) and not state.bus.confirm(
+        action, parts[1] if len(parts) > 1 else ""
+    ):
+        code = state.bus.begin_confirm(action)
+        reply(f"This sends a real sell order for {symbol}. Confirm: /exit {symbol} {code}")
+        return
+    left = runner.exit_positions({p.position_id for p in matches})
+    if left:
+        reply(
+            f"{symbol}: the sale did not complete and the position is still open. Check the "
+            "warning above, then send /exit again or /flatten."
+        )
+    else:
+        reply(f"{symbol}: closed (the exit message has the prices).")
+
+
+def _handle_action_command(
+    command: Command,
+    *,
+    ctx: AppContext,
+    alerts: Alerts,
+    state: ServeState,
+    reply: Callable[[str], None],
+) -> bool:
+    """/exit, /rearm, /reconcile, /clearhalt and /restart. True if `command` was one of them."""
+    kind = command.kind
+    runner = state.runner
+    if kind is CommandKind.EXIT:
+        _handle_exit(command, state=state, reply=reply)
+    elif kind in (CommandKind.REARM, CommandKind.RECONCILE):
+        if runner is None:
+            reply(_NO_SESSION)
+        elif runner.executor is None:
+            reply("This session places no orders (paper mode), so there is nothing to check.")
+        elif kind is CommandKind.REARM:
+            looked = runner.protect_open_positions()
+            if not looked:
+                reply("No open positions that hold orders.")
+            for p in looked:
+                reply(
+                    f"{p.trading_symbol}: broker stop in place (trigger {p.stop_trigger:.2f}, "
+                    f"qty {p.stop_quantity})"
+                    if p.stop_order_id
+                    else f"{p.trading_symbol}: the broker stop could not be placed (see warning)"
+                )
+        else:
+            problems = runner.reconcile_now()
+            if problems:
+                reply(
+                    "MISMATCH (new entries are blocked, nothing was sold):\n"
+                    + "\n".join(problems)
+                )
+            else:
+                reply(
+                    f"The books match ({len(runner.open_positions())} open position(s) checked)."
+                )
+    elif kind is CommandKind.CLEARHALT:
+        s = state.risk.state
+        if not (s.halted or s.entries_blocked):
+            reply("Nothing to clear: the kill switch is not tripped and entries are not blocked.")
+        else:
+            what = " and ".join(
+                part
+                for part in (
+                    f"kill switch ({s.halt_reason})" if s.halted else "",
+                    f"entry block ({s.block_reason})" if s.entries_blocked else "",
+                )
+                if part
+            )
+            if not state.bus.confirm("clearhalt", command.arg):
+                code = state.bus.begin_confirm("clearhalt")
+                reply(
+                    f"Active: {what}. Check the broker first. To clear it and allow new "
+                    f"entries: /clearhalt {code}"
+                )
+            else:
+                state.risk.clear_halt()
+                alerts.order_event(f"ORB bot: {what} cleared by the operator.")
+                reply("Cleared. New entries are allowed again (the limits still apply).")
+    elif kind is CommandKind.RESTART:
+        if not state.bus.confirm("restart", command.arg):
+            code = state.bus.begin_confirm("restart")
+            reply(
+                "This restarts the service (the supervisor starts it again within seconds). "
+                "Open positions and their broker stops are kept and restored. "
+                f"Confirm: /restart {code}"
+            )
+        else:
+            alerts.order_event("ORB bot: restart requested by the operator.")
+            reply("Restarting.")
+            state.stop_requested = True
+            if runner is not None:
+                runner.request_stop()
+    else:
+        return False
+    return True
+
+
 def handle_command(
     command: Command,
     *,
@@ -109,11 +374,25 @@ def handle_command(
 ) -> None:
     """Apply one operator command. Read-only commands reply; control commands set flags."""
     bus = state.bus
+    day = now.astimezone(IST).date()
+    if command.kind in _CONTROL_KINDS:
+        # An audit line for every command that changes something (never the confirmation code).
+        log_event(log, "operator_command", command=command.kind.value)
+    if _handle_report_command(command, ctx=ctx, state=state, reply=reply, day=day):
+        return
+    if _handle_action_command(command, ctx=ctx, alerts=alerts, state=state, reply=reply):
+        return
     if command.kind is CommandKind.STATUS:
         from orb_intraday_bot.app.health import status_report
 
         report = status_report(ctx.data_dir / ctx.cfg.runtime.heartbeat_file, now)
-        reply(report.text)
+        extra = ot.status_extra(
+            ctx.settings,
+            state.risk,
+            stopped_today=bus.is_stopped(day),
+            session_status=state.runner.status if state.runner is not None else None,
+        )
+        reply(report.text + "\n" + extra)
         return
     if command.kind is CommandKind.TODAY:
         if not ctx.database_path.exists():
@@ -158,7 +437,6 @@ def handle_command(
             store.close()
         return
     if command.kind is CommandKind.STOP_TODAY:
-        day = now.astimezone(IST).date()
         bus.stop_for(day)
         write_stopped_day(ctx.data_dir, day)
         alerts.paused(day.isoformat())
@@ -169,7 +447,6 @@ def handle_command(
         )
         return
     if command.kind is CommandKind.START_TODAY:
-        day = now.astimezone(IST).date()
         was_stopped = bus.is_stopped(day)
         bus.start_for(day)
         write_stopped_day(ctx.data_dir, None)
@@ -218,12 +495,13 @@ def run_one_session(
 ) -> RunOutcome:
     """Run today's LiveRunner. Honours pause by wrapping allow_open at the day level later."""
     from orb_intraday_bot.analysis.levels import levels_path, remember
-    from orb_intraday_bot.indicators.pivots import SessionLevels
 
     store = TradeStore(ctx.database_path)
     data = build_market_data(ctx)
 
     def save_levels(symbol: str, levels: SessionLevels) -> None:
+        state.levels = (symbol, levels)
+        state.levels_day = today
         try:
             remember(levels_path(ctx.history_path(symbol)), levels)
         except OSError as exc:
@@ -275,12 +553,19 @@ def run_one_session(
         decision = state.risk.check_entry(lots=1)
         return decision.allowed
 
+    halt_marked = False
+
     def flatten_requested() -> bool:
+        nonlocal halt_marked
         if flatten_marker.exists():
             return True
         if state.risk.state.halted:
-            flatten_marker.parent.mkdir(parents=True, exist_ok=True)
-            flatten_marker.write_text(f"risk:{state.risk.state.halt_reason}\n", encoding="utf-8")
+            if not halt_marked:             # the marker survives a restart; write it once
+                halt_marked = True
+                flatten_marker.parent.mkdir(parents=True, exist_ok=True)
+                flatten_marker.write_text(
+                    f"risk:{state.risk.state.halt_reason}\n", encoding="utf-8"
+                )
             return True
         return False
 
@@ -303,9 +588,11 @@ def run_one_session(
         square_off_at=parse_clock_time(state.risk.limits.square_off_time),
         on_idle=on_idle,
     )
+    state.runner = runner
     try:
         return runner.run()
     finally:
+        state.runner = None
         store.close()
 
 
@@ -350,7 +637,7 @@ def build_executor(
     from orb_intraday_bot.adapters.groww.quotes import GrowwQuoteSource
     from orb_intraday_bot.adapters.groww.trading_client import AccountReadView
     from orb_intraday_bot.adapters.groww.venue import GrowwVenue
-    from orb_intraday_bot.execution.account import AccountReader, DryRunAccount
+    from orb_intraday_bot.execution.account import DryRunAccount
     from orb_intraday_bot.execution.dry_run_venue import DryRunVenue
     from orb_intraday_bot.execution.quotes import QuoteSource
     from orb_intraday_bot.execution.venue import ExecutionVenue
