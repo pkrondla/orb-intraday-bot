@@ -20,6 +20,17 @@ from orb_intraday_bot.storage.store import TradeStore
 STALE_AFTER_SEC = 120
 
 
+def _check_error(exc: BaseException) -> str:
+    text = f"{type(exc).__name__}: {exc}"
+    low = str(exc).lower()
+    if "permission" in low or "authorisation" in low or "authorization" in low:
+        text += (
+            " A key that works on your PC often fails on EC2 until the instance "
+            "public IP is allowed on that Groww API key."
+        )
+    return text
+
+
 @dataclass(frozen=True)
 class StatusReport:
     text: str
@@ -90,7 +101,7 @@ def run_checks(
         try:
             result = CheckStep(name, True, fn())
         except Exception as exc:
-            result = CheckStep(name, False, f"{type(exc).__name__}: {exc}")
+            result = CheckStep(name, False, _check_error(exc))
         steps.append(result)
         on_step(result)
         return result.ok
