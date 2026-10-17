@@ -862,6 +862,8 @@ def serve_loop(
         poller.start()
 
     alerts.startup(__version__, mode, fingerprint(ctx.cfg).strategy)
+    if poller is not None:
+        alerts.order_event("ORB bot: Telegram commands on. Send /help in this chat.")
     ignored = ignored_override_note(ctx.settings, ctx.data_dir)
     if ignored:
         alerts.order_event(f"ORB bot: {ignored}")

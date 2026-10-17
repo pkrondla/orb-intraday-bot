@@ -9,6 +9,8 @@ from orb_intraday_bot.runtime.telegram_commands import (
     CommandBus,
     CommandKind,
     TelegramCommandPoller,
+    chats_match,
+    normalize_chat_id,
     parse_command,
 )
 
@@ -92,3 +94,41 @@ def test_poller_queues_authorized_commands_and_handles_help() -> None:
     assert not any("code" in r.lower() for r in replies if "ORB bot commands" not in r)
     cmds = bus.drain()
     assert [c.kind for c in cmds] == [CommandKind.STOP_TODAY, CommandKind.FLATTEN]
+
+
+def test_chat_ids_match_after_quotes_and_spaces() -> None:
+    assert normalize_chat_id(' "1447109810" ') == "1447109810"
+    assert chats_match(1447109810, "1447109810")
+    assert chats_match("'42'", "42")
+    assert not chats_match("42", "43")
+
+
+def test_poller_accepts_quoted_chat_id_and_operator_sender() -> None:
+    replies: list[str] = []
+    bus = CommandBus()
+    updates = [
+        {"update_id": 1, "message": {"chat": {"id": 42}, "text": "/help"}},
+        {
+            "update_id": 2,
+            "message": {
+                "chat": {"id": -1001},
+                "from": {"id": 42},
+                "text": "/help",
+            },
+        },
+    ]
+    state = {"i": 0}
+
+    def get(_url: str) -> bytes:
+        i = state["i"]
+        state["i"] += 1
+        if i >= len(updates):
+            return json.dumps({"ok": True, "result": []}).encode()
+        return json.dumps({"ok": True, "result": [updates[i]]}).encode()
+
+    poller = TelegramCommandPoller(
+        "tok", ' "42" ', bus, replies.append, get=get, sleep=lambda _: None
+    )
+    poller._poll_once()  # noqa: SLF001
+    poller._poll_once()  # noqa: SLF001
+    assert len([r for r in replies if "ORB bot commands" in r]) == 2

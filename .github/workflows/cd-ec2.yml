@@ -204,6 +204,12 @@ jobs:
               """,
               "init env",
           )
+          token = clean("TELEGRAM_BOT_TOKEN")
+          bot_id = token.split(":", 1)[0] if token else "(empty)"
+          print(
+              f"Host Telegram bot id (token prefix): {bot_id}; "
+              f"TELEGRAM_CHAT_ID={clean('TELEGRAM_CHAT_ID') or '(empty)'}"
+          )
 
           for i, line in enumerate(env_lines, start=1):
               line_b64 = base64.b64encode((line + "\n").encode("utf-8")).decode("ascii")

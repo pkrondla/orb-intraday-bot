@@ -68,6 +68,26 @@ class Settings(BaseSettings):
     def _empty_is_unset(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
 
+    @field_validator("telegram_chat_id", mode="before")
+    @classmethod
+    def _strip_chat_id(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        text = value.strip().strip('"').strip("'")
+        try:
+            return str(int(text)) if text else ""
+        except ValueError:
+            return text
+
+    @field_validator("telegram_bot_token", mode="before")
+    @classmethod
+    def _strip_bot_token(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, SecretStr):
+            return value.get_secret_value().strip()
+        return value
+
     def has_trading_credentials(self) -> bool:
         trading = (
             self.groww_trading_totp_token.get_secret_value()

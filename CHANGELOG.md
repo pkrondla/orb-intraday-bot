@@ -6,6 +6,11 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+### Fixed
+- Telegram `/help` (and other commands) in the ORB bot chat: drop a restrictive
+  `allowed_updates` filter that could make `getUpdates` miss messages, clear any
+  webhook before polling, and treat quoted/whitespace chat ids as the same chat.
+
 ## [0.12.0] - 2026-10-17
 
 More Telegram commands for the operator.

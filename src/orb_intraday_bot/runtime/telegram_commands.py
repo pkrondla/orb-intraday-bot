@@ -23,6 +23,20 @@ from typing import Any
 log = logging.getLogger("orb.telegram_cmd")
 _TIMEOUT_SEC = 35          # long-poll timeout + a little slack
 _POLL_TIMEOUT = 25
+
+
+def normalize_chat_id(value: object) -> str:
+    """Strip quotes/whitespace so GitHub vars and Telegram ids compare equal."""
+    text = str(value or "").strip().strip('"').strip("'")
+    try:
+        return str(int(text))
+    except (TypeError, ValueError):
+        return text
+
+
+def chats_match(left: object, right: object) -> bool:
+    a, b = normalize_chat_id(left), normalize_chat_id(right)
+    return bool(a) and a == b
 _HELP = (
     "ORB bot commands:\n"
     "Status\n"
@@ -208,8 +222,8 @@ class TelegramCommandPoller:
         get: GetFunc = _urllib_get,
         sleep: SleepFunc = time.sleep,
     ) -> None:
-        self._token = token
-        self._chat_id = str(chat_id)
+        self._token = token.strip()
+        self._chat_id = normalize_chat_id(chat_id)
         self._bus = bus
         self._reply = reply
         self._get = get
@@ -222,6 +236,8 @@ class TelegramCommandPoller:
         if self._thread is not None:
             return
         self._stop.clear()
+        self._delete_webhook()
+        log.info("Telegram commands listening for chat %s", self._chat_id)
         self._thread = threading.Thread(
             target=self._run, name="orb-telegram-commands", daemon=True
         )
@@ -233,6 +249,38 @@ class TelegramCommandPoller:
             self._thread.join(timeout=timeout)
             self._thread = None
 
+    def _redact(self, text: str) -> str:
+        return text.replace(self._token, "<token>") if self._token else text
+
+    def _delete_webhook(self) -> None:
+        """getUpdates is refused while a webhook is set (HTTP 409)."""
+        url = f"https://api.telegram.org/bot{self._token}/deleteWebhook"
+        try:
+            raw = self._get(url)
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            log.warning("Telegram deleteWebhook failed: %s", type(exc).__name__)
+            return
+        if not payload.get("ok"):
+            log.warning("Telegram deleteWebhook rejected: %s", payload.get("description", "unknown"))
+
+    def _fetch(self, url: str) -> bytes | None:
+        try:
+            return self._get(url)
+        except urllib.error.HTTPError as exc:
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            detail = self._redact((body or exc.reason or "")[:240])
+            log.warning("Telegram poll failed: HTTP %s %s", exc.code, detail)
+            self._sleep(5.0 if exc.code == 409 else 2.0)
+            return None
+        except urllib.error.URLError:
+            log.warning("Telegram poll failed: URLError")
+            self._sleep(2.0)
+            return None
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -242,20 +290,22 @@ class TelegramCommandPoller:
                 self._sleep(2.0)
 
     def _poll_once(self) -> None:
-        params = urllib.parse.urlencode(
-            {"timeout": _POLL_TIMEOUT, "offset": self._offset, "allowed_updates": '["message"]'}
-        )
+        # Do not pass allowed_updates: a bad encoding can make Telegram drop messages
+        # while sendMessage (startup alerts) still works.
+        params = urllib.parse.urlencode({"timeout": _POLL_TIMEOUT, "offset": self._offset})
         url = f"https://api.telegram.org/bot{self._token}/getUpdates?{params}"
-        try:
-            raw = self._get(url)
-        except urllib.error.URLError:
-            self._sleep(2.0)
+        raw = self._fetch(url)
+        if raw is None:
             return
         try:
             payload: dict[str, Any] = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return
         if not payload.get("ok"):
+            log.warning(
+                "Telegram getUpdates rejected: %s",
+                self._redact(str(payload.get("description", "unknown"))),
+            )
             return
         for update in payload.get("result") or []:
             self._handle_update(update)
@@ -264,18 +314,25 @@ class TelegramCommandPoller:
         update_id = int(update.get("update_id", 0))
         if update_id >= self._offset:
             self._offset = update_id + 1
-        message = update.get("message") or {}
+        message = update.get("message") or update.get("edited_message") or {}
         chat = message.get("chat") or {}
-        chat_id = str(chat.get("id", ""))
-        if chat_id != self._chat_id:
-            if chat_id:
-                log.info("Ignoring Telegram message from unauthorized chat %s", chat_id)
+        sender = message.get("from") or {}
+        chat_id = normalize_chat_id(chat.get("id", ""))
+        sender_id = normalize_chat_id(sender.get("id", ""))
+        if not chats_match(chat_id, self._chat_id) and not chats_match(sender_id, self._chat_id):
+            if chat_id or sender_id:
+                log.info(
+                    "Ignoring Telegram message from unauthorized chat %s sender %s",
+                    chat_id,
+                    sender_id,
+                )
             return
-        text = str(message.get("text") or "")
+        text = str(message.get("text") or message.get("caption") or "")
         command = parse_command(text)
         command = Command(
-            kind=command.kind, arg=command.arg, chat_id=chat_id, update_id=update_id
+            kind=command.kind, arg=command.arg, chat_id=chat_id or sender_id, update_id=update_id
         )
+        log.info("Telegram command %s from chat %s", command.kind.value, command.chat_id)
         if command.kind is CommandKind.HELP:
             self._reply(_HELP)
             return
@@ -291,8 +348,9 @@ def build_command_poller(
     reply: ReplyFunc,
 ) -> TelegramCommandPoller | None:
     """Return a poller when Telegram is configured, else None."""
-    token = settings.telegram_bot_token.get_secret_value()
-    chat = settings.telegram_chat_id
+    token = settings.telegram_bot_token.get_secret_value().strip()
+    chat = normalize_chat_id(settings.telegram_chat_id)
     if not token or not chat:
+        log.warning("Telegram commands off: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is empty")
         return None
     return TelegramCommandPoller(token, chat, bus, reply)
