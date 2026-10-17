@@ -39,6 +39,13 @@ from orb_intraday_bot.runtime.dry_run_switch import (
     write_override,
 )
 from orb_intraday_bot.runtime.executor import LiveExecutor
+from orb_intraday_bot.runtime.limit_overrides import (
+    KNOBS,
+    LimitControls,
+    describe_range,
+    format_value,
+    parse_number,
+)
 from orb_intraday_bot.runtime.live import LiveRunner, RunOutcome
 from orb_intraday_bot.runtime.logs import log_event, new_run_id
 from orb_intraday_bot.runtime.notify import Notifier, build_notifier
@@ -72,6 +79,8 @@ class ServeState:
     # The pivot inputs the last session loaded, and the day they are for (for /levels).
     levels: tuple[str, SessionLevels] | None = None
     levels_day: date | None = None
+    # The adjustable money limits (/capital, /riskpct, /dailyloss, /maxlots). Built at start.
+    limits: LimitControls | None = None
 
 
 SleepFunc = Callable[[float], None]
@@ -124,6 +133,11 @@ _CONTROL_KINDS = frozenset(
         CommandKind.CLEARHALT,
         CommandKind.RESTART,
         CommandKind.DRYRUN,
+        CommandKind.LIMITS,
+        CommandKind.CAPITAL,
+        CommandKind.RISKPCT,
+        CommandKind.DAILYLOSS,
+        CommandKind.MAXLOTS,
     }
 )
 _NO_SESSION = (
@@ -337,6 +351,79 @@ def _handle_dryrun(
         state.runner.request_stop()
 
 
+_LIMIT_KEYS = {
+    CommandKind.CAPITAL: "capital",
+    CommandKind.RISKPCT: "risk_pct",
+    CommandKind.DAILYLOSS: "daily_loss_pct",
+    CommandKind.MAXLOTS: "max_lots",
+}
+_LIMIT_KINDS = frozenset({CommandKind.LIMITS, *_LIMIT_KEYS})
+
+
+def limit_controls(ctx: AppContext, state: ServeState) -> LimitControls:
+    """The session-wide limit controls (built on first use when the service did not make them)."""
+    if state.limits is None:
+        state.limits = LimitControls(ctx.cfg, state.risk, ctx.data_dir)
+    return state.limits
+
+
+def _handle_limits(
+    command: Command, *, ctx: AppContext, state: ServeState, reply: Callable[[str], None]
+) -> None:
+    """/limits, /capital, /riskpct, /dailyloss, /maxlots: show or change the money limits."""
+    controls = limit_controls(ctx, state)
+    word = command.arg.strip().lower()
+    if command.kind is CommandKind.LIMITS or not word:
+        if word == "reset":
+            controls.reset()
+            reply("Every limit is back to its default.\n" + ot.limits_text(controls))
+        else:
+            reply(ot.limits_text(controls))
+        return
+    key = _LIMIT_KEYS[command.kind]
+    knob = KNOBS[key]
+    old = controls.get(key)
+    try:
+        if word == "reset":
+            controls.reset(key)
+        else:
+            value = parse_number(word)
+            if value is None:
+                reply(
+                    f"{word!r} is not a number. Usage: {knob.command} <value> "
+                    f"({describe_range(knob)}) or {knob.command} reset"
+                )
+                return
+            controls.set(key, value)
+    except ValueError as exc:
+        reply(f"{exc} Nothing changed.")
+        return
+    new = controls.get(key)
+    log_event(
+        log, "limit_changed", f"{key} {old:g} -> {new:g}", key=key, old=old, new=new
+    )
+    lines = [
+        f"{knob.label}: {format_value(knob, old)} -> {format_value(knob, new)}" if old != new
+        else f"{knob.label} stays {format_value(knob, new)}.",
+        f"Risk per trade {controls.get('risk_pct'):g}% = {ot.rs(controls.risk_budget_inr())}, "
+        f"daily loss limit {controls.get('daily_loss_pct'):g}% = "
+        f"{ot.rs(controls.daily_loss_limit_inr())}, max {controls.get('max_lots'):g} lot(s).",
+        "Applies from the next entry and is kept across restarts and deploys."
+        if controls.is_set_by_operator(key)
+        else "Back to the default. Applies from the next entry.",
+    ]
+    if controls.get("risk_pct") > controls.get("daily_loss_pct"):
+        lines.append(
+            "Warning: one losing trade can use the whole daily loss limit (risk per trade is "
+            "above it)."
+        )
+    if state.risk.state.halted:
+        lines.append(
+            f"The kill switch is on ({state.risk.state.halt_reason}); /clearhalt clears it."
+        )
+    reply("\n".join(lines))
+
+
 def _handle_action_command(
     command: Command,
     *,
@@ -401,6 +488,8 @@ def _handle_action_command(
             runner.request_stop()
     elif kind is CommandKind.DRYRUN:
         _handle_dryrun(command, ctx=ctx, state=state, reply=reply)
+    elif kind in _LIMIT_KINDS:
+        _handle_limits(command, ctx=ctx, state=state, reply=reply)
     else:
         return False
     return True
@@ -756,6 +845,9 @@ def serve_loop(
         capital_inr=ctx.cfg.sizing.capital_inr,
     )
     state = ServeState(bus=CommandBus(), risk=risk)
+    state.limits = LimitControls(ctx.cfg, risk, ctx.data_dir)
+    limit_notes = state.limits.apply_configured(ctx.settings)     # the GitHub variables
+    limit_notes += state.limits.load_saved()                      # then what /capital etc. set
     state.bus.stopped_day = read_stopped_day(ctx.data_dir)    # a /stop survives a restart
     holidays = load_holidays() if holidays is None else holidays
     mode = configured_mode_label(ctx.settings)
@@ -773,6 +865,9 @@ def serve_loop(
     ignored = ignored_override_note(ctx.settings, ctx.data_dir)
     if ignored:
         alerts.order_event(f"ORB bot: {ignored}")
+    notes = limit_notes + state.limits.startup_notes()
+    if notes:
+        alerts.order_event("ORB bot limits: " + "; ".join(notes))
     sessions = 0
     exit_code = 0
     try:

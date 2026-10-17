@@ -24,6 +24,7 @@ from orb_intraday_bot.runtime.arming import (
     describe_order_mode,
     resolve_mode,
 )
+from orb_intraday_bot.runtime.limit_overrides import KNOBS, LimitControls, format_value
 from orb_intraday_bot.storage.store import TradeStore
 
 _MAX_ORDERS_SHOWN = 25
@@ -151,6 +152,32 @@ def risk_text(risk: RiskEngine, *, stopped_today: bool) -> str:
         f"{limits.square_off_time}",
     ]
     return "\n".join(lines)
+
+
+# ---- limits ---------------------------------------------------------------------------------
+def limits_text(controls: LimitControls) -> str:
+    """The four adjustable limits, what each means in rupees and where each value comes from."""
+    rows = []
+    for key, knob in KNOBS.items():
+        value = controls.get(key)
+        extra = {
+            "risk_pct": f" = {rs(controls.risk_budget_inr())} per trade",
+            "daily_loss_pct": f" = {rs(controls.daily_loss_limit_inr())} a day",
+        }.get(key, "")
+        source = (
+            "set by Telegram"
+            if controls.is_set_by_operator(key)
+            else "default"
+        )
+        rows.append(
+            f"{knob.label}: {format_value(knob, value)}{extra} "
+            f"({source}, change with {knob.command})"
+        )
+    return (
+        "Limits in force (a change applies from the next entry)\n"
+        + "\n".join(rows)
+        + "\nDefault = the config files and GitHub variables. /limits reset puts every value back."
+    )
 
 
 # ---- funds -------------------------------------------------------------------------------

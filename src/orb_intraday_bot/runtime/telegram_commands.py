@@ -50,6 +50,11 @@ _HELP = (
     "/reconcile - check the bot's books against the broker now\n"
     "/clearhalt - clear the kill switch / entry block so new entries are allowed\n"
     "/restart - restart the service (open positions and broker stops are kept)\n"
+    "/limits - capital, risk per trade, daily loss limit and lot cap now in force\n"
+    "/capital <amount> - capital the bot sizes against (e.g. 750000 or 7.5L)\n"
+    "/riskpct <percent> - risk per trade as % of capital (e.g. 1.5)\n"
+    "/dailyloss <percent> - daily loss limit as % of capital; trading halts past it\n"
+    "/maxlots <n> - most lots in one trade (/limits reset restores the defaults)\n"
     "/dryrun [on|off] - show or switch DRY_RUN: off = REAL orders, on = no orders reach the "
     "broker (restarts the bot; only with no open position)\n"
     "/help - this list"
@@ -79,6 +84,11 @@ class CommandKind(StrEnum):
     CLEARHALT = "clearhalt"
     RESTART = "restart"
     DRYRUN = "dryrun"
+    LIMITS = "limits"
+    CAPITAL = "capital"
+    RISKPCT = "riskpct"
+    DAILYLOSS = "dailyloss"
+    MAXLOTS = "maxlots"
     FLATTEN = "flatten"
     HELP = "help"
     UNKNOWN = "unknown"
@@ -127,6 +137,11 @@ def parse_command(text: str) -> Command:
         "clearhalt": CommandKind.CLEARHALT,
         "restart": CommandKind.RESTART,
         "dryrun": CommandKind.DRYRUN,
+        "limits": CommandKind.LIMITS,
+        "capital": CommandKind.CAPITAL,
+        "riskpct": CommandKind.RISKPCT,
+        "dailyloss": CommandKind.DAILYLOSS,
+        "maxlots": CommandKind.MAXLOTS,
         "stop": CommandKind.STOP_TODAY,
         "pause": CommandKind.STOP_TODAY,
         "start": CommandKind.START_TODAY,

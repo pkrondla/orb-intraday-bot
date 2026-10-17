@@ -22,7 +22,12 @@ More Telegram commands for the operator.
   kill switch or entry block) and `/restart` (graceful service restart).
 - `ExitReason.MANUAL` for `/exit`. Every control command writes an `operator_command` log line.
 - `TradeStore.orders_for_day`, `PaperEngine.protect_all`, and `close_all(position_ids=...)`.
-
+- Money limits from Telegram: `/limits`, `/capital <amount>`, `/riskpct <percent>`,
+  `/dailyloss <percent>` and `/maxlots <n>` change capital, risk per trade, the daily loss limit and
+  the lot cap at once, without a restart or redeploy. Saved in `data/LIMITS_OVERRIDE.json`; `reset`
+  restores the default. New optional GitHub variables `CAPITAL_INR`, `RISK_PER_TRADE_PCT`,
+  `DAILY_LOSS_LIMIT_PCT` and `MAX_LOTS_PER_TRADE` set the defaults. Ranges are enforced.
+  `RiskEngine.recheck_daily_loss` trips the kill switch when a new limit is already breached.
 - `/dryrun [on|off|status]`: show or switch `DRY_RUN` from Telegram, without a code. It saves
   `data/DRY_RUN_OVERRIDE` and restarts the bot. It refuses while a position is open, and refuses
   real orders unless live mode, `LIVE_ARMED` and credentials are all in place. The saved choice

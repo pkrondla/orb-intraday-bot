@@ -37,6 +37,12 @@ Already done if the Groww bot is deployed:
 | `LIVE_ARMED` | `false` until you intentionally switch the live pipeline on (also needed for the dry run) |
 | `DRY_RUN` | `true` (default): the whole live pipeline, but no order is sent to the broker. `false`: real orders |
 | `HEALTHCHECK_URL` | Optional healthchecks.io ping URL |
+| `CAPITAL_INR` | Optional default capital the bot sizes against (for example `750000`). Unset keeps `config/default.yaml` |
+| `RISK_PER_TRADE_PCT` | Optional default risk per trade in percent (`1.5` = 1.5%) |
+| `DAILY_LOSS_LIMIT_PCT` | Optional default daily loss limit in percent of capital (`1` = 1%) |
+| `MAX_LOTS_PER_TRADE` | Optional default lot cap per trade |
+
+The four limit variables are only the defaults. On Telegram `/capital`, `/riskpct`, `/dailyloss` and `/maxlots` change them at once without a redeploy, and the Telegram value wins (also after a redeploy) until `/limits reset`.
 
 ### The dry run (what to set before the first live market day)
 
@@ -102,4 +108,4 @@ Logs: `C:\orb-bot\logs\orb-bot.log`, `orb-bot-error.log`, `orb-watch.log`.
 Create a **new** bot with @BotFather (do not reuse the Groww bot token). Message it once,
 then read your chat id from `https://api.telegram.org/bot<token>/getUpdates`. Commands:
 
-`/help` lists them; the full list is in `docs/RUNBOOK.md`. Status: `/status` `/mode` `/version` `/risk` `/funds` `/log`. Today: `/today` `/pnl` `/positions` `/progress` `/signals` `/orders` `/levels` `/report`. Control: `/stop` `/start` `/exit` `/flatten` `/rearm` `/reconcile` `/clearhalt` `/restart` `/dryrun`.
+`/help` lists them; the full list is in `docs/RUNBOOK.md`. Status: `/status` `/mode` `/version` `/risk` `/funds` `/log`. Today: `/today` `/pnl` `/positions` `/progress` `/signals` `/orders` `/levels` `/report`. Control: `/stop` `/start` `/exit` `/flatten` `/rearm` `/reconcile` `/clearhalt` `/restart` `/dryrun`. Limits: `/limits` `/capital` `/riskpct` `/dailyloss` `/maxlots`.

@@ -19,7 +19,7 @@ Telegram commands (authorized chat only). `/help` lists them.
 |---|---|
 | Status | `/status` (heartbeat, order mode, today's trading state, risk), `/mode`, `/version`, `/risk`, `/funds`, `/log [n]` |
 | Today | `/today`, `/pnl [day\|week\|month]`, `/positions`, `/progress` (stops, targets and broker stop per position), `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`, `/report` |
-| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/dryrun [on\|off]` |
+| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/dryrun [on\|off]`, `/limits`, `/capital <amount>`, `/riskpct <percent>`, `/dailyloss <percent>`, `/maxlots <n>` |
 
 - `/stop`: no new entries for the rest of today (open positions are still managed). It ends by
   itself at midnight and survives a restart. `/start` allows entries again the same day.
@@ -38,6 +38,17 @@ Telegram commands (authorized chat only). `/help` lists them.
   possible (LIVE_MODE not live, LIVE_ARMED false, no credentials). The choice replaces the GitHub
   `DRY_RUN` value and survives a redeploy until you change it with `/dryrun` again; `/mode` and the
   startup message say which one is in force.
+- Money limits: `/limits` shows capital, risk per trade, the daily loss limit and the lot cap, with the rupee
+  amounts and where each value comes from. `/capital 750000` (or `7.5L`), `/riskpct 1.5`, `/dailyloss 2`
+  and `/maxlots 2` change one of them at once, with no restart and no redeploy. The next entry uses
+  the new value; a trade already open is not touched. Each is saved in `data/LIMITS_OVERRIDE.json` and kept across
+  restarts and deploys. `/capital reset` (or `/limits reset` for all four) goes back to the default,
+  which is the GitHub variable (`CAPITAL_INR`, `RISK_PER_TRADE_PCT`, `DAILY_LOSS_LIMIT_PCT`,
+  `MAX_LOTS_PER_TRADE`; percentages as `1.5` for 1.5%) or, if that is unset, `config/*.yaml`.
+  Ranges (to catch a typing slip): capital Rs 10,000 to Rs 10 crore, risk per trade 0.05% to 5%, daily
+  loss limit 0.1% to 10%, lots 1 to 50. If the new daily loss limit is already below today's loss, the kill
+  switch trips and positions are flattened. The lot count is "risk budget / (stop points x lot size)",
+  capped by `/maxlots`, so raise both to trade more than one lot.
 - `/log` shows the last lines of today's log with tokens and secrets masked.
 - Every control command leaves an `operator_command` line in the JSONL log.
 

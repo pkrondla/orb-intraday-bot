@@ -15,7 +15,9 @@ jobs:
       # Secrets: WINRM_PASSWORD, GH_PAT, GROWW_TOTP_TOKEN, GROWW_TOTP_SECRET,
       #          TELEGRAM_BOT_TOKEN
       # Variables: WINRM_HOST, WINRM_USERNAME, TELEGRAM_CHAT_ID, LIVE_MODE (optional),
-      #            LIVE_ARMED, DRY_RUN (default true), HEALTHCHECK_URL (optional)
+      #            LIVE_ARMED, DRY_RUN (default true), HEALTHCHECK_URL (optional),
+      #            CAPITAL_INR, RISK_PER_TRADE_PCT, DAILY_LOSS_LIMIT_PCT, MAX_LOTS_PER_TRADE
+      #            (all optional: unset keeps the value in config/*.yaml)
       #
       # One-time EC2 prerequisites (already true if GrowwBot is deployed):
       # - WinRM HTTPS on 5986, Python 3.12, Git, nssm on PATH
@@ -67,6 +69,10 @@ jobs:
           LIVE_MODE: ${{ vars.LIVE_MODE || 'paper' }}
           LIVE_ARMED: ${{ vars.LIVE_ARMED || 'false' }}
           DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          CAPITAL_INR: ${{ vars.CAPITAL_INR || '' }}
+          RISK_PER_TRADE_PCT: ${{ vars.RISK_PER_TRADE_PCT || '' }}
+          DAILY_LOSS_LIMIT_PCT: ${{ vars.DAILY_LOSS_LIMIT_PCT || '' }}
+          MAX_LOTS_PER_TRADE: ${{ vars.MAX_LOTS_PER_TRADE || '' }}
         run: |
           python - <<'PY'
           import os, sys, base64, winrm
@@ -104,6 +110,10 @@ jobs:
               f"LIVE_MODE={clean('LIVE_MODE')}",
               f"LIVE_ARMED={clean('LIVE_ARMED')}",
               f"DRY_RUN={clean('DRY_RUN')}",
+              f"CAPITAL_INR={clean('CAPITAL_INR')}",
+              f"RISK_PER_TRADE_PCT={clean('RISK_PER_TRADE_PCT')}",
+              f"DAILY_LOSS_LIMIT_PCT={clean('DAILY_LOSS_LIMIT_PCT')}",
+              f"MAX_LOTS_PER_TRADE={clean('MAX_LOTS_PER_TRADE')}",
           ]
           clone_url = (
               f"https://x-access-token:{clean('GH_PAT')}@github.com/"

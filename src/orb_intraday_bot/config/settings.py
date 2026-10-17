@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -51,6 +51,22 @@ class Settings(BaseSettings):
     groww_trading_totp_secret: SecretStr = Field(
         default=SecretStr(""), alias="GROWW_TRADING_TOTP_SECRET"
     )
+
+    # Optional defaults for the money limits (GitHub variables). Empty or unset = the YAML value.
+    # Percentages are written as 1.5 for 1.5%. /capital, /riskpct, /dailyloss and /maxlots on
+    # Telegram override these without a redeploy (see runtime/limit_overrides.py).
+    capital_inr: float | None = Field(default=None, alias="CAPITAL_INR")
+    risk_per_trade_pct: float | None = Field(default=None, alias="RISK_PER_TRADE_PCT")
+    daily_loss_limit_pct: float | None = Field(default=None, alias="DAILY_LOSS_LIMIT_PCT")
+    max_lots_per_trade: int | None = Field(default=None, alias="MAX_LOTS_PER_TRADE")
+
+    @field_validator(
+        "capital_inr", "risk_per_trade_pct", "daily_loss_limit_pct", "max_lots_per_trade",
+        mode="before",
+    )
+    @classmethod
+    def _empty_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     def has_trading_credentials(self) -> bool:
         trading = (

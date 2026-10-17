@@ -73,6 +73,12 @@ class RiskEngine:
         elif self.state.loss_streak >= self.limits.loss_streak_halt:
             self.trip(f"loss streak {self.state.loss_streak}")
 
+    def recheck_daily_loss(self) -> None:
+        """After the capital or the loss limit changed: trip if today's loss is already past it."""
+        limit = self.limits.daily_loss_limit_inr(self.capital_inr)
+        if not self.state.halted and self.state.realized_pnl_inr <= -limit:
+            self.trip(f"daily loss limit hit ({self.state.realized_pnl_inr:.0f} <= -{limit:.0f})")
+
     def record_open(self) -> None:
         self.state.trades_today += 1
         self.state.open_positions += 1

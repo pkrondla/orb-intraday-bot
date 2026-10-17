@@ -120,7 +120,7 @@ def test_the_help_asks_for_no_codes_and_explains_each_command() -> None:
         "/status", "/mode", "/version", "/risk", "/funds", "/log", "/today", "/pnl",
         "/positions", "/progress", "/signals", "/orders", "/levels", "/report", "/stop",
         "/start", "/exit", "/flatten", "/rearm", "/reconcile", "/clearhalt", "/restart",
-        "/help", "/dryrun",
+        "/help", "/dryrun", "/limits", "/capital", "/riskpct", "/dailyloss", "/maxlots",
     ):
         assert " - " in lines[word]                       # every command has its purpose
     assert "code" not in _HELP.lower()
