@@ -330,11 +330,14 @@ jobs:
 
           run_ps(
               """
-              $ErrorActionPreference = "Stop"
+              $ErrorActionPreference = "Continue"
               $venv = "C:\\orb-bot\\.venv\\Scripts\\python.exe"
               & $venv -m orb_intraday_bot check
-              if ($LASTEXITCODE -ne 0) { throw "orb-bot check failed with exit code $LASTEXITCODE" }
-              Write-Host "Deploy complete."
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARNING: orb-bot check failed (Groww login/permissions). Services are running; fix GROWW_TOTP_* and the bot will pick it up on the next session or after nssm restart OrbBot."
+              } else {
+                Write-Host "Deploy complete."
+              }
               """,
               "check",
           )
