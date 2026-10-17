@@ -17,11 +17,16 @@ More Telegram commands for the operator.
   state, the session state and the risk counters.
 - Today: `/pnl [day|week|month]`, `/progress` (stops, targets, broker stop per position),
   `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`.
-- Control: `/exit <symbol>` (one position; a real sale asks for a one-time code), `/rearm`
+- Control: `/exit <symbol>` (one position), `/rearm`
   (re-place a missing broker stop), `/reconcile` (check the books now), `/clearhalt` (clear the
-  kill switch or entry block, with a code) and `/restart` (graceful service restart, with a code).
+  kill switch or entry block) and `/restart` (graceful service restart).
 - `ExitReason.MANUAL` for `/exit`. Every control command writes an `operator_command` log line.
 - `TradeStore.orders_for_day`, `PaperEngine.protect_all`, and `close_all(position_ids=...)`.
+
+### Changed
+- No Telegram command asks for a confirmation code any more. `/flatten`, `/exit`,
+  `/clearhalt` and `/restart` run as soon as the authorized chat sends them. `/help` lists
+  every command with its purpose.
 
 ### Fixed
 - A flatten request made while nothing was open used to mark the flatten as done for the whole

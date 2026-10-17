@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import queue
-import secrets
 import threading
 import time
 import urllib.error
@@ -45,12 +44,12 @@ _HELP = (
     "Control\n"
     "/stop - no new trades for the rest of today (exits still run); trading restarts tomorrow\n"
     "/start - allow new trades again today\n"
-    "/exit <symbol> - close one position (live orders: reply with the code)\n"
-    "/flatten - close everything (reply /flatten <code> to confirm)\n"
+    "/exit <symbol> - close one open position now (a part of the symbol is enough)\n"
+    "/flatten - close every open position now\n"
     "/rearm - put the broker-side stop back on open positions\n"
     "/reconcile - check the bot's books against the broker now\n"
-    "/clearhalt - clear the kill switch / entry block (reply with the code)\n"
-    "/restart - restart the service (reply with the code)\n"
+    "/clearhalt - clear the kill switch / entry block so new entries are allowed\n"
+    "/restart - restart the service (open positions and broker stops are kept)\n"
     "/help - this list"
 )
 
@@ -78,7 +77,6 @@ class CommandKind(StrEnum):
     CLEARHALT = "clearhalt"
     RESTART = "restart"
     FLATTEN = "flatten"
-    FLATTEN_CONFIRM = "flatten_confirm"
     HELP = "help"
     UNKNOWN = "unknown"
 
@@ -129,7 +127,7 @@ def parse_command(text: str) -> Command:
         "pause": CommandKind.STOP_TODAY,
         "start": CommandKind.START_TODAY,
         "resume": CommandKind.START_TODAY,
-        "flatten": CommandKind.FLATTEN if not arg else CommandKind.FLATTEN_CONFIRM,
+        "flatten": CommandKind.FLATTEN,
         "help": CommandKind.HELP,
     }
     kind = mapping.get(verb, CommandKind.UNKNOWN)
@@ -137,13 +135,11 @@ def parse_command(text: str) -> Command:
 
 
 class CommandBus:
-    """Thread-safe queue of commands plus a pending flatten-confirm code."""
+    """Thread-safe queue of commands and the operator's stop-for-today flag."""
 
     def __init__(self) -> None:
         self._queue: queue.Queue[Command] = queue.Queue()
         self._lock = threading.Lock()
-        self._flatten_code: str | None = None
-        self._codes: dict[str, str] = {}
         # The day (IST) on which the operator sent /stop. Trading is on by default every day and
         # a stop expires by itself: it only ever applies to the day it names.
         self.stopped_day: date | None = None
@@ -159,34 +155,6 @@ class CommandBus:
             except queue.Empty:
                 break
         return out
-
-    def begin_flatten(self) -> str:
-        code = secrets.token_hex(2)
-        with self._lock:
-            self._flatten_code = code
-        return code
-
-    def confirm_flatten(self, code: str) -> bool:
-        with self._lock:
-            ok = bool(self._flatten_code) and code.strip().lower() == self._flatten_code
-            if ok:
-                self._flatten_code = None
-            return ok
-
-    def begin_confirm(self, action: str) -> str:
-        """A one-time code for a risky command. A new request for the same action replaces it."""
-        code = secrets.token_hex(2)
-        with self._lock:
-            self._codes[action] = code
-        return code
-
-    def confirm(self, action: str, code: str) -> bool:
-        with self._lock:
-            expected = self._codes.get(action)
-            ok = bool(expected) and code.strip().lower() == expected
-            if ok:
-                del self._codes[action]
-            return ok
 
     def stop_for(self, day: date) -> None:
         with self._lock:
@@ -294,13 +262,6 @@ class TelegramCommandPoller:
             return
         if command.kind is CommandKind.UNKNOWN:
             self._reply("Unknown command. /help for the list.")
-            return
-        if command.kind is CommandKind.FLATTEN:
-            code = self._bus.begin_flatten()
-            self._reply(
-                f"Confirm flatten: reply /flatten {code} within a few minutes. "
-                "This closes every open position this bot owns."
-            )
             return
         self._bus.put(command)
 

@@ -1,4 +1,4 @@
-"""Telegram command poller: parse, authorize, flatten confirm, queue."""
+"""Telegram command poller: parse, authorize, queue."""
 
 from __future__ import annotations
 
@@ -17,22 +17,13 @@ def test_parse_commands() -> None:
     assert parse_command("/status").kind is CommandKind.STATUS
     assert parse_command("/help@MyBot").kind is CommandKind.HELP
     assert parse_command("/flatten").kind is CommandKind.FLATTEN
-    assert parse_command("/flatten ab12").kind is CommandKind.FLATTEN_CONFIRM
-    assert parse_command("/flatten ab12").arg == "ab12"
+    assert parse_command("/flatten ab12").kind is CommandKind.FLATTEN   # no code is needed
     assert parse_command("/stop").kind is CommandKind.STOP_TODAY
     assert parse_command("/pause").kind is CommandKind.STOP_TODAY
     assert parse_command("/start").kind is CommandKind.START_TODAY
     assert parse_command("/resume").kind is CommandKind.START_TODAY
     assert parse_command("/arm dead").kind is CommandKind.UNKNOWN      # no daily arm any more
     assert parse_command("hello").kind is CommandKind.UNKNOWN
-
-
-def test_bus_flatten_confirm_is_case_insensitive() -> None:
-    bus = CommandBus()
-    code = bus.begin_flatten()
-    assert not bus.confirm_flatten("zzzz")
-    assert bus.confirm_flatten(code.upper())
-    assert not bus.confirm_flatten(code)   # consumed
 
 
 def test_bus_stop_is_per_day() -> None:
@@ -98,6 +89,6 @@ def test_poller_queues_authorized_commands_and_handles_help() -> None:
     poller._poll_once()  # noqa: SLF001
     poller._poll_once()  # noqa: SLF001
     assert any("ORB bot commands" in r for r in replies)
-    assert any("Confirm flatten" in r for r in replies)
+    assert not any("code" in r.lower() for r in replies if "ORB bot commands" not in r)
     cmds = bus.drain()
-    assert [c.kind for c in cmds] == [CommandKind.STOP_TODAY]
+    assert [c.kind for c in cmds] == [CommandKind.STOP_TODAY, CommandKind.FLATTEN]

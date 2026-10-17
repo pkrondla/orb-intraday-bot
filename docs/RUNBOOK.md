@@ -25,8 +25,7 @@ Telegram commands (authorized chat only). `/help` lists them.
   itself at midnight and survives a restart. `/start` allows entries again the same day.
   `/pause` and `/resume` are the same commands.
 - `/exit <symbol>` closes one open position (the full symbol, or a unique part such as `24500CE`).
-  When the sale is a real order the bot first replies with a one-time code to send back.
-- `/flatten`, `/clearhalt` and `/restart` also ask for a one-time code first.
+  It runs at once. No command asks for a confirmation code, so only the authorized chat can send them.
 - `/rearm` puts the broker-side stop back on open positions that lost it. `/reconcile` checks the
   bot's books against the broker (or the dry-run ledger) now. `/exit`, `/rearm` and `/reconcile`
   work while a session is running; between sessions they say so.
@@ -49,7 +48,7 @@ stale signals as MISSED (never entered late).
 
 ## Flatten
 
-1. Telegram: `/flatten` then `/flatten <code>`, or
+1. Telegram: `/flatten` (runs at once), or
 2. CLI on the host: `python -m orb_intraday_bot flatten`, or
 3. Create `C:\orb-bot\data\FLATTEN`
 

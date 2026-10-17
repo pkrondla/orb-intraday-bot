@@ -111,7 +111,7 @@ _CONTROL_KINDS = frozenset(
     {
         CommandKind.STOP_TODAY,
         CommandKind.START_TODAY,
-        CommandKind.FLATTEN_CONFIRM,
+        CommandKind.FLATTEN,
         CommandKind.EXIT,
         CommandKind.REARM,
         CommandKind.RECONCILE,
@@ -244,7 +244,7 @@ def _handle_report_command(
 def _handle_exit(
     command: Command, *, state: ServeState, reply: Callable[[str], None]
 ) -> None:
-    """/exit <symbol> [code]: close one position. A real (live) sell needs the code."""
+    """/exit <symbol>: close one position now."""
     runner = state.runner
     if runner is None:
         reply(_NO_SESSION)
@@ -264,13 +264,6 @@ def _handle_exit(
         reply(f"{parts[0]} matches more than one position: {', '.join(symbols)}. Be more exact.")
         return
     symbol = symbols[0]
-    action = f"exit:{symbol}"
-    if any(p.order_mode == "live" for p in matches) and not state.bus.confirm(
-        action, parts[1] if len(parts) > 1 else ""
-    ):
-        code = state.bus.begin_confirm(action)
-        reply(f"This sends a real sell order for {symbol}. Confirm: /exit {symbol} {code}")
-        return
     left = runner.exit_positions({p.position_id for p in matches})
     if left:
         reply(
@@ -334,30 +327,15 @@ def _handle_action_command(
                 )
                 if part
             )
-            if not state.bus.confirm("clearhalt", command.arg):
-                code = state.bus.begin_confirm("clearhalt")
-                reply(
-                    f"Active: {what}. Check the broker first. To clear it and allow new "
-                    f"entries: /clearhalt {code}"
-                )
-            else:
-                state.risk.clear_halt()
-                alerts.order_event(f"ORB bot: {what} cleared by the operator.")
-                reply("Cleared. New entries are allowed again (the limits still apply).")
+            state.risk.clear_halt()
+            alerts.order_event(f"ORB bot: {what} cleared by the operator.")
+            reply(f"Cleared {what}. New entries are allowed again (the limits still apply).")
     elif kind is CommandKind.RESTART:
-        if not state.bus.confirm("restart", command.arg):
-            code = state.bus.begin_confirm("restart")
-            reply(
-                "This restarts the service (the supervisor starts it again within seconds). "
-                "Open positions and their broker stops are kept and restored. "
-                f"Confirm: /restart {code}"
-            )
-        else:
-            alerts.order_event("ORB bot: restart requested by the operator.")
-            reply("Restarting.")
-            state.stop_requested = True
-            if runner is not None:
-                runner.request_stop()
+        alerts.order_event("ORB bot: restart requested by the operator.")
+        reply("Restarting. Open positions and their broker stops are kept and restored.")
+        state.stop_requested = True
+        if runner is not None:
+            runner.request_stop()
     else:
         return False
     return True
@@ -376,7 +354,7 @@ def handle_command(
     bus = state.bus
     day = now.astimezone(IST).date()
     if command.kind in _CONTROL_KINDS:
-        # An audit line for every command that changes something (never the confirmation code).
+        # An audit line for every command that changes something.
         log_event(log, "operator_command", command=command.kind.value)
     if _handle_report_command(command, ctx=ctx, state=state, reply=reply, day=day):
         return
@@ -457,14 +435,11 @@ def handle_command(
             else f"Trading was not stopped for {day.isoformat()}; new entries are already allowed."
         )
         return
-    if command.kind is CommandKind.FLATTEN_CONFIRM:
-        if bus.confirm_flatten(command.arg):
-            stop_file_path(ctx.data_dir).parent.mkdir(parents=True, exist_ok=True)
-            (ctx.data_dir / "FLATTEN").write_text("confirm\n", encoding="utf-8")
-            alerts.flatten_requested()
-            reply("Flatten requested. The session will close open positions.")
-        else:
-            reply("Flatten code mismatch. Send /flatten again for a new code.")
+    if command.kind is CommandKind.FLATTEN:
+        stop_file_path(ctx.data_dir).parent.mkdir(parents=True, exist_ok=True)
+        (ctx.data_dir / "FLATTEN").write_text("flatten\n", encoding="utf-8")
+        alerts.flatten_requested()
+        reply("Flatten requested. The session will close open positions.")
         return
     reply(f"Unhandled command: {command.kind.value}")
 

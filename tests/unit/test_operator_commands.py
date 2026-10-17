@@ -82,7 +82,7 @@ def _database(ctx: AppContext) -> TradeStore:
     return store
 
 
-# ---- parsing and codes -------------------------------------------------------------------
+# ---- parsing -------------------------------------------------------------------------
 @pytest.mark.parametrize(
     ("text", "kind", "arg"),
     [
@@ -112,28 +112,18 @@ def test_new_commands_are_parsed(text: str, kind: CommandKind, arg: str) -> None
     assert (command.kind, command.arg) == (kind, arg)
 
 
-def test_confirmation_codes_are_per_action_and_single_use() -> None:
-    bus = CommandBus()
-    code = bus.begin_confirm("restart")
-    assert not bus.confirm("clearhalt", code)             # another action's code is no good
-    assert not bus.confirm("restart", "zzzz")
-    assert bus.confirm("restart", code.upper())           # not case sensitive
-    assert not bus.confirm("restart", code)               # used up
-    first = bus.begin_confirm("exit:X")
-    second = bus.begin_confirm("exit:X")                  # a new request replaces the old code
-    assert first == second or not bus.confirm("exit:X", first)
-    assert not bus.confirm("never-asked", "")
-
-
-def test_the_help_lists_every_command() -> None:
+def test_the_help_asks_for_no_codes_and_explains_each_command() -> None:
     from orb_intraday_bot.runtime.telegram_commands import _HELP
 
+    lines = {ln.split()[0]: ln for ln in _HELP.splitlines() if ln.startswith("/")}
     for word in (
         "/status", "/mode", "/version", "/risk", "/funds", "/log", "/today", "/pnl",
         "/positions", "/progress", "/signals", "/orders", "/levels", "/report", "/stop",
         "/start", "/exit", "/flatten", "/rearm", "/reconcile", "/clearhalt", "/restart",
+        "/help",
     ):
-        assert word in _HELP
+        assert " - " in lines[word]                       # every command has its purpose
+    assert "code" not in _HELP.lower()
     assert len(_HELP) < 4000                              # one Telegram message
 
 
@@ -414,19 +404,12 @@ def test_exit_that_cannot_sell_says_the_position_is_still_open(tmp_path: Path) -
     assert "did not complete" in reply and position.is_open
 
 
-def test_exit_needs_the_code_when_the_sale_is_real(tmp_path: Path) -> None:
+def test_exit_of_a_real_position_needs_no_code(tmp_path: Path) -> None:
     s, runner, _, position = _primed(tmp_path, at_time=at(10, 0))
     position.order_mode = "live"
     ctx, state = _ctx(tmp_path), _state(runner, s.risk)
-    asked = _send(CommandKind.EXIT, position.trading_symbol, ctx=ctx, state=state)[0]
-    assert "real sell order" in asked and position.is_open
-    code = asked.rsplit(" ", 1)[1]
-    wrong = _send(CommandKind.EXIT, f"{position.trading_symbol} zzzz", ctx=ctx, state=state)[0]
-    assert "real sell order" in wrong and position.is_open
-    code = wrong.rsplit(" ", 1)[1]
-    done = _send(CommandKind.EXIT, f"{position.trading_symbol} {code}", ctx=ctx, state=state)[0]
+    done = _send(CommandKind.EXIT, position.trading_symbol, ctx=ctx, state=state)[0]
     assert "closed" in done and not position.is_open
-
 
 def test_exit_with_an_ambiguous_symbol_asks_for_more(tmp_path: Path) -> None:
     s, runner, trading, position = _primed(tmp_path, at_time=at(10, 0))
@@ -466,34 +449,25 @@ def test_reconcile_reports_a_match_and_a_mismatch(tmp_path: Path) -> None:
     assert s.risk.state.entries_blocked
 
 
-def test_clearhalt_needs_the_code_and_clears_both_flags(tmp_path: Path) -> None:
+def test_clearhalt_clears_both_flags(tmp_path: Path) -> None:
     ctx, state = _ctx(tmp_path), _state()
     assert "Nothing to clear" in _send(CommandKind.CLEARHALT, "", ctx=ctx, state=state)[0]
     state.risk.trip("loss streak 2")
     state.risk.block_entries("reconciliation mismatch")
-    asked = _send(CommandKind.CLEARHALT, "", ctx=ctx, state=state)[0]
-    assert "loss streak 2" in asked and "reconciliation mismatch" in asked
-    assert state.risk.state.halted
-    code = asked.rsplit(" ", 1)[1]
-    assert state.risk.state.halted
     notes = Recorder()
-    done = _send(CommandKind.CLEARHALT, code, ctx=ctx, state=state, notes=notes)[0]
-    assert done.startswith("Cleared")
+    done = _send(CommandKind.CLEARHALT, "", ctx=ctx, state=state, notes=notes)[0]
+    assert done.startswith("Cleared") and "loss streak 2" in done
+    assert "reconciliation mismatch" in done
     assert not state.risk.state.halted and not state.risk.state.entries_blocked
     assert "cleared by the operator" in notes.joined()
 
-
-def test_restart_needs_the_code_then_stops_the_session_and_the_service(
-    tmp_path: Path,
-) -> None:
+def test_restart_stops_the_session_and_the_service(tmp_path: Path) -> None:
     s = Session(tmp_path, at(9, 10))
     runner = s.runner()
     ctx, state = _ctx(tmp_path), _state(runner, s.risk)
-    asked = _send(CommandKind.RESTART, "", ctx=ctx, state=state)[0]
-    assert "Confirm: /restart" in asked and not state.stop_requested
-    code = asked.rsplit(" ", 1)[1]
     notes = Recorder()
-    assert _send(CommandKind.RESTART, code, ctx=ctx, state=state, notes=notes) == ["Restarting."]
+    reply = _send(CommandKind.RESTART, "", ctx=ctx, state=state, notes=notes)[0]
+    assert reply.startswith("Restarting")
     assert state.stop_requested and "restart requested" in notes.joined()
     outcome = runner.run()                                     # the session ends at once
     assert outcome == RunOutcome(130, "stopped on request")
@@ -502,8 +476,7 @@ def test_restart_needs_the_code_then_stops_the_session_and_the_service(
 
 def test_restart_between_sessions_just_stops_the_service(tmp_path: Path) -> None:
     ctx, state = _ctx(tmp_path), _state()
-    code = _send(CommandKind.RESTART, "", ctx=ctx, state=state)[0].rsplit(" ", 1)[1]
-    _send(CommandKind.RESTART, code, ctx=ctx, state=state)
+    _send(CommandKind.RESTART, "", ctx=ctx, state=state)
     assert state.stop_requested and serve.should_stop(tmp_path, state)
 
 

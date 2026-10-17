@@ -80,13 +80,12 @@ def test_handle_status_stop_and_start(tmp_path: Path) -> None:
     assert "not stopped" in replies[-1]
 
 
-def test_flatten_confirm_writes_marker(tmp_path: Path) -> None:
+def test_flatten_writes_marker_without_a_code(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     state = ServeState(bus=CommandBus(), risk=RiskEngine())
-    code = state.bus.begin_flatten()
     replies: list[str] = []
     handle_command(
-        Command(CommandKind.FLATTEN_CONFIRM, arg=code),
+        Command(CommandKind.FLATTEN),
         ctx=ctx, alerts=Alerts(Recorder()), state=state,
         reply=replies.append, now=datetime.now(IST),
     )
