@@ -55,8 +55,8 @@ jobs:
 
       - name: Deploy over WinRM (HTTPS 5986)
         env:
-          WINRM_HOST: ${{ vars.WINRM_HOST }}
-          WINRM_USERNAME: ${{ vars.WINRM_USERNAME }}
+          WINRM_HOST: ${{ vars.WINRM_HOST || secrets.WINRM_HOST }}
+          WINRM_USERNAME: ${{ vars.WINRM_USERNAME || secrets.WINRM_USERNAME }}
           WINRM_PASSWORD: ${{ secrets.WINRM_PASSWORD }}
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -64,7 +64,7 @@ jobs:
           GROWW_TOTP_TOKEN: ${{ secrets.GROWW_TOTP_TOKEN }}
           GROWW_TOTP_SECRET: ${{ secrets.GROWW_TOTP_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
           HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL || '' }}
           LIVE_MODE: ${{ vars.LIVE_MODE || 'paper' }}
           LIVE_ARMED: ${{ vars.LIVE_ARMED || 'false' }}
@@ -76,6 +76,17 @@ jobs:
         run: |
           python - <<'PY'
           import os, sys, base64, winrm
+
+          required = [
+              "WINRM_HOST", "WINRM_USERNAME", "WINRM_PASSWORD", "GH_PAT",
+              "GROWW_TOTP_TOKEN", "GROWW_TOTP_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+          ]
+          missing = [n for n in required if not os.environ.get(n, "").strip()]
+          if missing:
+              raise SystemExit(
+                  "Missing GitHub settings (Settings > Secrets and variables > Actions, as a "
+                  "repository variable or secret): " + ", ".join(missing)
+              )
 
           host = os.environ["WINRM_HOST"]
           username = os.environ["WINRM_USERNAME"]
