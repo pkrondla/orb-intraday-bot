@@ -62,6 +62,9 @@ if (Test-Path $currentFile) {
 # session. The clone/pull still works; this only stops the fatal-looking warning.
 $env:GCM_CREDENTIAL_STORE = "none"
 $env:GCM_INTERACTIVE = "never"
+$env:GIT_TERMINAL_PROMPT = "0"
+$env:GIT_PAGER = "cat"
+$env:PAGER = "cat"
 
 if (-not $SkipGit) {
     if (Test-Path (Join-Path $RepoPath ".git")) {

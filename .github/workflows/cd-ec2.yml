@@ -97,6 +97,8 @@ jobs:
           session = winrm.Session(
               endpoint, auth=(username, password), transport="basic",
               server_cert_validation="ignore",
+              operation_timeout_sec=590,
+              read_timeout_sec=600,
           )
 
           def clean(name: str) -> str:
@@ -139,7 +141,11 @@ jobs:
               $ErrorActionPreference = "Stop"
               $env:GCM_CREDENTIAL_STORE = "none"
               $env:GCM_INTERACTIVE = "never"
+              $env:GIT_TERMINAL_PROMPT = "0"
+              $env:GIT_PAGER = "cat"
+              $env:PAGER = "cat"
               function Invoke-Native([scriptblock]$Command, [string]$Label) {{
+                Write-Host $Label
                 & $Command
                 if ($LASTEXITCODE -ne 0) {{ throw "$Label failed with exit code $LASTEXITCODE" }}
               }}
@@ -150,9 +156,8 @@ jobs:
                 throw "nssm was not found on PATH."
               }}
               if (Test-Path (Join-Path $repo ".git")) {{
-                Invoke-Native {{ git -C $repo fetch origin }} "git fetch"
-                Invoke-Native {{ git -C $repo checkout --force "{git_ref}" }} "git checkout"
-                Invoke-Native {{ git -C $repo reset --hard "origin/{git_ref}" }} "git reset"
+                Invoke-Native {{ git -c core.pager=cat -C $repo fetch origin }} "git fetch"
+                Invoke-Native {{ git -c core.pager=cat -C $repo reset --hard "origin/{git_ref}" }} "git reset"
               }} else {{
                 if (Test-Path $repo) {{
                   if (Test-Path $dataDir) {{
@@ -161,14 +166,13 @@ jobs:
                   }}
                   Remove-Item -Recurse -Force $repo
                 }}
-                Invoke-Native {{ git clone "{clone_url}" $repo }} "git clone"
-                Invoke-Native {{ git -C $repo checkout --force "{git_ref}" }} "git checkout ref"
+                Invoke-Native {{ git -c core.pager=cat clone "{clone_url}" $repo }} "git clone"
                 if (Test-Path $backupDataDir) {{
                   New-Item -ItemType Directory -Path $repo -Force | Out-Null
                   Move-Item -Path $backupDataDir -Destination $dataDir
                 }}
               }}
-              Write-Host "Host repo HEAD is $((git -C $repo rev-parse HEAD).Trim())"
+              Write-Host "Host repo HEAD is $((git -c core.pager=cat -C $repo rev-parse HEAD).Trim())"
               New-Item -ItemType Directory -Path (Join-Path $repo "logs") -Force | Out-Null
               New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
               """,
