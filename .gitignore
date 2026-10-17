@@ -82,6 +82,8 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
-data/
+# Runtime data at the project root only. A bare "data/" also hid the source package
+# src/orb_intraday_bot/data/, so it was never committed.
+/data/
 .env.*
 !.env.example
