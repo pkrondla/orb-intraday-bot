@@ -11,10 +11,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-Native([scriptblock]$Command, [string]$Name) {
+function Invoke-Native([scriptblock]$Command, [string]$Label) {
+    # The label must not be called $Name: scriptblocks look up $Name here and would
+    # pass the label to nssm instead of the service name (the first-install failure).
     & $Command
     if ($LASTEXITCODE -ne 0) {
-        throw "$Name failed with exit code $LASTEXITCODE"
+        throw "$Label failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -53,6 +55,11 @@ $currentFile = Join-Path $deployDir "current_ref.txt"
 if (Test-Path $currentFile) {
     Copy-Item $currentFile $prevFile -Force
 }
+
+# Git Credential Manager on this host has no Windows credential store in a WinRM
+# session. The clone/pull still works; this only stops the fatal-looking warning.
+$env:GCM_CREDENTIAL_STORE = "none"
+$env:GCM_INTERACTIVE = "never"
 
 if (Test-Path (Join-Path $RepoPath ".git")) {
     Invoke-Native { git -C $RepoPath fetch --all --tags } "git fetch"
@@ -101,34 +108,39 @@ $watchLauncher = Join-Path $RepoPath "start-orb-watch.ps1"
 ) | Set-Content -Path $watchLauncher -Encoding utf8
 
 function Install-NssmService {
-    param([string]$Name, [string]$Launcher, [string]$Stdout, [string]$Stderr)
-    if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
-        Invoke-Native { nssm stop $Name confirm } "nssm stop $Name" | Out-Null
+    param([string]$ServiceName, [string]$Launcher, [string]$Stdout, [string]$Stderr)
+    $powershell = (Get-Command powershell.exe).Source
+    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+        Invoke-Native { nssm stop $ServiceName confirm } "nssm stop $ServiceName" | Out-Null
         Start-Sleep -Seconds 2
-        Invoke-Native { nssm remove $Name confirm } "nssm remove $Name" | Out-Null
+        Invoke-Native { nssm remove $ServiceName confirm } "nssm remove $ServiceName" | Out-Null
+        Start-Sleep -Seconds 1
     }
-    Invoke-Native { nssm install $Name "powershell.exe" } "nssm install $Name" | Out-Null
+    Invoke-Native { nssm install $ServiceName $powershell } "nssm install $ServiceName" | Out-Null
+    if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
+        throw "nssm install $ServiceName returned success but the service was not created."
+    }
     Invoke-Native {
-        nssm set $Name AppParameters "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Launcher`""
-    } "nssm set AppParameters $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppDirectory $RepoPath } "nssm set AppDirectory $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppStdout $Stdout } "nssm set AppStdout $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppStderr $Stderr } "nssm set AppStderr $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppRotateFiles 1 } "nssm set AppRotateFiles $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppRotateOnline 1 } "nssm set AppRotateOnline $Name" | Out-Null
-    Invoke-Native { nssm set $Name Start SERVICE_AUTO_START } "nssm set Start $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppExit Default Restart } "nssm set AppExit $Name" | Out-Null
-    Invoke-Native { nssm set $Name AppThrottle 15000 } "nssm set AppThrottle $Name" | Out-Null
-    Invoke-Native { nssm start $Name } "nssm start $Name" | Out-Null
+        nssm set $ServiceName AppParameters "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Launcher`""
+    } "nssm set AppParameters $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppDirectory $RepoPath } "nssm set AppDirectory $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppStdout $Stdout } "nssm set AppStdout $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppStderr $Stderr } "nssm set AppStderr $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppRotateFiles 1 } "nssm set AppRotateFiles $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppRotateOnline 1 } "nssm set AppRotateOnline $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName Start SERVICE_AUTO_START } "nssm set Start $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppExit Default Restart } "nssm set AppExit $ServiceName" | Out-Null
+    Invoke-Native { nssm set $ServiceName AppThrottle 15000 } "nssm set AppThrottle $ServiceName" | Out-Null
+    Invoke-Native { nssm start $ServiceName } "nssm start $ServiceName" | Out-Null
     Start-Sleep -Seconds 3
-    $status = (nssm status $Name).Trim()
-    if ($status -ne "SERVICE_RUNNING") { throw "Service $Name failed to start: $status" }
-    Write-Host "$Name is running."
+    $status = (nssm status $ServiceName).Trim()
+    if ($status -ne "SERVICE_RUNNING") { throw "Service $ServiceName failed to start: $status" }
+    Write-Host "$ServiceName is running."
 }
 
-Install-NssmService -Name $ServiceName -Launcher $serveLauncher `
+Install-NssmService -ServiceName $ServiceName -Launcher $serveLauncher `
     -Stdout (Join-Path $logsDir "orb-bot.log") -Stderr (Join-Path $logsDir "orb-bot-error.log")
-Install-NssmService -Name $WatchServiceName -Launcher $watchLauncher `
+Install-NssmService -ServiceName $WatchServiceName -Launcher $watchLauncher `
     -Stdout (Join-Path $logsDir "orb-watch.log") -Stderr (Join-Path $logsDir "orb-watch-error.log")
 
 # Smoke check (read-only)

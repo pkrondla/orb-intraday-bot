@@ -33,6 +33,10 @@ More Telegram commands for the operator.
   real orders unless live mode, `LIVE_ARMED` and credentials are all in place. The saved choice
   replaces the `DRY_RUN` environment value until changed again.
 
+- The first EC2 deploy failed to create the `OrbBot` NSSM service: `Invoke-Native`'s
+  `$Name` parameter shadowed the service name inside the scriptblocks, so `nssm install`
+  never created `OrbBot`. The helper's label is now `$Label`.
+
 ### Changed
 - No Telegram command asks for a confirmation code any more. `/flatten`, `/exit`,
   `/clearhalt` and `/restart` run as soon as the authorized chat sends them. `/help` lists
