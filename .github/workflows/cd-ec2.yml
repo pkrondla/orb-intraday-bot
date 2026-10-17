@@ -78,7 +78,6 @@ jobs:
         run: |
           python - <<'PY'
           import os, sys, base64, winrm
-          from pathlib import Path
 
           required = [
               "WINRM_HOST", "WINRM_USERNAME", "WINRM_PASSWORD", "GH_PAT",
@@ -201,22 +200,17 @@ jobs:
                   f"write env line {i}",
               )
 
-          install_script = Path("scripts/deploy/Install-OrbBot.ps1").read_bytes()
-          if b'throw "$Name failed' in install_script:
-              raise SystemExit("Refusing to send the broken install script (Invoke-Native $Name).")
-          if b"[string]$Label)" not in install_script:
-              raise SystemExit("Install script is missing the NSSM Label fix; aborting.")
-          script_b64 = base64.b64encode(install_script).decode("ascii")
           run_ps(
-              f"""
+              """
               $ErrorActionPreference = "Stop"
               $path = "C:\\orb-bot\\scripts\\deploy\\Install-OrbBot.ps1"
-              New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
-              $bytes = [System.Convert]::FromBase64String("{script_b64}")
-              [System.IO.File]::WriteAllBytes($path, $bytes)
-              Write-Host "Wrote install script $($bytes.Length) bytes from the workflow checkout"
+              $text = Get-Content -LiteralPath $path -Raw
+              if ($text -notmatch '\[string\]\$Label\)') {
+                throw 'Host install script is still the broken Invoke-Native $Name version after git reset.'
+              }
+              Write-Host "Host install script has the Label fix"
               """,
-              "write install script",
+              "verify install script",
           )
 
           run_ps(
