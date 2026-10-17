@@ -262,7 +262,10 @@ class TelegramCommandPoller:
             log.warning("Telegram deleteWebhook failed: %s", type(exc).__name__)
             return
         if not payload.get("ok"):
-            log.warning("Telegram deleteWebhook rejected: %s", payload.get("description", "unknown"))
+            log.warning(
+                "Telegram deleteWebhook rejected: %s",
+                payload.get("description", "unknown"),
+            )
 
     def _fetch(self, url: str) -> bytes | None:
         try:
