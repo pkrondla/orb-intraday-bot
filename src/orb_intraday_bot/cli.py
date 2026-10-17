@@ -283,8 +283,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     else:
         print("  OK    telegram: configured")
         if args.send_test_alert:
-            notifier.send("ORB bot: test alert. Telegram is working.")
-            print("        test alert sent")
+            if notifier.send("ORB bot: test alert. Telegram is working."):
+                print("        test alert sent")
+            else:
+                print("  FAIL  telegram: send failed (see URLError/HTTP above)")
+                failures += 1
     print("All checks passed." if failures == 0 else f"{failures} check(s) failed.")
     return 0 if failures == 0 else 1
 

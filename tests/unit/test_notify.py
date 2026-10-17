@@ -112,6 +112,18 @@ def test_build_notifier_null_without_credentials() -> None:
     assert isinstance(build_notifier(Settings(), async_outbox=False), NullNotifier)
 
 
+def test_format_telegram_http_error_hides_token() -> None:
+    from urllib.error import URLError
+
+    from orb_intraday_bot.runtime.notify import format_telegram_http_error, ssl_context
+
+    err = URLError("CERTIFICATE_VERIFY_FAILED token=secret-token")
+    text = format_telegram_http_error(err, "secret-token")
+    assert "URLError" in text and "CERTIFICATE_VERIFY_FAILED" in text
+    assert "secret-token" not in text
+    assert ssl_context().cert_store_stats()["x509_ca"] > 0
+
+
 def test_build_notifier_telegram_when_configured() -> None:
     from pydantic import SecretStr
 

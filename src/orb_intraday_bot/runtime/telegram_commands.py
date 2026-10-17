@@ -20,6 +20,8 @@ from datetime import date
 from enum import StrEnum
 from typing import Any
 
+from orb_intraday_bot.runtime.notify import format_telegram_http_error, ssl_context
+
 log = logging.getLogger("orb.telegram_cmd")
 _TIMEOUT_SEC = 35          # long-poll timeout + a little slack
 _POLL_TIMEOUT = 25
@@ -206,7 +208,9 @@ class CommandBus:
 
 def _urllib_get(url: str) -> bytes:  # pragma: no cover - network
     request = urllib.request.Request(url, method="GET")
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_SEC) as response:   # noqa: S310
+    with urllib.request.urlopen(  # noqa: S310
+        request, timeout=_TIMEOUT_SEC, context=ssl_context()
+    ) as response:
         return bytes(response.read())
 
 
@@ -271,16 +275,17 @@ class TelegramCommandPoller:
         try:
             return self._get(url)
         except urllib.error.HTTPError as exc:
-            try:
-                body = exc.read().decode("utf-8", errors="replace")
-            except Exception:
-                body = ""
-            detail = self._redact((body or exc.reason or "")[:240])
-            log.warning("Telegram poll failed: HTTP %s %s", exc.code, detail)
+            log.warning(
+                "Telegram poll failed: %s",
+                format_telegram_http_error(exc, self._token),
+            )
             self._sleep(5.0 if exc.code == 409 else 2.0)
             return None
-        except urllib.error.URLError:
-            log.warning("Telegram poll failed: URLError")
+        except urllib.error.URLError as exc:
+            log.warning(
+                "Telegram poll failed: %s",
+                format_telegram_http_error(exc, self._token),
+            )
             self._sleep(2.0)
             return None
 

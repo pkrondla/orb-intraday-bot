@@ -49,7 +49,7 @@ from orb_intraday_bot.runtime.limit_overrides import (
 from orb_intraday_bot.runtime.live import LiveRunner, RunOutcome
 from orb_intraday_bot.runtime.logs import log_event, new_run_id
 from orb_intraday_bot.runtime.notify import Notifier, build_notifier
-from orb_intraday_bot.runtime.output import make_output
+from orb_intraday_bot.runtime.output import configure_logging, make_output
 from orb_intraday_bot.runtime.telegram_commands import (
     Command,
     CommandBus,
@@ -837,6 +837,10 @@ def serve_loop(
     """The always-on loop. Returns 0 on graceful stop."""
     clock = clock or SystemClock()
     sleep = sleep or time.sleep
+    log_dir = ctx.data_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    configure_logging(log_dir, clock.now().astimezone(IST).date(), new_run_id(clock.now()))
+    log.info("serve starting")
     notifier = notifier or build_notifier(ctx.settings, async_outbox=True)
     session = session or run_one_session
     alerts = Alerts(notifier)

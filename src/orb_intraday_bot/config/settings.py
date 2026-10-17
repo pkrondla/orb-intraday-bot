@@ -82,10 +82,10 @@ class Settings(BaseSettings):
     @field_validator("telegram_bot_token", mode="before")
     @classmethod
     def _strip_bot_token(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip()
         if isinstance(value, SecretStr):
-            return value.get_secret_value().strip()
+            value = value.get_secret_value()
+        if isinstance(value, str):
+            return value.strip().strip('"').strip("'").replace("\\n", "").replace("\\r", "")
         return value
 
     def has_trading_credentials(self) -> bool:

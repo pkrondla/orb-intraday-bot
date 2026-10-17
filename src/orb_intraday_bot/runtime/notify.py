@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import ssl
 import threading
 import time
 import urllib.error
@@ -16,6 +17,8 @@ import urllib.request
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from typing import Protocol
+
+import certifi
 
 from orb_intraday_bot.config.settings import Settings
 
@@ -28,24 +31,46 @@ _BACKOFF_SEC = (0.5, 1.5, 3.0)
 
 
 class Notifier(Protocol):
-    def send(self, text: str) -> None: ...
+    def send(self, text: str) -> bool: ...
 
 
 class NullNotifier:
-    def send(self, text: str) -> None:
-        return None
+    def send(self, text: str) -> bool:
+        return True
 
 
 PostFunc = Callable[[str, bytes], bytes]
 SleepFunc = Callable[[float], None]
 
 
+def ssl_context() -> ssl.SSLContext:
+    """Windows urllib often fails Telegram TLS without certifi's CA bundle."""
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _urllib_post(url: str, body: bytes) -> bytes:  # pragma: no cover - network
     request = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_SEC) as response:   # noqa: S310
+    with urllib.request.urlopen(  # noqa: S310
+        request, timeout=_TIMEOUT_SEC, context=ssl_context()
+    ) as response:
         return bytes(response.read())
+
+
+def format_telegram_http_error(exc: BaseException, token: str = "") -> str:
+    """Describe a send/poll failure without the bot token."""
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            body = exc.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            body = ""
+        text = f"HTTP {exc.code} {body}".rstrip()
+    elif isinstance(exc, urllib.error.URLError):
+        text = f"URLError {exc.reason}"
+    else:
+        text = f"{type(exc).__name__}: {exc}"
+    return text.replace(token, "<token>") if token else text
 
 
 def split_message(text: str, max_len: int = _MAX_LEN) -> list[str]:
@@ -82,7 +107,8 @@ class TelegramNotifier:
         *,
         async_outbox: bool = True,
     ) -> None:
-        self._url = f"https://api.telegram.org/bot{token}/sendMessage"
+        self._token = token.strip()
+        self._url = f"https://api.telegram.org/bot{self._token}/sendMessage"
         self._chat_id = chat_id
         self._post = post
         self._sleep = sleep
@@ -94,15 +120,18 @@ class TelegramNotifier:
             )
             self._thread.start()
 
-    def send(self, text: str) -> None:
+    def send(self, text: str) -> bool:
+        ok = True
         for part in split_message(text):
             if self._thread is None:
-                self._deliver(part)
+                ok = self._deliver(part) and ok
                 continue
             try:
                 self._queue.put_nowait(part)
             except queue.Full:
                 log.warning("Telegram outbox full; dropping a message")
+                ok = False
+        return ok
 
     def close(self, timeout: float = 5.0) -> None:
         """Flush the outbox (best effort) and stop the worker. Safe to call more than once."""
@@ -120,23 +149,20 @@ class TelegramNotifier:
                 return
             self._deliver(item)
 
-    def _deliver(self, text: str) -> None:
+    def _deliver(self, text: str) -> bool:
         body = json.dumps({"chat_id": self._chat_id, "text": text}).encode("utf-8")
         last_err: Exception | None = None
         for attempt in range(_RETRIES):
             try:
                 self._post(self._url, body)
-                return
+                return True
             except Exception as exc:        # never let an alert failure reach the trading loop
                 last_err = exc
                 if attempt < _RETRIES - 1:
                     self._sleep(_BACKOFF_SEC[min(attempt, len(_BACKOFF_SEC) - 1)])
-        # The URL holds the bot token, so only the error type is logged.
-        name = type(last_err).__name__ if last_err else "Unknown"
-        detail = ""
-        if isinstance(last_err, urllib.error.HTTPError):
-            detail = f" HTTP {last_err.code}"
-        log.warning("Telegram send failed after %s attempts: %s%s", _RETRIES, name, detail)
+        detail = format_telegram_http_error(last_err or RuntimeError("unknown"), self._token)
+        log.warning("Telegram send failed after %s attempts: %s", _RETRIES, detail)
+        return False
 
 
 class CompositeNotifier:
@@ -145,19 +171,22 @@ class CompositeNotifier:
     def __init__(self, notifiers: Sequence[Notifier]) -> None:
         self._notifiers = list(notifiers)
 
-    def send(self, text: str) -> None:
+    def send(self, text: str) -> bool:
+        ok = True
         for notifier in self._notifiers:
             try:
-                notifier.send(text)
+                ok = notifier.send(text) and ok
             except Exception as exc:
+                ok = False
                 log.warning(
                     "CompositeNotifier: %s failed: %s", type(notifier).__name__, type(exc).__name__
                 )
+        return ok
 
 
 def build_notifier(settings: Settings, *, async_outbox: bool = False) -> Notifier:
     """Build a notifier. CLI is sync; the serve loop passes async_outbox=True."""
-    token = settings.telegram_bot_token.get_secret_value()
+    token = settings.telegram_bot_token.get_secret_value().strip()
     chat = settings.telegram_chat_id
     if token and chat:
         return TelegramNotifier(token, chat, async_outbox=async_outbox)

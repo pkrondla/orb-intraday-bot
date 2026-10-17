@@ -10,6 +10,9 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 - Telegram `/help` (and other commands) in the ORB bot chat: drop a restrictive
   `allowed_updates` filter that could make `getUpdates` miss messages, clear any
   webhook before polling, and treat quoted/whitespace chat ids as the same chat.
+- Telegram send on Windows EC2: use certifi's CA bundle for `api.telegram.org`
+  (urllib's default store was failing with URLError while Groww's requests path
+  still worked). `check --send-test-alert` now reports a failed send.
 
 ## [0.12.0] - 2026-10-17
 

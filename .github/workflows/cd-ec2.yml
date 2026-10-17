@@ -106,7 +106,7 @@ jobs:
           session = connect()
 
           def clean(name: str) -> str:
-              return str(os.environ.get(name, "")).replace("\r", "").replace("\n", "\\n")
+              return str(os.environ.get(name, "")).replace("\r", "").replace("\n", "").strip()
 
           def run_ps(script: str, name: str) -> None:
               global session
