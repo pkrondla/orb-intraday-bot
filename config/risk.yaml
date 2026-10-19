@@ -2,10 +2,10 @@
 # Starting defaults: conservative (1 lot, 3 trades/day, 1% daily loss, halt after 2 losses).
 
 max_lots_per_trade: 1
-max_trades_per_day: 3
+max_trades_per_day: 6
 max_open_positions: 1
 daily_loss_limit_pct: 0.01          # of sizing.capital_inr
-loss_streak_halt: 2
+loss_streak_halt: 3
 max_option_spread_pct: 0.05         # reject if (ask-bid)/mid above this (when quotes available)
 max_data_staleness_sec: 120
 square_off_time: "15:20"            # MIS square-off before close
