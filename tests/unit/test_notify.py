@@ -10,6 +10,7 @@ from orb_intraday_bot.runtime.notify import (
     CompositeNotifier,
     NullNotifier,
     TelegramNotifier,
+    as_telegram_html,
     build_notifier,
     split_message,
 )
@@ -50,6 +51,16 @@ class _FakePost:
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
+
+
+def test_telegram_html_sets_parse_mode() -> None:
+    fake = _FakePost()
+    n = TelegramNotifier("tok", "42", post=fake, sleep=fake.sleep, async_outbox=False)
+    n.send(as_telegram_html("<b>BUY</b>"))
+    payload = fake.calls[0][1]
+    assert payload["text"] == "<b>BUY</b>"
+    assert payload["parse_mode"] == "HTML"
+    assert payload["disable_web_page_preview"] is True
 
 
 def test_telegram_send_posts_json_to_bot_api() -> None:

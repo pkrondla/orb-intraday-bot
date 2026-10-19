@@ -28,6 +28,13 @@ _MAX_LEN = 3900          # Telegram's limit is 4096 characters per message
 _OUTBOX_SIZE = 200
 _RETRIES = 3
 _BACKOFF_SEC = (0.5, 1.5, 3.0)
+# Prefix so send() stays a single string; stripped before the Bot API sees the text.
+_HTML_PREFIX = "\x1eHTML\n"
+
+
+def as_telegram_html(text: str) -> str:
+    """Mark a message as Telegram HTML (bold / code). Other sends stay plain text."""
+    return _HTML_PREFIX + text
 
 
 class Notifier(Protocol):
@@ -112,7 +119,9 @@ class TelegramNotifier:
         self._chat_id = chat_id
         self._post = post
         self._sleep = sleep
-        self._queue: queue.Queue[str | None] = queue.Queue(maxsize=_OUTBOX_SIZE)
+        self._queue: queue.Queue[tuple[str, str | None] | None] = queue.Queue(
+            maxsize=_OUTBOX_SIZE
+        )
         self._thread: threading.Thread | None = None
         if async_outbox:
             self._thread = threading.Thread(
@@ -121,13 +130,16 @@ class TelegramNotifier:
             self._thread.start()
 
     def send(self, text: str) -> bool:
+        html = text.startswith(_HTML_PREFIX)
+        body = text[len(_HTML_PREFIX):] if html else text
+        mode = "HTML" if html else None
         ok = True
-        for part in split_message(text):
+        for part in split_message(body):
             if self._thread is None:
-                ok = self._deliver(part) and ok
+                ok = self._deliver(part, mode) and ok
                 continue
             try:
-                self._queue.put_nowait(part)
+                self._queue.put_nowait((part, mode))
             except queue.Full:
                 log.warning("Telegram outbox full; dropping a message")
                 ok = False
@@ -147,10 +159,15 @@ class TelegramNotifier:
             item = self._queue.get()
             if item is None:
                 return
-            self._deliver(item)
+            text, parse_mode = item
+            self._deliver(text, parse_mode)
 
-    def _deliver(self, text: str) -> bool:
-        body = json.dumps({"chat_id": self._chat_id, "text": text}).encode("utf-8")
+    def _deliver(self, text: str, parse_mode: str | None = None) -> bool:
+        payload: dict[str, object] = {"chat_id": self._chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+            payload["disable_web_page_preview"] = True
+        body = json.dumps(payload).encode("utf-8")
         last_err: Exception | None = None
         for attempt in range(_RETRIES):
             try:

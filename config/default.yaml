@@ -101,7 +101,7 @@ runtime:                       # live run timing and monitoring
   stall_alert_sec: 180         # alert if no new candle this long after it should exist
   no_session_exit_time: "09:45"  # no candles by then: treat as a holiday and exit
   heartbeat_file: heartbeat.json
-  notify_candle_reports: false # true = send every candle report to Telegram
+  notify_candle_reports: false # true = also send every candle report (decisions are always sent)
 
 enabled_setups:
   orb: true

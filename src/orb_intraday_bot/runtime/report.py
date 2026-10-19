@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from html import escape
 
+from orb_intraday_bot.core.clock import IST
+from orb_intraday_bot.options.pricing import OptionPlan
 from orb_intraday_bot.paper.exits import ExitEvent
 from orb_intraday_bot.paper.models import Position
 from orb_intraday_bot.paper.report import (
@@ -19,6 +22,24 @@ def _price(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}"
 
 
+def _opened_stamp(pos: Position) -> str:
+    return pos.opened_at.astimezone(IST).strftime("%H:%M IST")
+
+
+def _rr(entry: float, stop: float, target: float) -> str:
+    risk = abs(entry - stop)
+    if risk < 1e-6:
+        return "n/a"
+    return f"1 : {abs(target - entry) / risk:.2f}"
+
+
+def _rr_line(plan: OptionPlan) -> str:
+    return (
+        f"R:R  {_rr(plan.entry_ltp, plan.sl, plan.t1)} (T1)   "
+        f"{_rr(plan.entry_ltp, plan.sl, plan.t2)} (T2)"
+    )
+
+
 def format_opened(outcome: SignalOutcome) -> str:
     sig, plan, pos = outcome.signal, outcome.plan, outcome.position
     assert plan is not None and pos is not None and outcome.trade is not None
@@ -30,15 +51,55 @@ def format_opened(outcome: SignalOutcome) -> str:
         else ""
     )
     return (
-        f"OPENED {sig.setup.value} {sig.level_name} {sig.direction.value} "
+        f"OPENED {_opened_stamp(pos)} {sig.setup.value} {sig.level_name} {sig.direction.value} "
         f"[{outcome.trade.zone.value}] futures {sig.entry_price:.1f} ({sig.entry_basis})\n"
-        f"      buy {plan.contract.trading_symbol} ({plan.strike_label.upper()}, delta {delta}) "
+        f"      BUY {plan.contract.trading_symbol} ({plan.strike_label.upper()}, delta {delta}) "
         f"{pos.lots} lot(s) x {pos.lot_size} = {plan.quantity} @ {pos.entry_ltp:.2f}"
         f"  outlay Rs {plan.outlay_inr:,.0f}\n"
-        f"      stop: futures {pos.hard_stop:.1f}{close}; option {plan.sl:.2f} "
+        f"      SL futures {pos.hard_stop:.1f}{close}; option {plan.sl:.2f} "
         f"(sized for Rs {plan.sized_risk_inr:,.0f}, loss at stop Rs {plan.risk_at_stop_inr:,.0f})\n"
         f"      T1 futures {pos.t1:.1f} / option {plan.t1:.2f}"
-        f" (book {pos.t1_book_lots} lot(s)), T2 futures {pos.t2:.1f} / option {plan.t2:.2f}"
+        f" (book {pos.t1_book_lots} lot(s)), T2 futures {pos.t2:.1f} / option {plan.t2:.2f}\n"
+        f"      {_rr_line(plan)}"
+        f"{flags}"
+    )
+
+
+def format_opened_alert(outcome: SignalOutcome) -> str:
+    """Telegram card: time, BUY / SL / targets, and R:R. HTML; send with parse_mode."""
+    sig, plan, pos = outcome.signal, outcome.plan, outcome.position
+    assert plan is not None and pos is not None and outcome.trade is not None
+    delta = "n/a" if plan.delta is None else f"{plan.delta:.2f}"
+    symbol = escape(plan.contract.trading_symbol)
+    setup = escape(sig.setup.value)
+    level = escape(sig.level_name)
+    direction = escape(sig.direction.value)
+    zone = escape(outcome.trade.zone.value)
+    basis = escape(sig.entry_basis)
+    strike = escape(plan.strike_label.upper())
+    close = (
+        f"\nor close back {'below' if pos.sign > 0 else 'above'} "
+        f"<code>{pos.close_exit_level:.1f}</code>"
+        if pos.close_exit_level is not None
+        else ""
+    )
+    flags = ""
+    if plan.flags:
+        flags = "\nFLAGS  " + escape(", ".join(plan.flags))
+    return (
+        f"🟢 <b>OPENED</b>  <code>{_opened_stamp(pos)}</code>\n"
+        f"{setup} · {level} · {direction} · {zone}\n"
+        f"<i>{basis}</i>\n"
+        f"\n<b>BUY</b>  <code>{symbol}</code>\n"
+        f"      {strike}  δ {delta} · {pos.lots} lot(s) × {pos.lot_size}\n"
+        f"      @ <b>{pos.entry_ltp:.2f}</b>   Rs {plan.outlay_inr:,.0f}\n"
+        f"\n<b>SL</b>   option <code>{plan.sl:.2f}</code>   fut {pos.hard_stop:.1f}"
+        f"{close}\n"
+        f"      risk Rs {plan.risk_at_stop_inr:,.0f}\n"
+        f"\n<b>T1</b>   option <code>{plan.t1:.2f}</code>   fut {pos.t1:.1f}"
+        f"  (book {pos.t1_book_lots} lot(s))\n"
+        f"<b>T2</b>   option <code>{plan.t2:.2f}</code>   fut {pos.t2:.1f}\n"
+        f"\n<b>{escape(_rr_line(plan))}</b>"
         f"{flags}"
     )
 
