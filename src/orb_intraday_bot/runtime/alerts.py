@@ -4,7 +4,8 @@ All messages go through one object so the rules (which events alert, what they s
 place and a second channel is a change here only.
 
 A quiet candle is not sent. Decision alerts (opening-range levels, a zone change, a new SIGN,
-a failed or cancelled pattern, a blocked signal) are. OPENED / MISSED / EXIT stay as they were.
+a failed or cancelled pattern, a blocked signal) are. OPENED and SL / T1 / T2 exits are HTML
+cards; other exits use the same card with the reason as the heading.
 `notify_candle_reports` still adds the full per-candle report on top.
 """
 
@@ -17,7 +18,7 @@ from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
 from orb_intraday_bot.runtime.notify import Notifier, as_telegram_html
 from orb_intraday_bot.runtime.report import (
     format_candle_report,
-    format_exit,
+    format_exit_alert,
     format_opened_alert,
     format_outcome,
 )
@@ -126,7 +127,7 @@ class Alerts:
         )
 
     def exit(self, event: ExitEvent) -> None:
-        self._notifier.send(format_exit(event))
+        self._notifier.send(as_telegram_html(format_exit_alert(event)))
 
     def day_end(self, text: str) -> None:
         self._notifier.send(text)

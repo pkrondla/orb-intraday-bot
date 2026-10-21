@@ -5,6 +5,8 @@ from __future__ import annotations
 from orb_intraday_bot.core.events import LevelSet
 from orb_intraday_bot.core.models import Direction, Zone
 from orb_intraday_bot.core.signals import PatternEvent, PatternKind, Setup, SetupSignal
+from orb_intraday_bot.paper.exits import ExitEvent
+from orb_intraday_bot.paper.models import ExitReason, Fill
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
 from orb_intraday_bot.runtime.report import _rr
@@ -64,12 +66,68 @@ def test_risk_reward_is_reward_over_risk() -> None:
 def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     notes = Recorder()
     alerts = Alerts(notes)
+    opened: SignalOutcome | None = None
     for report in _reports():
         alerts.candle(report)
+        if opened is None and report.opened:
+            opened = report.opened[0]
+    assert opened is not None and opened.position is not None
     card = next(m for m in notes.messages if "<b>BUY</b>" in m)
+    pos = opened.position
     assert "IST" in card and "OPENED" in card
     assert "<b>SL</b>" in card and "<b>T1</b>" in card and "<b>T2</b>" in card
     assert "R:R" in card and "1 :" in card
+    buy_block = card.split("<b>SL</b>", 1)[0]
+    assert f"fut <code>{pos.futures_entry:.1f}</code>" in buy_block
+    assert f"fut <code>{pos.hard_stop:.1f}</code>" in card
+    assert f"fut <code>{pos.t1:.1f}</code>" in card
+    assert f"fut <code>{pos.t2:.1f}</code>" in card
+
+
+def _exit_fill(reason: ExitReason, futures: float, option: float, points: float) -> Fill:
+    return Fill(
+        time=at(10, 15),
+        reason=reason,
+        lots=1,
+        quantity=75,
+        futures_price=futures,
+        option_price=option,
+        price_source="live",
+        option_gross=round((option - 150.0) * 75, 2),
+        futures_points=points,
+        charges=25.0,
+    )
+
+
+def test_exit_telegram_card_has_futures_on_sl_t1_t2() -> None:
+    notes = Recorder()
+    alerts = Alerts(notes)
+    alerts.exit(ExitEvent(
+        "p1", at(10, 15),
+        "NIFTY26O1922800CE HARD_STOP: sold 1 lot(s) at 130.75 (live), futures 22765.0",
+        _exit_fill(ExitReason.HARD_STOP, 22765.0, 130.75, -35.0),
+    ))
+    alerts.exit(ExitEvent(
+        "p1", at(10, 21),
+        "NIFTY26O1922800CE T1: sold 1 lot(s) at 166.50 (live), futures 22830.0",
+        _exit_fill(ExitReason.T1, 22830.0, 166.50, 30.0),
+    ))
+    alerts.exit(ExitEvent(
+        "p1", at(10, 21),
+        "NIFTY26O1922800CE T1 reached: stop moved to entry (futures 22800.0, option 150.00)",
+    ))
+    alerts.exit(ExitEvent(
+        "p1", at(10, 45),
+        "NIFTY26O1922800CE T2: sold 1 lot(s) at 205.00 (live), futures 22900.0",
+        _exit_fill(ExitReason.T2, 22900.0, 205.00, 100.0),
+    ))
+    sl, t1, moved, t2 = notes.messages
+    assert "<b>SL</b>" in sl and "HARD_STOP" in sl
+    assert "fut <code>22765.0</code>" in sl and "option <code>130.75</code>" in sl
+    assert "<b>T1</b>" in t1 and "fut <code>22830.0</code>" in t1
+    assert "<b>T1</b>" in moved and "stop moved to entry" in moved
+    assert "fut <code>22800.0</code>" in moved and "option <code>150.00</code>" in moved
+    assert "<b>T2</b>" in t2 and "fut <code>22900.0</code>" in t2
 
 
 def test_candle_reports_are_sent_only_when_enabled() -> None:

@@ -161,7 +161,7 @@ def test_open_position_is_exited_by_a_live_price_poll(tmp_path: Path) -> None:
     assert positions and all(p.status.value == "CLOSED" for p in positions)
     reasons = {f.reason for p in positions for f in p.fills}
     assert reasons & {ExitReason.HARD_STOP, ExitReason.OPTION_STOP}
-    assert "EXIT" in h.notes.joined()
+    assert "<b>SL</b>" in h.notes.joined()
     assert "last candle never arrived" not in h.text      # nothing left to force-close
 
 

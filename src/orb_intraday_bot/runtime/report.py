@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from html import escape
 
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.options.pricing import OptionPlan
 from orb_intraday_bot.paper.exits import ExitEvent
-from orb_intraday_bot.paper.models import Position
+from orb_intraday_bot.paper.models import ExitReason, Position
 from orb_intraday_bot.paper.report import (
     DaySummary,
     format_closed_position,
@@ -92,13 +93,17 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
         f"<i>{basis}</i>\n"
         f"\n<b>BUY</b>  <code>{symbol}</code>\n"
         f"      {strike}  δ {delta} · {pos.lots} lot(s) × {pos.lot_size}\n"
-        f"      @ <b>{pos.entry_ltp:.2f}</b>   Rs {plan.outlay_inr:,.0f}\n"
-        f"\n<b>SL</b>   option <code>{plan.sl:.2f}</code>   fut {pos.hard_stop:.1f}"
+        f"      option <code>{pos.entry_ltp:.2f}</code>   "
+        f"fut <code>{pos.futures_entry:.1f}</code>   Rs {plan.outlay_inr:,.0f}\n"
+        f"\n<b>SL</b>   option <code>{plan.sl:.2f}</code>   "
+        f"fut <code>{pos.hard_stop:.1f}</code>"
         f"{close}\n"
         f"      risk Rs {plan.risk_at_stop_inr:,.0f}\n"
-        f"\n<b>T1</b>   option <code>{plan.t1:.2f}</code>   fut {pos.t1:.1f}"
+        f"\n<b>T1</b>   option <code>{plan.t1:.2f}</code>   "
+        f"fut <code>{pos.t1:.1f}</code>"
         f"  (book {pos.t1_book_lots} lot(s))\n"
-        f"<b>T2</b>   option <code>{plan.t2:.2f}</code>   fut {pos.t2:.1f}\n"
+        f"<b>T2</b>   option <code>{plan.t2:.2f}</code>   "
+        f"fut <code>{pos.t2:.1f}</code>\n"
         f"\n<b>{escape(_rr_line(plan))}</b>"
         f"{flags}"
     )
@@ -118,6 +123,66 @@ def format_outcome(outcome: SignalOutcome) -> str:
 
 def format_exit(event: ExitEvent) -> str:
     return f"EXIT {event.time:%H:%M:%S} {event.message}"
+
+
+_SL_REASONS = frozenset({
+    ExitReason.HARD_STOP,
+    ExitReason.BREAKEVEN_STOP,
+    ExitReason.CLOSE_STOP,
+    ExitReason.OPTION_STOP,
+    ExitReason.BROKER_STOP,
+})
+_T1_MOVED = re.compile(
+    r"T1 reached: stop moved to entry \(futures ([0-9.]+), option ([0-9.]+)\)"
+)
+
+
+def _exit_stamp(event: ExitEvent) -> str:
+    return event.time.astimezone(IST).strftime("%H:%M:%S IST")
+
+
+def _exit_heading(reason: ExitReason | None, message: str) -> tuple[str, str]:
+    if reason is ExitReason.T1 or (reason is None and "T1 reached" in message):
+        return "🟡", "T1"
+    if reason is ExitReason.T2:
+        return "🟢", "T2"
+    if reason in _SL_REASONS:
+        return "🔴", "SL"
+    if reason is not None:
+        return "⚪", reason.value
+    return "⚪", "EXIT"
+
+
+def format_exit_alert(event: ExitEvent) -> str:
+    """Telegram card: SL / T1 / T2 (or other exit) with the futures fill. HTML."""
+    fill = event.fill
+    reason = fill.reason if fill is not None else None
+    emoji, heading = _exit_heading(reason, event.message)
+    symbol = escape(event.message.split()[0]) if event.message else ""
+    lines = [f"{emoji} <b>{escape(heading)}</b>  <code>{_exit_stamp(event)}</code>"]
+    if fill is not None and heading != fill.reason.value:
+        lines.append(escape(fill.reason.value))
+    if symbol:
+        lines.append(f"<code>{symbol}</code>")
+    if fill is not None:
+        lines.append(
+            f"      option <code>{fill.option_price:.2f}</code>   "
+            f"fut <code>{fill.futures_price:.1f}</code>"
+        )
+        lines.append(f"      sold {fill.lots} lot(s)   {fill.futures_points:+.1f} pts")
+        lines.append(f"      option Rs {fill.option_gross:+,.0f}")
+        return "\n".join(lines)
+    moved = _T1_MOVED.search(event.message)
+    if moved:
+        lines.append("      stop moved to entry")
+        lines.append(
+            f"      option <code>{float(moved.group(2)):.2f}</code>   "
+            f"fut <code>{float(moved.group(1)):.1f}</code>"
+        )
+        return "\n".join(lines)
+    rest = event.message.split(" ", 1)[1] if " " in event.message else event.message
+    lines.append(escape(rest))
+    return "\n".join(lines)
 
 
 def format_candle_report(report: CandleReport) -> str:

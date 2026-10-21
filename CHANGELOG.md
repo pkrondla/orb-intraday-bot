@@ -6,6 +6,12 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+### Changed
+- Telegram OPENED card: BUY now shows the futures price at signal time (same as SL / T1 / T2),
+  so the four chart levels can be copied from one message.
+- Telegram SL / T1 / T2 exits are the same card style: option fill and the futures price at
+  the event, so the trigger can be marked on the chart.
+
 ### Fixed
 - Telegram `/help` (and other commands) in the ORB bot chat: drop a restrictive
   `allowed_updates` filter that could make `getUpdates` miss messages, clear any
