@@ -68,7 +68,8 @@ def test_lock_files_pin_every_line_and_include_the_broker_sdk() -> None:
         assert lines, name
         assert all("==" in line for line in lines), f"{name} has an unpinned line"
         assert any(line.lower().startswith("growwapi==") for line in lines)
-        # PYSEC-2026-4320; growwapi 1.5.0 still declares certifi<2026.0.0, so installs use --no-deps.
+        # PYSEC-2026-4320. growwapi 1.5.0 still declares certifi<2026.0.0;
+        # lock installs use --no-deps so the patched bundle can be pinned.
         assert _pinned_version(text, "certifi") >= (2026, 10, 19)
     dev = (ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
     for tool in ("pytest==", "ruff==", "mypy==", "import-linter=="):
