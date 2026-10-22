@@ -25,7 +25,7 @@ jobs:
       # - WinRM HTTPS on 5986, Python 3.12, Git, nssm on PATH
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
