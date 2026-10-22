@@ -33,7 +33,7 @@ switch ($Task) {
         if (-not (Test-Path $py)) { python -m venv $Venv }
         Run "install pinned dependencies" {
             & $py -m pip install --upgrade pip
-            & $py -m pip install -r requirements-dev.lock
+            & $py -m pip install --no-deps -r requirements-dev.lock
             & $py -m pip install --no-deps -e .
         }
     }
@@ -46,16 +46,21 @@ switch ($Task) {
     "lock" {
         Need-Venv
         # Regenerate the lock files from a clean install of exactly what pyproject.toml allows.
+        # growwapi 1.5.0 still declares certifi<2026.0.0, which blocks PYSEC-2026-4320.
+        # Overlay the patched CA bundle, then install the freeze with --no-deps.
         $tmp = Join-Path $env:TEMP "orb-bot-lock"
         if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
         python -m venv $tmp
         $tp = Join-Path $tmp "Scripts\python.exe"
+        $certifiFloor = "certifi>=2026.10.19"
         Run "resolve runtime" {
             & $tp -m pip install --quiet .
+            & $tp -m pip install --quiet --no-deps $certifiFloor
             & $tp -m pip freeze --exclude orb-intraday-bot | Out-File -Encoding ascii requirements.lock
         }
         Run "resolve dev" {
             & $tp -m pip install --quiet ".[dev]"
+            & $tp -m pip install --quiet --no-deps $certifiFloor
             & $tp -m pip freeze --exclude orb-intraday-bot | Out-File -Encoding ascii requirements-dev.lock
         }
         Remove-Item -Recurse -Force $tmp

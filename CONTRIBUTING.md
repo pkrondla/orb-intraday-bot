@@ -45,6 +45,8 @@ put a key with trading permission on a development machine.
 ## Dependencies
 
 Runtime and dev dependencies are pinned in `requirements.lock` and `requirements-dev.lock`.
+Install those files with `--no-deps`: they are a full freeze, and growwapi 1.5.0 still
+declares `certifi<2026.0.0`, which blocks the PYSEC-2026-4320 pin (`certifi>=2026.10.19`).
 Change `pyproject.toml`, run `scripts\dev.ps1 lock`, review the diff, run `ci`, commit all three
 files together. Dependabot proposes updates weekly; each one goes through the same gates.
 

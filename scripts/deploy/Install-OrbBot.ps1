@@ -84,7 +84,7 @@ if (-not (Test-Path $venvPython)) {
     Invoke-Native { & $python -m venv (Join-Path $RepoPath ".venv") } "create venv"
 }
 Invoke-Native { & $venvPython -m pip install --upgrade pip } "pip upgrade"
-Invoke-Native { & $venvPython -m pip install -r (Join-Path $RepoPath "requirements.lock") } "pip install lock"
+Invoke-Native { & $venvPython -m pip install --no-deps -r (Join-Path $RepoPath "requirements.lock") } "pip install lock"
 Invoke-Native { & $venvPython -m pip install --no-deps -e $RepoPath } "pip install package"
 
 # Launchers

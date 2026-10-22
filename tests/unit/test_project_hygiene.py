@@ -53,14 +53,23 @@ def test_env_example_ships_as_a_dry_run_with_no_secrets() -> None:
         assert values[secret] == ""
 
 
+def _pinned_version(lock_text: str, name: str) -> tuple[int, ...]:
+    prefix = f"{name}=="
+    for line in lock_text.splitlines():
+        if line.lower().startswith(prefix):
+            return tuple(int(part) for part in line.split("==", 1)[1].split("."))
+    raise AssertionError(f"{name} missing from lock")
+
+
 def test_lock_files_pin_every_line_and_include_the_broker_sdk() -> None:
     for name in ("requirements.lock", "requirements-dev.lock"):
-        lines = [
-            line for line in (ROOT / name).read_text(encoding="utf-8").splitlines() if line.strip()
-        ]
+        text = (ROOT / name).read_text(encoding="utf-8")
+        lines = [line for line in text.splitlines() if line.strip()]
         assert lines, name
         assert all("==" in line for line in lines), f"{name} has an unpinned line"
         assert any(line.lower().startswith("growwapi==") for line in lines)
+        # PYSEC-2026-4320; growwapi 1.5.0 still declares certifi<2026.0.0, so installs use --no-deps.
+        assert _pinned_version(text, "certifi") >= (2026, 10, 19)
     dev = (ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
     for tool in ("pytest==", "ruff==", "mypy==", "import-linter=="):
         assert tool in dev
@@ -103,3 +112,10 @@ def test_ci_runs_every_quality_gate() -> None:
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     for gate in ("ruff check", "mypy", "lint-imports", "pytest", "pip-audit"):
         assert gate in ci, gate
+    assert "pip install --no-deps -r requirements-dev.lock" in ci
+    for path in (
+        "scripts/dev.ps1",
+        "scripts/deploy/Install-OrbBot.ps1",
+        ".github/workflows/cd-ec2.yml",
+    ):
+        assert "--no-deps -r" in (ROOT / path).read_text(encoding="utf-8"), path
