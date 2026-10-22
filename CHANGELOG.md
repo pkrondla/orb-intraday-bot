@@ -7,6 +7,9 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 ## [Unreleased]
 
 ### Changed
+- ORB and R2/S2 breakout stops sit on the setup level (touch + close-through), not at a
+  relocated 35-point line. The trade is skipped if that distance is under 10 or over 35
+  points. Traps, structure, Case 1/2 and consolidation are unchanged.
 - Telegram OPENED card: BUY now shows the futures price at signal time (same as SL / T1 / T2),
   so the four chart levels can be copied from one message.
 - Telegram SL / T1 / T2 exits are the same card style: option fill and the futures price at

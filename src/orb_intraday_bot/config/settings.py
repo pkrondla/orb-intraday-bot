@@ -143,8 +143,9 @@ class SizingConfig(BaseModel):
     capital_inr: float = Field(default=500_000, gt=0)
     risk_pct_per_trade: float = Field(default=0.01, gt=0, le=1)
     max_open_positions: int = Field(default=5, ge=1)
-    # What the lot count is sized on. "stop_plan" (chosen rule): the distance to the structural
-    # level (floor 10, cap 35), while the trade's stop stays 35 points. "hard_stop": the real
+    # What the lot count is sized on. "stop_plan": the distance to the structural level
+    # (ORB / pivot-breakout: that distance is also the live stop, and the trade is skipped if
+    # it is outside 10–35. Touch stops still floor at 10 and cap at 35). "hard_stop": the real
     # stop distance, which keeps the loss at the stop inside the budget.
     risk_basis: Literal["stop_plan", "hard_stop"] = "stop_plan"
 

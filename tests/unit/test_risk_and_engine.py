@@ -51,51 +51,85 @@ def make(
 
 
 # ---- stop plan -----------------------------------------------------------------------------
-def test_close_stop_uses_distance_to_level_with_floor() -> None:
-    plan = plan_stop(make(entry=112, stop_level=110), STOPS)
-    assert plan.stop_points == 10                        # 2 points away -> 10-point floor
-    assert plan.close_exit_level == 110
-    assert plan.price_stop == 77                         # the 35-point hard stop behind it
-    assert "floor" in plan.basis
-
-
-def test_close_stop_distance_between_floor_and_hard() -> None:
+def test_orb_stop_sits_on_the_level_when_distance_is_in_band() -> None:
     plan = plan_stop(make(entry=130, stop_level=110), STOPS)
-    assert plan.stop_points == 20 and plan.price_stop == 95
+    assert plan.stop_points == 20
+    assert plan.price_stop == 110
+    assert plan.close_exit_level == 110
+    assert plan.basis == "ORH is 20.0 pts away"
 
 
-def test_close_stop_capped_at_hard_stop() -> None:
-    plan = plan_stop(make(entry=160, stop_level=110), STOPS)
-    assert plan.stop_points == 35
+def test_orb_stop_accepts_the_floor_and_the_cap() -> None:
+    at_floor = plan_stop(make(entry=120, stop_level=110), STOPS)
+    assert at_floor.stop_points == 10 and at_floor.price_stop == 110
+    at_cap = plan_stop(make(entry=145, stop_level=110), STOPS)
+    assert at_cap.stop_points == 35 and at_cap.price_stop == 110
 
 
-def test_close_stop_with_entry_already_beyond_the_level() -> None:
-    plan = plan_stop(make(entry=109, stop_level=110), STOPS)    # entry below ORH
-    assert plan.stop_points == 10
-    assert "already beyond" in plan.basis
+def test_orb_stop_rejects_a_fill_inside_the_floor() -> None:
+    with pytest.raises(PlanError, match="below the 10-point floor"):
+        plan_stop(make(entry=112, stop_level=110), STOPS)
 
 
-def test_close_stop_short() -> None:
+def test_orb_stop_rejects_a_fill_beyond_the_cap() -> None:
+    with pytest.raises(PlanError, match="above the 35-point cap"):
+        plan_stop(make(entry=160, stop_level=110), STOPS)
+
+
+def test_orb_stop_rejects_entry_already_beyond_the_level() -> None:
+    with pytest.raises(PlanError, match="already beyond ORH"):
+        plan_stop(make(entry=109, stop_level=110), STOPS)
+
+
+def test_orb_short_stop_sits_on_orl() -> None:
     plan = plan_stop(
-        make(direction=Direction.SHORT, entry=80, stop_level=95, level=95), STOPS
+        make(direction=Direction.SHORT, entry=80, stop_level=95, level=95, level_name="ORL"),
+        STOPS,
     )
     assert plan.stop_points == 15
-    assert plan.price_stop == 115                        # 80 + 35
+    assert plan.price_stop == 95
+    assert plan.close_exit_level == 95
+
+
+def test_pivot_breakout_uses_the_same_level_bound_stop() -> None:
+    plan = plan_stop(
+        make(setup=Setup.PIVOT_BREAKOUT, entry=135, stop_level=120, level=120, level_name="R2"),
+        STOPS,
+    )
+    assert plan.stop_points == 15 and plan.price_stop == 120 and plan.close_exit_level == 120
+    with pytest.raises(PlanError, match="above the 35-point cap"):
+        plan_stop(
+            make(setup=Setup.PIVOT_BREAKOUT, entry=160, stop_level=120, level=120, level_name="R2"),
+            STOPS,
+        )
+
+
+def test_additional_whipsaw_close_stop_still_relocates_to_35() -> None:
+    plan = plan_stop(
+        make(setup=Setup.ADDITIONAL_WHIPSAW, entry=130, stop_level=110, stop_on="close"),
+        STOPS,
+    )
+    assert plan.stop_points == 20
+    assert plan.price_stop == 95                         # entry - 35, in front of the level
+    assert plan.close_exit_level == 110
 
 
 def test_touch_stop_levels() -> None:
-    near = plan_stop(make(entry=107.5, stop_level=110, stop_on="touch",
-                          direction=Direction.SHORT), STOPS)
+    near = plan_stop(make(setup=Setup.TRAP_REVERSE_RETEST, entry=107.5, stop_level=110,
+                          stop_on="touch", direction=Direction.SHORT), STOPS)
     assert near.stop_points == 10 and near.price_stop == 117.5 and near.close_exit_level is None
-    mid = plan_stop(make(entry=100, stop_level=80, stop_on="touch"), STOPS)
+    mid = plan_stop(make(setup=Setup.TRAP_REVERSE_RETEST, entry=100, stop_level=80,
+                          stop_on="touch"), STOPS)
     assert mid.stop_points == 20 and mid.price_stop == 80
-    far = plan_stop(make(entry=100, stop_level=40, stop_on="touch"), STOPS)
+    far = plan_stop(make(setup=Setup.TRAP_REVERSE_RETEST, entry=100, stop_level=40,
+                          stop_on="touch"), STOPS)
     assert far.stop_points == 35 and far.price_stop == 65
 
 
 def test_touch_stop_on_the_wrong_side_is_rejected() -> None:
     with pytest.raises(PlanError):
-        plan_stop(make(entry=100, stop_level=105, stop_on="touch"), STOPS)
+        plan_stop(make(setup=Setup.TRAP_REVERSE_RETEST, entry=100, stop_level=105,
+                        stop_on="touch"), STOPS)
 
 
 def test_no_structural_stop_means_hard_stop() -> None:
@@ -241,6 +275,7 @@ def test_engine_accepts_a_valid_signal_and_builds_the_plan() -> None:
     assert res.zone is Zone.BULLISH and res.rejected == []
     (trade,) = res.accepted
     assert trade.stop.stop_points == 15 and trade.targets.t2 == 140
+    assert trade.stop.price_stop == 110 and trade.stop.close_exit_level == 110
     assert trade.risk_budget_inr == 5000
 
 
@@ -281,6 +316,14 @@ def test_plan_failure_is_reported() -> None:
     too_close = make(entry=138, sign="y")                            # R2 (140) only 2 away
     res = engine().evaluate(bar(138), [too_close], 110, 95)
     assert res.rejected[0].stage == "plan"
+
+
+def test_engine_skips_orb_when_the_level_is_too_far() -> None:
+    far = make(entry=160, stop_level=110, level=110, sign="far")
+    res = engine().evaluate(bar(160), [far], 110, 95)
+    assert res.accepted == []
+    assert res.rejected[0].stage == "plan"
+    assert "above the 35-point cap" in res.rejected[0].reason
 
 
 def test_priority_resolves_a_same_candle_conflict() -> None:

@@ -3,16 +3,16 @@
 The bot always buys the option (a CE for a long signal, a PE for a short one), so the option price
 rises when the trade works, for both directions:
 
-    option_SL = entry_LTP - futures_stop_points * |delta|   (the trade's real stop: 35 points,
-                                                             or the level for touch stops)
+    option_SL = entry_LTP - futures_stop_points * |delta|   (the trade's real stop: the setup
+                                                             level for ORB / pivot-breakout
+                                                             and for touch stops, else 35)
     option_T1 = entry_LTP + futures_T1_points   * |delta|
     option_T2 = entry_LTP + futures_T2_points   * |delta|
     lots      = floor(risk amount / (sizing option points * lot size))
 
-The lots are sized on the distance to the structural level (spec section 5, floor 10, cap 35),
-while the stop is the 35-point stop, so the loss at the stop can exceed the risk budget for
-close-based setups. That is the chosen rule (`sizing.risk_basis: stop_plan`). `hard_stop` sizes on
-the real stop instead.
+The lots are sized on the distance to the structural level (`sizing.risk_basis: stop_plan`).
+For ORB / pivot-breakout that distance is also the live stop (10–35 or the trade is skipped).
+Touch stops still floor at 10 and cap at 35. `hard_stop` sizes on the real stop instead.
 
 Delta and the three prices are fixed at entry. If delta is missing, the stop falls back to the
 fixed 20 points of the notes. The notes give no fallback for the targets, so they use the target
@@ -101,8 +101,8 @@ def plan_option_trade(
     flags = list(selection.flags)
 
     delta = quote.delta
-    # The trade's stop in futures points: the real price stop (35 points for close-based and
-    # standard stops, the structural level when that is closer for touch stops).
+    # The trade's stop in futures points: the real price stop (the setup level for ORB /
+    # pivot-breakout, the structural level when that is closer for touch stops, else 35).
     stop_futures_points = abs(futures_entry - stop.price_stop)
     if delta is None:
         if FLAG_DELTA_MISSING not in flags:

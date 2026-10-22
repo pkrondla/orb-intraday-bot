@@ -16,8 +16,8 @@ session:
   candle_publish_delay_sec: 5  # wait after a boundary before fetching the closed candle
 
 stops:
-  hard_stop_points: 35
-  min_stop_points: 10          # [assumption] safety floor
+  hard_stop_points: 35         # ORB / pivot-breakout: skip if the level is farther than this
+  min_stop_points: 10          # ORB / pivot-breakout: skip if closer; touch stops: floor
   option_fallback_points: 20   # used only if delta is unavailable
 
 targets:
@@ -37,8 +37,9 @@ sizing:
   capital_inr: 500000          # [assumption]
   risk_pct_per_trade: 0.01     # [assumption]
   max_open_positions: 5        # [assumption]
-  risk_basis: stop_plan        # stop_plan = lots from the level distance, stop stays 35 pts
-                               # (your rule); hard_stop = lots from the real stop distance
+  risk_basis: stop_plan        # lots from the level distance (ORB / pivot-breakout: that
+                               # distance is also the live stop; 10–35 or skip).
+                               # hard_stop = lots from the real stop distance
 
 consolidation:
   min_touches: 3               # [assumption]
