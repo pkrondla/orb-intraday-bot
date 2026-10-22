@@ -239,7 +239,20 @@ jobs:
           )
 
           # Short WinRM calls, same shape as telegram-groww-ai-bot. One long
-          # Install-OrbBot.ps1 run is what closed the connection.
+          # Install-OrbBot.ps1 run is what closed the connection. Stop the
+          # services before pip so a package swap cannot crash a running
+          # interpreter and leave NSSM in SERVICE_START_PENDING.
+          run_ps(
+              """
+              $ErrorActionPreference = "Stop"
+              $helper = "C:\\orb-bot\\scripts\\deploy\\Nssm-OrbServices.ps1"
+              if (-not (Test-Path $helper)) { throw "missing $helper after git reset" }
+              powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -Action Stop
+              if ($LASTEXITCODE -ne 0) { throw "Nssm-OrbServices Stop failed with exit code $LASTEXITCODE" }
+              """,
+              "stop services",
+          )
+
           run_ps(
               """
               $ErrorActionPreference = "Stop"
@@ -294,45 +307,15 @@ jobs:
               "launchers",
           )
 
-          service_script = r"""
-              $ErrorActionPreference = "Stop"
-              function Invoke-Native([scriptblock]$Command, [string]$Label) {
-                Write-Host $Label
-                & $Command
-                if ($LASTEXITCODE -ne 0) { throw "$Label failed with exit code $LASTEXITCODE" }
-              }
-              function Install-NssmService {
-                param([string]$ServiceName, [string]$Launcher, [string]$Stdout, [string]$Stderr)
-                $repo = "C:\orb-bot"
-                if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-                  Invoke-Native { nssm stop $ServiceName confirm } "nssm stop $ServiceName" | Out-Null
-                  Start-Sleep -Seconds 2
-                  Invoke-Native { nssm remove $ServiceName confirm } "nssm remove $ServiceName" | Out-Null
-                }
-                Invoke-Native { nssm install $ServiceName "powershell.exe" } "nssm install $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppParameters "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Launcher`"" } "nssm set AppParameters $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppDirectory $repo } "nssm set AppDirectory $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppStdout $Stdout } "nssm set AppStdout $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppStderr $Stderr } "nssm set AppStderr $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppRotateFiles 1 } "nssm set AppRotateFiles $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppRotateOnline 1 } "nssm set AppRotateOnline $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName Start SERVICE_AUTO_START } "nssm set Start $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppExit Default Restart } "nssm set AppExit $ServiceName" | Out-Null
-                Invoke-Native { nssm set $ServiceName AppThrottle 15000 } "nssm set AppThrottle $ServiceName" | Out-Null
-                Invoke-Native { nssm start $ServiceName } "nssm start $ServiceName" | Out-Null
-                Start-Sleep -Seconds 3
-                $status = (nssm status $ServiceName).Trim()
-                if ($status -ne "SERVICE_RUNNING") { throw "Service $ServiceName failed to start: $status" }
-                Write-Host "$ServiceName is running."
-              }
-              $repo = "C:\orb-bot"
-              $logs = Join-Path $repo "logs"
-              Install-NssmService -ServiceName "OrbBot" -Launcher (Join-Path $repo "start-orb-bot.ps1") `
-                -Stdout (Join-Path $logs "orb-bot.log") -Stderr (Join-Path $logs "orb-bot-error.log")
-              Install-NssmService -ServiceName "OrbBotWatch" -Launcher (Join-Path $repo "start-orb-watch.ps1") `
-                -Stdout (Join-Path $logs "orb-watch.log") -Stderr (Join-Path $logs "orb-watch-error.log")
+          run_ps(
               """
-          run_ps(service_script, "nssm")
+              $ErrorActionPreference = "Stop"
+              $helper = "C:\\orb-bot\\scripts\\deploy\\Nssm-OrbServices.ps1"
+              powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -Action Install
+              if ($LASTEXITCODE -ne 0) { throw "Nssm-OrbServices Install failed with exit code $LASTEXITCODE" }
+              """,
+              "nssm",
+          )
 
           run_ps(
               """

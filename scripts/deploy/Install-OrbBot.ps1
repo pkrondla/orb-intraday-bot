@@ -79,6 +79,9 @@ if (-not $SkipGit) {
 $sha = (git -C $RepoPath rev-parse HEAD).Trim()
 Set-Content -Path $currentFile -Value $sha -Encoding utf8
 
+$nssmHelper = Join-Path $PSScriptRoot "Nssm-OrbServices.ps1"
+& $nssmHelper -Action Stop -RepoPath $RepoPath -ServiceName $ServiceName -WatchServiceName $WatchServiceName
+
 # venv
 if (-not (Test-Path $venvPython)) {
     Invoke-Native { & $python -m venv (Join-Path $RepoPath ".venv") } "create venv"
@@ -114,41 +117,7 @@ $watchLauncher = Join-Path $RepoPath "start-orb-watch.ps1"
     "& `"$venvPython`" -m orb_intraday_bot watchdog"
 ) | Set-Content -Path $watchLauncher -Encoding utf8
 
-function Install-NssmService {
-    param([string]$ServiceName, [string]$Launcher, [string]$Stdout, [string]$Stderr)
-    $powershell = (Get-Command powershell.exe).Source
-    if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-        Invoke-Native { nssm stop $ServiceName confirm } "nssm stop $ServiceName" | Out-Null
-        Start-Sleep -Seconds 2
-        Invoke-Native { nssm remove $ServiceName confirm } "nssm remove $ServiceName" | Out-Null
-        Start-Sleep -Seconds 1
-    }
-    Invoke-Native { nssm install $ServiceName $powershell } "nssm install $ServiceName" | Out-Null
-    if (-not (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) {
-        throw "nssm install $ServiceName returned success but the service was not created."
-    }
-    Invoke-Native {
-        nssm set $ServiceName AppParameters "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Launcher`""
-    } "nssm set AppParameters $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppDirectory $RepoPath } "nssm set AppDirectory $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppStdout $Stdout } "nssm set AppStdout $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppStderr $Stderr } "nssm set AppStderr $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppRotateFiles 1 } "nssm set AppRotateFiles $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppRotateOnline 1 } "nssm set AppRotateOnline $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName Start SERVICE_AUTO_START } "nssm set Start $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppExit Default Restart } "nssm set AppExit $ServiceName" | Out-Null
-    Invoke-Native { nssm set $ServiceName AppThrottle 15000 } "nssm set AppThrottle $ServiceName" | Out-Null
-    Invoke-Native { nssm start $ServiceName } "nssm start $ServiceName" | Out-Null
-    Start-Sleep -Seconds 3
-    $status = (nssm status $ServiceName).Trim()
-    if ($status -ne "SERVICE_RUNNING") { throw "Service $ServiceName failed to start: $status" }
-    Write-Host "$ServiceName is running."
-}
-
-Install-NssmService -ServiceName $ServiceName -Launcher $serveLauncher `
-    -Stdout (Join-Path $logsDir "orb-bot.log") -Stderr (Join-Path $logsDir "orb-bot-error.log")
-Install-NssmService -ServiceName $WatchServiceName -Launcher $watchLauncher `
-    -Stdout (Join-Path $logsDir "orb-watch.log") -Stderr (Join-Path $logsDir "orb-watch-error.log")
+& $nssmHelper -Action Install -RepoPath $RepoPath -ServiceName $ServiceName -WatchServiceName $WatchServiceName
 
 # Smoke check (read-only)
 Invoke-Native { & $venvPython -m orb_intraday_bot check } "orb-bot check"

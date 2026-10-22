@@ -120,3 +120,15 @@ def test_ci_runs_every_quality_gate() -> None:
         ".github/workflows/cd-ec2.yml",
     ):
         assert "--no-deps -r" in (ROOT / path).read_text(encoding="utf-8"), path
+
+
+def test_deploy_stops_nssm_before_pip_and_waits_out_pending_start() -> None:
+    helper = (ROOT / "scripts/deploy/Nssm-OrbServices.ps1").read_text(encoding="utf-8")
+    assert "SERVICE_START_PENDING" in helper
+    assert "SERVICE_RUNNING" in helper
+    install = (ROOT / "scripts/deploy/Install-OrbBot.ps1").read_text(encoding="utf-8")
+    assert "Nssm-OrbServices.ps1" in install
+    assert install.index("-Action Stop") < install.index("pip install --no-deps")
+    cd = (ROOT / ".github/workflows/cd-ec2.yml").read_text(encoding="utf-8")
+    assert cd.index("-Action Stop") < cd.index("pip install --no-deps")
+    assert "-Action Install" in cd

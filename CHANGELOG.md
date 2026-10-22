@@ -18,6 +18,8 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 ### Fixed
 - Bump certifi to 2026.10.19 (PYSEC-2026-4320). growwapi 1.5.0 still declares
   `certifi<2026.0.0`, so lock installs use `--no-deps` (the lock is a full freeze).
+- EC2 deploy: stop OrbBot/OrbBotWatch before pip, and wait out NSSM
+  `SERVICE_START_PENDING` instead of treating `nssm start` exit 1 as a hard fail.
 - Telegram `/help` (and other commands) in the ORB bot chat: drop a restrictive
   `allowed_updates` filter that could make `getUpdates` miss messages, clear any
   webhook before polling, and treat quoted/whitespace chat ids as the same chat.

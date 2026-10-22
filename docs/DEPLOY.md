@@ -76,8 +76,9 @@ The workflow:
 
 1. Clones or updates `C:\orb-bot` (preserves `data/`)
 2. Writes `.env` from Secrets and Variables
-3. Creates `.venv`, installs from `requirements.lock` with `--no-deps` (full freeze)
-4. Installs / restarts NSSM services `OrbBot` (`orb-bot serve`) and `OrbBotWatch` (`orb-bot watchdog`)
+3. Stops `OrbBot` / `OrbBotWatch`, then creates `.venv` and installs from
+   `requirements.lock` with `--no-deps` (full freeze)
+4. Reinstalls NSSM services `OrbBot` (`orb-bot serve`) and `OrbBotWatch` (`orb-bot watchdog`)
 5. Runs `orb-bot check` as a smoke test
 
 Deploy is allowed at any time, including during market hours and with open positions. The
