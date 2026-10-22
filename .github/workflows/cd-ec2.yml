@@ -101,6 +101,10 @@ jobs:
               return winrm.Session(
                   endpoint, auth=(username, password), transport="basic",
                   server_cert_validation="ignore",
+                  # Cap each WinRM call. Hung nssm stop keep-alives until the 30 min
+                  # job cancel; this aborts the command instead. Must stay above pip.
+                  operation_timeout_sec=300,
+                  read_timeout_sec=330,
               )
 
           session = connect()
@@ -110,6 +114,7 @@ jobs:
 
           def run_ps(script: str, name: str) -> None:
               global session
+              print(f"== {name}", flush=True)
               last: Exception | None = None
               for attempt in range(1, 4):
                   try:
@@ -170,6 +175,27 @@ jobs:
               if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {{
                 throw "nssm was not found on PATH."
               }}
+              function Stop-ServiceQuick([string]$Name) {{
+                $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+                if (-not $svc) {{ Write-Host "$Name not installed"; return }}
+                Write-Host "sc stop $Name (status $($svc.Status))"
+                & sc.exe stop $Name | Out-Null
+                $deadline = (Get-Date).AddSeconds(12)
+                while ((Get-Date) -lt $deadline) {{
+                  $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+                  if (-not $svc -or $svc.Status -eq "Stopped") {{ Write-Host "$Name stopped"; return }}
+                  Start-Sleep -Milliseconds 400
+                }}
+                $cim = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
+                if ($cim -and $cim.ProcessId -and $cim.ProcessId -ne 0) {{
+                  Write-Host "taskkill pid $($cim.ProcessId) for $Name"
+                  & taskkill.exe /F /T /PID $cim.ProcessId | Out-Null
+                }}
+                Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+              }}
+              Write-Host "stopping services before git"
+              Stop-ServiceQuick OrbBot
+              Stop-ServiceQuick OrbBotWatch
               if (Test-Path (Join-Path $repo ".git")) {{
                 Invoke-Native {{ git -c core.pager=cat -C $repo fetch origin }} "git fetch"
                 Invoke-Native {{ git -c core.pager=cat -C $repo reset --hard "origin/{git_ref}" }} "git reset"
@@ -238,17 +264,16 @@ jobs:
               "verify install script",
           )
 
-          # Short WinRM calls, same shape as telegram-groww-ai-bot. One long
-          # Install-OrbBot.ps1 run is what closed the connection. Stop the
-          # services before pip so a package swap cannot crash a running
-          # interpreter and leave NSSM in SERVICE_START_PENDING.
+          # Short WinRM calls. Do not nest powershell.exe: a child blocked on
+          # nssm stop is invisible in the log and WinRM keep-alives it until
+          # the job timeout.
           run_ps(
               """
               $ErrorActionPreference = "Stop"
               $helper = "C:\\orb-bot\\scripts\\deploy\\Nssm-OrbServices.ps1"
               if (-not (Test-Path $helper)) { throw "missing $helper after git reset" }
-              powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -Action Stop
-              if ($LASTEXITCODE -ne 0) { throw "Nssm-OrbServices Stop failed with exit code $LASTEXITCODE" }
+              Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+              & $helper -Action Stop
               """,
               "stop services",
           )
@@ -311,8 +336,8 @@ jobs:
               """
               $ErrorActionPreference = "Stop"
               $helper = "C:\\orb-bot\\scripts\\deploy\\Nssm-OrbServices.ps1"
-              powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -Action Install
-              if ($LASTEXITCODE -ne 0) { throw "Nssm-OrbServices Install failed with exit code $LASTEXITCODE" }
+              Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+              & $helper -Action Install
               """,
               "nssm",
           )

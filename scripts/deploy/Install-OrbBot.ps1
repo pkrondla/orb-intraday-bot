@@ -47,6 +47,9 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
     throw "nssm was not found on PATH."
 }
 
+$nssmHelper = Join-Path $PSScriptRoot "Nssm-OrbServices.ps1"
+& $nssmHelper -Action Stop -RepoPath $RepoPath -ServiceName $ServiceName -WatchServiceName $WatchServiceName
+
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
@@ -78,9 +81,6 @@ if (-not $SkipGit) {
 
 $sha = (git -C $RepoPath rev-parse HEAD).Trim()
 Set-Content -Path $currentFile -Value $sha -Encoding utf8
-
-$nssmHelper = Join-Path $PSScriptRoot "Nssm-OrbServices.ps1"
-& $nssmHelper -Action Stop -RepoPath $RepoPath -ServiceName $ServiceName -WatchServiceName $WatchServiceName
 
 # venv
 if (-not (Test-Path $venvPython)) {

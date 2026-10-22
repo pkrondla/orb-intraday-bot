@@ -3,6 +3,9 @@
 #
 #   powershell -File Nssm-OrbServices.ps1 -Action Stop
 #   powershell -File Nssm-OrbServices.ps1 -Action Install
+#
+# Never call `nssm stop`/`nssm start` and wait unbounded: NSSM blocks until the
+# app exits, WinRM keep-alives that hang, and GitHub cancels the job at 30 min.
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("Stop", "Install")]
@@ -14,54 +17,73 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-Nssm {
-    param([string]$Label, [string[]]$NssmArgs)
-    Write-Host $Label
-    & nssm @NssmArgs | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "$Label failed with exit code $LASTEXITCODE" }
-}
-
-function Get-NssmStatus {
+function Get-ServiceState {
     param([string]$Name)
-    if (-not (Get-Service -Name $Name -ErrorAction SilentlyContinue)) { return "MISSING" }
-    return ((& nssm status $Name 2>&1) | Out-String).Trim()
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if (-not $svc) { return "MISSING" }
+    return [string]$svc.Status
 }
 
-function Wait-NssmStatus {
-    param([string]$Name, [string[]]$Wanted, [int]$Seconds = 40)
+function Wait-ServiceState {
+    param([string]$Name, [string[]]$Wanted, [int]$Seconds = 15)
     $deadline = (Get-Date).AddSeconds($Seconds)
-    $status = Get-NssmStatus $Name
+    $status = Get-ServiceState $Name
     while ((Get-Date) -lt $deadline) {
         if ($Wanted -contains $status) { return $status }
-        Start-Sleep -Milliseconds 500
-        $status = Get-NssmStatus $Name
+        Start-Sleep -Milliseconds 400
+        $status = Get-ServiceState $Name
     }
     return $status
 }
 
+function Invoke-NssmTimed {
+    param(
+        [string]$Label,
+        [string[]]$NssmArgs,
+        [int]$TimeoutMs = 20000,
+        [switch]$IgnoreExit
+    )
+    Write-Host $Label
+    $nssm = (Get-Command nssm).Source
+    $p = Start-Process -FilePath $nssm -ArgumentList $NssmArgs -PassThru -WindowStyle Hidden
+    if (-not $p.WaitForExit($TimeoutMs)) {
+        Write-Host "$Label timed out after ${TimeoutMs}ms; killing nssm pid $($p.Id)"
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        if (-not $IgnoreExit) { throw "$Label timed out" }
+        return
+    }
+    if (-not $IgnoreExit -and $p.ExitCode -ne 0) {
+        throw "$Label failed with exit code $($p.ExitCode)"
+    }
+}
+
 function Stop-NssmService {
     param([string]$Name)
-    if ((Get-NssmStatus $Name) -eq "MISSING") { return }
-    Write-Host "nssm stop $Name"
-    & nssm stop $Name | Out-Null
-    $status = Wait-NssmStatus -Name $Name -Wanted @("SERVICE_STOPPED", "MISSING") -Seconds 40
-    if (@("SERVICE_STOPPED", "MISSING") -notcontains $status) {
-        Write-Host "force-stopping $Name (was $status)"
-        Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-        $status = Wait-NssmStatus -Name $Name -Wanted @("SERVICE_STOPPED", "MISSING") -Seconds 20
+    $status = Get-ServiceState $Name
+    if ($status -eq "MISSING") { return }
+    Write-Host "sc.exe stop $Name (was $status)"
+    # sc.exe returns immediately. nssm stop can block until the process exits.
+    & sc.exe stop $Name | Out-Null
+    $status = Wait-ServiceState -Name $Name -Wanted @("Stopped", "MISSING") -Seconds 12
+    if (@("Stopped", "MISSING") -contains $status) { return }
+    Write-Host "force-killing $Name (was $status)"
+    $cim = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
+    if ($cim -and $cim.ProcessId -and $cim.ProcessId -ne 0) {
+        & taskkill.exe /F /T /PID $cim.ProcessId | Out-Null
     }
-    if (@("SERVICE_STOPPED", "MISSING") -notcontains $status) {
+    Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+    $status = Wait-ServiceState -Name $Name -Wanted @("Stopped", "MISSING") -Seconds 8
+    if (@("Stopped", "MISSING") -notcontains $status) {
         throw "Could not stop $Name (status $status)"
     }
 }
 
 function Remove-NssmService {
     param([string]$Name)
-    if ((Get-NssmStatus $Name) -eq "MISSING") { return }
+    if ((Get-ServiceState $Name) -eq "MISSING") { return }
     Stop-NssmService -Name $Name
-    Write-Host "nssm remove $Name"
-    & nssm remove $Name confirm | Out-Null
-    $status = Wait-NssmStatus -Name $Name -Wanted @("MISSING") -Seconds 20
+    Invoke-NssmTimed "nssm remove $Name" @("remove", $Name, "confirm") -TimeoutMs 15000
+    $status = Wait-ServiceState -Name $Name -Wanted @("MISSING") -Seconds 10
     if ($status -ne "MISSING") {
         throw "Could not remove $Name (status $status)"
     }
@@ -69,14 +91,14 @@ function Remove-NssmService {
 
 function Start-NssmService {
     param([string]$Name)
-    $status = Get-NssmStatus $Name
+    $status = Get-ServiceState $Name
     Write-Host "nssm start $Name (current $status)"
-    # nssm start exits 1 if the service is already START_PENDING or RUNNING.
-    if ($status -ne "SERVICE_RUNNING" -and $status -ne "SERVICE_START_PENDING") {
-        & nssm start $Name | Out-Null
+    if ($status -ne "Running" -and $status -ne "StartPending") {
+        # Ignore exit: nssm returns 1 when already StartPending/Running.
+        Invoke-NssmTimed "nssm start $Name" @("start", $Name) -TimeoutMs 15000 -IgnoreExit
     }
-    $status = Wait-NssmStatus -Name $Name -Wanted @("SERVICE_RUNNING") -Seconds 45
-    if ($status -ne "SERVICE_RUNNING") {
+    $status = Wait-ServiceState -Name $Name -Wanted @("Running") -Seconds 20
+    if ($status -ne "Running") {
         throw "Service $Name failed to start: $status"
     }
     Write-Host "$Name is running."
@@ -92,23 +114,22 @@ function Install-NssmService {
     )
     $powershell = (Get-Command powershell.exe).Source
     Remove-NssmService -Name $Name
-    Invoke-Nssm "nssm install $Name" @("install", $Name, $powershell)
-    if ((Get-NssmStatus $Name) -eq "MISSING") {
+    Invoke-NssmTimed "nssm install $Name" @("install", $Name, $powershell)
+    if ((Get-ServiceState $Name) -eq "MISSING") {
         throw "nssm install $Name returned success but the service was not created."
     }
     $params = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Launcher`""
-    Invoke-Nssm "nssm set AppParameters $Name" @("set", $Name, "AppParameters", $params)
-    Invoke-Nssm "nssm set AppDirectory $Name" @("set", $Name, "AppDirectory", $Repo)
-    Invoke-Nssm "nssm set AppStdout $Name" @("set", $Name, "AppStdout", $Stdout)
-    Invoke-Nssm "nssm set AppStderr $Name" @("set", $Name, "AppStderr", $Stderr)
-    Invoke-Nssm "nssm set AppRotateFiles $Name" @("set", $Name, "AppRotateFiles", "1")
-    Invoke-Nssm "nssm set AppRotateOnline $Name" @("set", $Name, "AppRotateOnline", "1")
-    Invoke-Nssm "nssm set AppExit $Name" @("set", $Name, "AppExit", "Default", "Restart")
-    Invoke-Nssm "nssm set AppThrottle $Name" @("set", $Name, "AppThrottle", "15000")
-    # Demand-start for the first start so SCM does not race nssm (START_PENDING).
-    Invoke-Nssm "nssm set Start $Name" @("set", $Name, "Start", "SERVICE_DEMAND_START")
+    Invoke-NssmTimed "nssm set AppParameters $Name" @("set", $Name, "AppParameters", $params)
+    Invoke-NssmTimed "nssm set AppDirectory $Name" @("set", $Name, "AppDirectory", $Repo)
+    Invoke-NssmTimed "nssm set AppStdout $Name" @("set", $Name, "AppStdout", $Stdout)
+    Invoke-NssmTimed "nssm set AppStderr $Name" @("set", $Name, "AppStderr", $Stderr)
+    Invoke-NssmTimed "nssm set AppRotateFiles $Name" @("set", $Name, "AppRotateFiles", "1")
+    Invoke-NssmTimed "nssm set AppRotateOnline $Name" @("set", $Name, "AppRotateOnline", "1")
+    Invoke-NssmTimed "nssm set AppExit $Name" @("set", $Name, "AppExit", "Default", "Restart")
+    Invoke-NssmTimed "nssm set AppThrottle $Name" @("set", $Name, "AppThrottle", "15000")
+    Invoke-NssmTimed "nssm set Start $Name" @("set", $Name, "Start", "SERVICE_DEMAND_START")
     Start-NssmService -Name $Name
-    Invoke-Nssm "nssm set Start $Name" @("set", $Name, "Start", "SERVICE_AUTO_START")
+    Invoke-NssmTimed "nssm set Start $Name" @("set", $Name, "Start", "SERVICE_AUTO_START")
 }
 
 switch ($Action) {
