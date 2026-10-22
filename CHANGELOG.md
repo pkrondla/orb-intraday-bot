@@ -16,6 +16,7 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
   the event, so the trigger can be marked on the chart.
 
 ### Fixed
+- Bump certifi to 2026.10.19 (PYSEC-2026-4320) so the CI dependency audit passes.
 - Telegram `/help` (and other commands) in the ORB bot chat: drop a restrictive
   `allowed_updates` filter that could make `getUpdates` miss messages, clear any
   webhook before polling, and treat quoted/whitespace chat ids as the same chat.
