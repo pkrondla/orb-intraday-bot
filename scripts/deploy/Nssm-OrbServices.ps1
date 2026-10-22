@@ -17,6 +17,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-NativeExe {
+    param([string]$Name)
+    $found = @()
+    foreach ($lookup in @($Name, "$Name.exe")) {
+        $cmd = Get-Command $lookup -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cmd) {
+            foreach ($prop in @("Source", "Path", "Definition")) {
+                if ($cmd.$prop) { $found += [string]$cmd.$prop }
+            }
+        }
+    }
+    $where = & where.exe "$Name.exe" 2>$null | Select-Object -First 1
+    if ($where) { $found += $where.Trim() }
+    $found += @(
+        (Join-Path $env:SystemRoot "System32\$Name.exe"),
+        (Join-Path $env:SystemRoot "Sysnative\$Name.exe"),
+        (Join-Path $env:SystemRoot "SysWOW64\$Name.exe")
+    )
+    if ($Name -eq "nssm") {
+        $found += @("C:\nssm\nssm.exe", "C:\nssm\win64\nssm.exe", "C:\Tools\nssm.exe")
+    }
+    foreach ($path in $found) {
+        if ($path -and (Test-Path -LiteralPath $path)) { return $path }
+    }
+    throw "$Name.exe was not found on PATH or in the usual install locations."
+}
+
+$script:NssmExe = Resolve-NativeExe nssm
+$script:PowerShellExe = Resolve-NativeExe powershell
+
 function Get-ServiceState {
     param([string]$Name)
     $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
@@ -44,8 +74,7 @@ function Invoke-NssmTimed {
         [switch]$IgnoreExit
     )
     Write-Host $Label
-    $nssm = (Get-Command nssm).Source
-    $p = Start-Process -FilePath $nssm -ArgumentList $NssmArgs -PassThru -WindowStyle Hidden
+    $p = Start-Process -FilePath $script:NssmExe -ArgumentList $NssmArgs -PassThru -WindowStyle Hidden
     if (-not $p.WaitForExit($TimeoutMs)) {
         Write-Host "$Label timed out after ${TimeoutMs}ms; killing nssm pid $($p.Id)"
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
@@ -112,9 +141,8 @@ function Install-NssmService {
         [string]$Stderr,
         [string]$Repo
     )
-    $powershell = (Get-Command powershell.exe).Source
     Remove-NssmService -Name $Name
-    Invoke-NssmTimed "nssm install $Name" @("install", $Name, $powershell)
+    Invoke-NssmTimed "nssm install $Name" @("install", $Name, $script:PowerShellExe)
     if ((Get-ServiceState $Name) -eq "MISSING") {
         throw "nssm install $Name returned success but the service was not created."
     }

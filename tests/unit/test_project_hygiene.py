@@ -127,6 +127,8 @@ def test_deploy_stops_nssm_before_pip_and_waits_out_pending_start() -> None:
     assert "sc.exe stop" in helper
     assert "WaitForExit" in helper
     assert "& nssm stop" not in helper
+    assert "Resolve-NativeExe" in helper
+    assert "(Get-Command nssm).Source" not in helper
     install = (ROOT / "scripts/deploy/Install-OrbBot.ps1").read_text(encoding="utf-8")
     assert "Nssm-OrbServices.ps1" in install
     assert install.index("-Action Stop") < install.index("pip install --no-deps")

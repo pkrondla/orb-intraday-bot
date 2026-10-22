@@ -20,7 +20,8 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
   `certifi<2026.0.0`, so lock installs use `--no-deps` (the lock is a full freeze).
 - EC2 deploy: stop OrbBot/OrbBotWatch with `sc.exe` (and a taskkill timeout)
   before git, never wait unbounded on `nssm stop`. Nested `powershell.exe`
-  was keep-alived by WinRM until the 30-minute job cancel.
+  was keep-alived by WinRM until the 30-minute job cancel. Resolve `nssm.exe`
+  to a real path (WinRM's `Get-Command nssm` has an empty `.Source`).
 - Telegram `/help` (and other commands) in the ORB bot chat: drop a restrictive
   `allowed_updates` filter that could make `getUpdates` miss messages, clear any
   webhook before polling, and treat quoted/whitespace chat ids as the same chat.
