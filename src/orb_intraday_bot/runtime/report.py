@@ -7,6 +7,7 @@ from datetime import timedelta
 from html import escape
 
 from orb_intraday_bot.core.clock import IST
+from orb_intraday_bot.engine.signal_engine import PlannedTrade
 from orb_intraday_bot.options.pricing import OptionPlan
 from orb_intraday_bot.paper.exits import ExitEvent
 from orb_intraday_bot.paper.models import ExitReason, Position
@@ -17,6 +18,10 @@ from orb_intraday_bot.paper.report import (
     format_summary,
 )
 from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
+
+_NAMED_LEVEL = re.compile(r"\b(ORH|ORL|R[1-5]|S[1-5]|P)\b")
+_CAPPED_LEVEL = re.compile(r"capped at (ORH|ORL|R[1-5]|S[1-5]|P)\b")
+_HARD_STOP_PTS = re.compile(r"(?:hard stop |standard )(\d+(?:\.\d+)?)")
 
 
 def _price(value: float | None) -> str:
@@ -41,6 +46,46 @@ def _rr_line(plan: OptionPlan) -> str:
     )
 
 
+def _named_level(text: str) -> str | None:
+    """ORH / P / S2 etc. Prefer an explicit cap, then a name at the start of the basis."""
+    capped = _CAPPED_LEVEL.search(text)
+    if capped:
+        return capped.group(1)
+    start = _NAMED_LEVEL.match(text.strip())
+    if start:
+        return start.group(1)
+    found = _NAMED_LEVEL.findall(text)
+    return found[-1] if found else None
+
+
+def sl_level_name(trade: PlannedTrade) -> str:
+    """Short stop label: ORH, ORL, 35 pts, 2HH, ..."""
+    basis = trade.stop.basis
+    if "hard stop" in basis or basis.startswith("standard "):
+        found = _HARD_STOP_PTS.search(basis)
+        pts = found.group(1) if found else "35"
+        if pts.endswith(".0"):
+            pts = pts[:-2]
+        return f"{pts} pts"
+    if "floor" in basis:
+        return "10 pts"
+    return _named_level(basis) or trade.signal.level_name or "level"
+
+
+def target_level_name(basis: str) -> str:
+    """Short target label: P, S2, halfway, ..."""
+    if "halfway" in basis:
+        return "halfway"
+    named = _named_level(basis)
+    if named:
+        return named
+    if "projection" in basis:
+        return "OR proj"
+    if "consolidation" in basis or "opposite end" in basis:
+        return "range"
+    return basis
+
+
 def format_opened(outcome: SignalOutcome) -> str:
     sig, plan, pos = outcome.signal, outcome.plan, outcome.position
     assert plan is not None and pos is not None and outcome.trade is not None
@@ -51,16 +96,20 @@ def format_opened(outcome: SignalOutcome) -> str:
         if pos.close_exit_level is not None
         else ""
     )
+    sl_name = sl_level_name(outcome.trade)
+    t1_name = target_level_name(outcome.trade.targets.t1_basis)
+    t2_name = target_level_name(outcome.trade.targets.t2_basis)
     return (
         f"OPENED {_opened_stamp(pos)} {sig.setup.value} {sig.level_name} {sig.direction.value} "
         f"[{outcome.trade.zone.value}] futures {sig.entry_price:.1f} ({sig.entry_basis})\n"
         f"      BUY {plan.contract.trading_symbol} ({plan.strike_label.upper()}, delta {delta}) "
         f"{pos.lots} lot(s) x {pos.lot_size} = {plan.quantity} @ {pos.entry_ltp:.2f}"
         f"  outlay Rs {plan.outlay_inr:,.0f}\n"
-        f"      SL futures {pos.hard_stop:.1f}{close}; option {plan.sl:.2f} "
+        f"      SL {sl_name} futures {pos.hard_stop:.1f}{close}; option {plan.sl:.2f} "
         f"(sized for Rs {plan.sized_risk_inr:,.0f}, loss at stop Rs {plan.risk_at_stop_inr:,.0f})\n"
-        f"      T1 futures {pos.t1:.1f} / option {plan.t1:.2f}"
-        f" (book {pos.t1_book_lots} lot(s)), T2 futures {pos.t2:.1f} / option {plan.t2:.2f}\n"
+        f"      T1 {t1_name} futures {pos.t1:.1f} / option {plan.t1:.2f}"
+        f" (book {pos.t1_book_lots} lot(s)), T2 {t2_name} futures {pos.t2:.1f} / "
+        f"option {plan.t2:.2f}\n"
         f"      {_rr_line(plan)}"
         f"{flags}"
     )
@@ -87,6 +136,9 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
     flags = ""
     if plan.flags:
         flags = "\nFLAGS  " + escape(", ".join(plan.flags))
+    sl_name = escape(sl_level_name(outcome.trade))
+    t1_name = escape(target_level_name(outcome.trade.targets.t1_basis))
+    t2_name = escape(target_level_name(outcome.trade.targets.t2_basis))
     return (
         f"🟢 <b>OPENED</b>  <code>{_opened_stamp(pos)}</code>\n"
         f"{setup} · {level} · {direction} · {zone}\n"
@@ -95,14 +147,17 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
         f"      {strike}  δ {delta} · {pos.lots} lot(s) × {pos.lot_size}\n"
         f"      option <code>{pos.entry_ltp:.2f}</code>   "
         f"fut <code>{pos.futures_entry:.1f}</code>   Rs {plan.outlay_inr:,.0f}\n"
-        f"\n<b>SL</b>   option <code>{plan.sl:.2f}</code>   "
+        f"\n<b>SL</b>   {sl_name}\n"
+        f"      option <code>{plan.sl:.2f}</code>   "
         f"fut <code>{pos.hard_stop:.1f}</code>"
         f"{close}\n"
         f"      risk Rs {plan.risk_at_stop_inr:,.0f}\n"
-        f"\n<b>T1</b>   option <code>{plan.t1:.2f}</code>   "
+        f"\n<b>T1</b>   {t1_name}\n"
+        f"      option <code>{plan.t1:.2f}</code>   "
         f"fut <code>{pos.t1:.1f}</code>"
         f"  (book {pos.t1_book_lots} lot(s))\n"
-        f"<b>T2</b>   option <code>{plan.t2:.2f}</code>   "
+        f"<b>T2</b>   {t2_name}\n"
+        f"      option <code>{plan.t2:.2f}</code>   "
         f"fut <code>{pos.t2:.1f}</code>\n"
         f"\n<b>{escape(_rr_line(plan))}</b>"
         f"{flags}"

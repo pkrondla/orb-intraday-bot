@@ -9,7 +9,10 @@ from orb_intraday_bot.paper.exits import ExitEvent
 from orb_intraday_bot.paper.models import ExitReason, Fill
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
-from orb_intraday_bot.runtime.report import _rr
+from orb_intraday_bot.engine.signal_engine import PlannedTrade
+from orb_intraday_bot.risk.stops import StopPlan
+from orb_intraday_bot.risk.targets import TargetPlan
+from orb_intraday_bot.runtime.report import _rr, sl_level_name, target_level_name
 from tests.helpers import at, candle
 from tests.runtime_support import Recorder, make_day, real_day
 
@@ -63,6 +66,50 @@ def test_risk_reward_is_reward_over_risk() -> None:
     assert _rr(100.0, 100.0, 110.0) == "n/a"
 
 
+def _planned(
+    stop_basis: str,
+    *,
+    level_name: str = "ORL",
+    t1_basis: str = "nearest pivot P",
+    t2_basis: str = "S2",
+) -> PlannedTrade:
+    return PlannedTrade(
+        _signal() if level_name == "ORH" else SetupSignal(
+            setup=Setup.TRAP_REVERSE_RETEST,
+            direction=Direction.LONG,
+            level_name=level_name,
+            level_value=22750.0,
+            candle_start=at(9, 42),
+            entry_price=22780.0,
+            entry_basis="test",
+            sign_id="trap",
+            stop_level=22750.0,
+            stop_on="touch",
+            target_ref="ORH",
+        ),
+        Zone.NEUTRAL,
+        StopPlan(35.0, 22745.0, None, stop_basis),
+        TargetPlan(22790.0, 22850.0, 10.0, 70.0, t1_basis, t2_basis),
+        5_000.0,
+    )
+
+
+def test_opened_card_labels_sl_t1_t2_levels() -> None:
+    assert sl_level_name(_planned("ORH is 20.0 pts away", level_name="ORH")) == "ORH"
+    assert sl_level_name(_planned("level is 18.5 pts away", level_name="ORL")) == "ORL"
+    assert sl_level_name(_planned("level is 42.0 pts away: hard stop 35")) == "35 pts"
+    assert sl_level_name(_planned("standard 35-point stop")) == "35 pts"
+    assert sl_level_name(_planned("level is 8.0 pts away: raised to the 10-point floor")) == "10 pts"
+    assert sl_level_name(_planned("level is 18.5 pts away", level_name="2HH")) == "2HH"
+    assert target_level_name("nearest pivot P") == "P"
+    assert target_level_name("nearest pivot S1") == "S1"
+    assert target_level_name("halfway to T2") == "halfway"
+    assert target_level_name("S2") == "S2"
+    assert target_level_name("ORL, capped at S2") == "S2"
+    assert target_level_name("S4 (entry already beyond S2)") == "S4"
+    assert target_level_name("nearer of projection and pivot: pivot S1") == "S1"
+
+
 def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     notes = Recorder()
     alerts = Alerts(notes)
@@ -82,6 +129,11 @@ def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     assert f"fut <code>{pos.hard_stop:.1f}</code>" in card
     assert f"fut <code>{pos.t1:.1f}</code>" in card
     assert f"fut <code>{pos.t2:.1f}</code>" in card
+    trade = opened.trade
+    assert trade is not None
+    assert sl_level_name(trade) in card
+    assert target_level_name(trade.targets.t1_basis) in card
+    assert target_level_name(trade.targets.t2_basis) in card
 
 
 def _exit_fill(reason: ExitReason, futures: float, option: float, points: float) -> Fill:
