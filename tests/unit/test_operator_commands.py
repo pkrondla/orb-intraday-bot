@@ -187,6 +187,7 @@ def test_progress_text_for_paper_and_executed_positions() -> None:
     assert "broker stop: order S-9, trigger 99.50, qty 75" in text
     assert "broker stop: NONE" in text and "25 unit(s)" in text
     assert "planned 150.00" in text
+    assert f"T2 {paper.t2:.1f} (trigger {paper.t2_hit_level:.1f})" in text
 
 
 def test_levels_text_before_and_after_the_session_loads_them() -> None:

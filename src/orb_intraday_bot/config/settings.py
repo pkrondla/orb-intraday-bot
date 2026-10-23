@@ -129,6 +129,9 @@ class TargetsConfig(BaseModel):
     # Pull T1 in to at most this many points from the entry (None = no cap; the nearest pivot can
     # be 200+ points away). Off by default: a tuning option for Phase 9.
     t1_max_distance_points: float | None = Field(default=None, gt=0)
+    # T2 fires when the futures extreme comes within this many points of T2 (S2/R2 rejections
+    # often miss the print). 0 = exact touch. Capped so a short T2 still has 10 pts of room.
+    t2_proximity_points: float = Field(default=3.0, ge=0, le=5)
 
 
 class OptionsConfig(BaseModel):

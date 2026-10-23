@@ -210,6 +210,7 @@ S4 = Previous Low - 3 × (Previous High - Pivot)
 - **Pattern**: Lot of consolidation and rejections
 - **Breakout Rule**: If broken, easily reaches R3/S3 directly
 - **Profit Booking**: R2, R3, S2, S3 - Book ALL profits (Mandatory exits)
+- **T2 proximity (Python bot):** T2 also fires when futures come within 3 points of R2/S2 (config `targets.t2_proximity_points`), so a rejection just in front of the level still books. A later break of S2/R2 is a separate pivot-breakout trade, not a continuation of this one.
 - **Alert System**: Automatic alerts when R2/R3 or S2/S3 levels are hit
 
 ### Advanced Pivot Features - ✅ IMPLEMENTED

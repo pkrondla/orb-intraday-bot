@@ -129,6 +129,8 @@ def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     assert f"fut <code>{pos.hard_stop:.1f}</code>" in card
     assert f"fut <code>{pos.t1:.1f}</code>" in card
     assert f"fut <code>{pos.t2:.1f}</code>" in card
+    if abs(pos.t2_hit_level - pos.t2) >= 1e-6:
+        assert f"trigger <code>{pos.t2_hit_level:.1f}</code>" in card
     trade = opened.trade
     assert trade is not None
     assert sl_level_name(trade) in card

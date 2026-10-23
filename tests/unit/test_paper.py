@@ -102,6 +102,7 @@ def test_open_copies_the_plan_and_books_entry_charges() -> None:
     assert (p.lots, p.lot_size, p.remaining_lots, p.t1_book_lots) == (6, LOT, 6, 3)
     assert (p.entry_ltp, p.hard_stop, p.close_exit_level) == (150.0, 22765.0, 22780.0)
     assert (p.t1, p.t2, p.futures_entry) == (22830.0, 22900.0, 22800.0)
+    assert p.t2_trigger == pytest.approx(22897.0)            # 3 pts in front of T2
     assert p.sl_exit == 130.75                      # 35 points x 0.55 below entry, not 20 x 0.55
     assert p.entry_charges == order_charges("BUY", 150.0, 6 * LOT, CFG.paper.charges).total
     assert p.is_open and p.opened_at == OPENED
@@ -219,10 +220,43 @@ def test_break_even_stop_waits_for_the_next_bar() -> None:
     assert reasons(p) == [ExitReason.T1] and p.is_open
 
 
+def test_t2_fires_a_few_points_in_front_of_the_level() -> None:
+    p = opened()
+    assert p.t2_hit_level == pytest.approx(22897.0)
+    evaluate_bar(p, bar(9, 36, 22850, 22898, 22840, 22890), None, CFG.paper)
+    t2 = next(f for f in p.fills if f.reason is ExitReason.T2)
+    assert t2.futures_price == pytest.approx(22897.0)
+    assert not p.is_open
+
+
+def test_t2_still_misses_outside_the_proximity_band() -> None:
+    p = opened()
+    evaluate_bar(p, bar(9, 36, 22850, 22896, 22840, 22890), None, CFG.paper)
+    assert ExitReason.T2 not in reasons(p)
+    assert p.is_open and p.t1_done
+
+
+def test_t2_proximity_off_requires_an_exact_touch() -> None:
+    cfg = StrategyConfig.model_validate({"targets": {"t2_proximity_points": 0}})
+    p = opened(config=cfg)
+    assert p.t2_trigger == pytest.approx(22900.0)
+    evaluate_bar(p, bar(9, 36, 22850, 22898, 22840, 22890), None, cfg.paper)
+    assert ExitReason.T2 not in reasons(p)
+
+
+def test_t2_short_near_miss_fills_at_the_band() -> None:
+    p = opened(Direction.SHORT)
+    assert p.t2_trigger == pytest.approx(22703.0)
+    evaluate_bar(p, bar(9, 36, 22750, 22760, 22702, 22720), None, CFG.paper)
+    t2 = next(f for f in p.fills if f.reason is ExitReason.T2)
+    assert t2.futures_price == pytest.approx(22703.0)
+
+
 def test_t1_and_t2_in_one_candle() -> None:
     p = opened()
     evaluate_bar(p, bar(9, 36, 22800, 22905, 22799, 22900), None, CFG.paper)
     assert reasons(p) == [ExitReason.T1, ExitReason.T2] and not p.is_open
+    assert p.fills[1].futures_price == 22900.0
     assert p.fills[1].option_price == pytest.approx(150 + 100 * 0.55, abs=0.03)
 
 

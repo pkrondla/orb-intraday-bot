@@ -7,6 +7,10 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 ## [Unreleased]
 
 ### Changed
+- T2 fires when futures come within 3 points of the target (`targets.t2_proximity_points`),
+  so an S2/R2 rejection that misses the print still books. Fill is at the band (or at T2 /
+  the open if price traded through). The OPENED card still shows the chart level. Golden
+  replay: same 186 trades, fill-points 2612.65 → 2655.74.
 - ORB and R2/S2 breakout stops sit on the setup level (touch + close-through), not at a
   relocated 35-point line. The trade is skipped if that distance is under 10 or over 35
   points. Traps, structure, Case 1/2 and consolidation are unchanged.

@@ -38,6 +38,7 @@ from orb_intraday_bot.paper.exits import (
 )
 from orb_intraday_bot.paper.models import ExitReason, Position
 from orb_intraday_bot.paper.ports import PositionExecutor, PositionRepository
+from orb_intraday_bot.risk.targets import t2_trigger_price
 
 PositionHook = Callable[[Position], None]
 
@@ -160,6 +161,13 @@ class PaperEngine:
             close_exit_level=trade.stop.close_exit_level,
             t1=trade.targets.t1,
             t2=trade.targets.t2,
+            t2_trigger=t2_trigger_price(
+                signal.entry_price,
+                trade.targets.t2,
+                long=signal.direction is Direction.LONG,
+                proximity_points=self._cfg.targets.t2_proximity_points,
+                min_stop_points=self._cfg.stops.min_stop_points,
+            ),
             sl_exit=sl_exit,
             t1_option=t1_option,
             t2_option=t2_option,

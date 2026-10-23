@@ -30,6 +30,9 @@ def test_a_rule_change_moves_only_the_strategy_hash() -> None:
     changed = fingerprint(apply_overrides(StrategyConfig(), ["stops.hard_stop_points=30"]))
     assert changed.strategy != base.strategy
     assert changed.assumptions == base.assumptions and changed.runtime == base.runtime
+    proximity = fingerprint(apply_overrides(StrategyConfig(), ["targets.t2_proximity_points=0"]))
+    assert proximity.strategy != base.strategy
+    assert proximity.assumptions == base.assumptions and proximity.runtime == base.runtime
 
 
 def test_slippage_moves_only_the_assumptions_hash() -> None:
@@ -66,4 +69,8 @@ def test_old_stored_positions_without_a_hash_still_load() -> None:
         day.on_candle(candle)
     raw = day.positions_today()[0].to_dict()
     del raw["strategy_hash"]
-    assert Position.from_dict(raw).strategy_hash == ""
+    raw.pop("t2_trigger", None)
+    loaded = Position.from_dict(raw)
+    assert loaded.strategy_hash == ""
+    assert loaded.t2_trigger is None
+    assert loaded.t2_hit_level == loaded.t2

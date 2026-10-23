@@ -137,7 +137,7 @@ Two or more setups in the same direction mark a trending day.
 
 **R2 and S2**
 - They are strong resistance and support. Price rarely breaks them in one attempt, and there is a lot of consolidation and rejection there.
-- Touching R2 or S2 closes all positions in the matching direction.
+- Touching R2 or S2 closes all positions in the matching direction. T2 also fires when the futures extreme comes within `targets.t2_proximity_points` (default 3) of that level, so a rejection a few points in front still books. The fill is at the band (or at R2/S2 / the open if price traded through).
 - If R2 is broken, price tends to go through R3 to R4. If S2 is broken, it goes through S3 to S4.
 - **R2 and S2 as OR levels:** a break of R2 is traded as an ORB long with R2 acting as ORH. A break of S2 is traded as an ORB short with S2 acting as ORL. The target is R4 or S4.
 - **R4 and S4:** close all positions.
@@ -171,6 +171,8 @@ Two or more setups in the same direction mark a trending day.
 | ORB and the rest | R2 (long) or S2 (short). R4 or S4 for trades on a broken R2 or S2. |
 
 T2 is capped by the mandatory exits in Section 4.
+
+**T2 proximity [Assumption]:** T2 is reached when the bar's high (long) or low (short) comes within `targets.t2_proximity_points` of T2 (default 3, max 5, 0 = exact touch). R2/S2 often reject a few points in front of the print. The OPENED card still shows the chart level (S2); the trigger is that many points in front. The buffer shrinks so T2 keeps at least 10 points of room from the entry. Fill at the band; if price tagged T2 or gapped through it, fill at T2 or the open (unchanged). This does not start a new trade; a break of S2 is still a later `PIVOT_BREAKOUT` after close + retest + confirm.
 
 **T1 [Assumption]:** the notes do not define T1. It is the nearest pivot level between entry and T2. If there is none, it is the halfway point to T2.
 
@@ -280,7 +282,7 @@ These are intentional, because the notes win:
 9. Phase 5 decisions (stops, targets, zone filter, arbiter):
    - **Stop reference (confirmed by you):** `stop_points` = the distance to the structural level, capped at 35 and raised to the 10-point floor. It is used **only to size the lots**. The trade's stop is 35 points (for close-based setups also the candle-close exit, whichever comes first). Example: the 15 Oct ORB is sized on 16.2 points but stopped at 35, so the loss at the stop is about twice the Rs 5,000 budget. This is accepted. `sizing.risk_basis: hard_stop` would size on the real stop instead.
    - **Touch stops (traps, structure, fake breaks)** still use the level when it is closer than 35 points, as in section 5, so their stop and lot sizing use the same distance. Say so if you want 35 points for those too.
-   - **T2:** from the setup's target reference (section 5 table). A trade entered below R2 is capped at R2 (touching R2 closes everything). A trade on a broken R2, or entered beyond R2, targets R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected.
+   - **T2:** from the setup's target reference (section 5 table). A trade entered below R2 is capped at R2 (touching R2 closes everything). A trade on a broken R2, or entered beyond R2, targets R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T2 also fires `t2_proximity_points` in front of the level (default 3).
    - **Consolidation target:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
    - **T1:** the nearest pivot strictly between entry and T2, else halfway. No minimum distance.
    - **Aggressive entries** (blocked in the neutral zone): Case 1/2 follow-ups and the consolidation breakout (the notes label the direct no-retest entry "aggressive"). The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
@@ -303,7 +305,7 @@ These are intentional, because the notes win:
    - **Order inside one candle** is unknown, so replay is conservative: the stop is checked before targets (a candle that reaches both is a loss), and after T1 the break-even stop applies from the next candle. A gap through a stop fills at the open (worse). A gap through a target fills at the open (better).
    - **Candle-close exit:** a close strictly beyond the level exits at that close. A close exactly on the level does not. Live polls never trigger it.
    - **Entry timing:** a position opens at the close of the signal candle and is first checked on the next candle. Anything the signal candle did after the entry price traded is not checked (an unavoidable blind spot at candle granularity).
-   - **T1:** books `t1_book_lots` whole lots and moves the stop to the futures entry (option: the entry premium). With one lot only the stop moves. T2 closes what is left. R2/S2 and R4/S4 are mandatory exits because T2 is capped at them.
+   - **T1:** books `t1_book_lots` whole lots and moves the stop to the futures entry (option: the entry premium). With one lot only the stop moves. T2 closes what is left, including when the extreme comes within `t2_proximity_points` of T2. R2/S2 and R4/S4 are mandatory exits because T2 is capped at them.
    - **End of day:** open positions close at the close of the 15:27 candle (15:30), at the live LTP if given.
    - **Fill prices:** a live poll fills at the live option LTP. A replay, or a touch inside a closed candle, models the option price as `entry + sign x futures move x delta`. Slippage (`paper.slippage_option_points`, default 0) is paid on entry and on every exit.
    - **Charges** (`paper.charges`, all assumptions): brokerage the lower of Rs 20 and 0.1% per order, STT 0.15% on the sell side, exchange 0.03503%, SEBI 0.0001%, stamp 0.003% on the buy side, GST 18% on brokerage, exchange and SEBI. Check them against a Groww contract note.

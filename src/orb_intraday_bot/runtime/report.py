@@ -58,6 +58,16 @@ def _named_level(text: str) -> str | None:
     return found[-1] if found else None
 
 
+def _t2_trigger_note(pos: Position, *, plain: bool = False) -> str:
+    """Shown when T2 fires in front of the chart level (proximity band)."""
+    trigger = pos.t2_hit_level
+    if abs(trigger - pos.t2) < 1e-6:
+        return ""
+    if plain:
+        return f" (trigger {trigger:.1f})"
+    return f"\n      trigger <code>{trigger:.1f}</code>"
+
+
 def sl_level_name(trade: PlannedTrade) -> str:
     """Short stop label: ORH, ORL, 35 pts, 2HH, ..."""
     basis = trade.stop.basis
@@ -109,7 +119,7 @@ def format_opened(outcome: SignalOutcome) -> str:
         f"(sized for Rs {plan.sized_risk_inr:,.0f}, loss at stop Rs {plan.risk_at_stop_inr:,.0f})\n"
         f"      T1 {t1_name} futures {pos.t1:.1f} / option {plan.t1:.2f}"
         f" (book {pos.t1_book_lots} lot(s)), T2 {t2_name} futures {pos.t2:.1f} / "
-        f"option {plan.t2:.2f}\n"
+        f"option {plan.t2:.2f}{_t2_trigger_note(pos, plain=True)}\n"
         f"      {_rr_line(plan)}"
         f"{flags}"
     )
@@ -158,7 +168,8 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
         f"  (book {pos.t1_book_lots} lot(s))\n"
         f"<b>T2</b>   {t2_name}\n"
         f"      option <code>{plan.t2:.2f}</code>   "
-        f"fut <code>{pos.t2:.1f}</code>\n"
+        f"fut <code>{pos.t2:.1f}</code>"
+        f"{_t2_trigger_note(pos)}\n"
         f"\n<b>{escape(_rr_line(plan))}</b>"
         f"{flags}"
     )

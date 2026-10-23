@@ -216,12 +216,17 @@ def progress_text(positions: Sequence[Position]) -> str:
             slip = f" (planned {p.planned_entry:.2f})"
         stop_note = " (moved to entry after T1)" if p.stop_at_entry else ""
         t1 = "done" if p.t1_done else "pending"
+        t2_note = (
+            f" (trigger {p.t2_hit_level:.1f})"
+            if abs(p.t2_hit_level - p.t2) >= 1e-6
+            else ""
+        )
         out.append(
             f"- {p.direction.value} {p.setup} {p.trading_symbol} [{p.order_mode}] "
             f"{p.remaining_lots}/{p.lots} lot(s)\n"
             f"  entry premium {p.entry_ltp:.2f}{slip}, futures entry {p.futures_entry:.1f}\n"
             f"  futures stop {p.active_stop:.1f}{stop_note}, T1 {p.t1:.1f} ({t1}), "
-            f"T2 {p.t2:.1f}\n"
+            f"T2 {p.t2:.1f}{t2_note}\n"
             f"  option stop {p.active_option_stop:.2f}, T1 {p.t1_option:.2f}, "
             f"T2 {p.t2_option:.2f}"
         )

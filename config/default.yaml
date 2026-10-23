@@ -25,6 +25,7 @@ targets:
   t1_book_fraction: 0.5              # [assumption]
   move_sl_to_entry_after_t1: true    # [assumption]
   t1_max_distance_points: null       # [tuning] null = no cap; else T1 is at most this far from entry
+  t2_proximity_points: 3             # T2 fires this many pts in front of the level (0 = exact, max 5)
 
 options:
   strike_step: 50

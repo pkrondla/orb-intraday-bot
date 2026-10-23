@@ -17,7 +17,7 @@ from orb_intraday_bot.engine.zone_filter import zone_block_reason
 from orb_intraday_bot.indicators.pivots import traditional_pivots
 from orb_intraday_bot.risk.sizing import lots_for, risk_budget_inr
 from orb_intraday_bot.risk.stops import PlanError, plan_stop
-from orb_intraday_bot.risk.targets import plan_targets
+from orb_intraday_bot.risk.targets import plan_targets, t2_trigger_price
 from tests.helpers import at, candle
 
 # Narrow pivots: S5 50 S4 60 S3 70 S2 80 S1 90 P 100 R1 110 R2 120 R3 130 R4 140 R5 150
@@ -143,6 +143,29 @@ def test_no_structural_stop_means_hard_stop() -> None:
 # ---- target plan ---------------------------------------------------------------------------
 def targets(sig: SetupSignal, pivots=NARROW, orh=110.0, orl=95.0):  # type: ignore[no-untyped-def]
     return plan_targets(sig, pivots, orh, orl, STOPS)
+
+
+def test_t2_trigger_price_sits_a_few_points_in_front() -> None:
+    assert t2_trigger_price(
+        22800, 22900, long=True, proximity_points=3, min_stop_points=10
+    ) == 22897
+    assert t2_trigger_price(
+        22800, 22700, long=False, proximity_points=3, min_stop_points=10
+    ) == 22703
+    assert t2_trigger_price(
+        22800, 22900, long=True, proximity_points=0, min_stop_points=10
+    ) == 22900
+
+
+def test_t2_trigger_shrinks_so_the_level_keeps_ten_points_of_room() -> None:
+    # T2 is 12 pts away: buffer is min(3, 2) = 2, trigger 10 pts from entry.
+    assert t2_trigger_price(
+        22800, 22812, long=True, proximity_points=3, min_stop_points=10
+    ) == 22810
+    # T2 is exactly 10 pts: no buffer, exact touch.
+    assert t2_trigger_price(
+        22800, 22810, long=True, proximity_points=3, min_stop_points=10
+    ) == 22810
 
 
 def test_orb_long_targets_r2_with_nearest_pivot_as_t1() -> None:

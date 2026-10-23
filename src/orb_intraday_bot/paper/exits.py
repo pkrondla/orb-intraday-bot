@@ -8,7 +8,8 @@ A position is closed by the first of:
 4. the end of the day
 
 The mandatory pivot exits (R2/S2 touched, R4/S4) are already T2: the target planner caps T2 at
-them, so reaching T2 closes whatever is left.
+them, so reaching T2 closes whatever is left. T2 also fires when the extreme comes within
+`t2_proximity_points` of that level (a near-miss at S2/R2).
 
 Prices are checked on a `Bar`. A live poll is a bar with open = high = low = close = the price.
 A closed candle is a bar with its own OHLC. Inside one candle the order of events is unknown, so
@@ -250,8 +251,8 @@ def _evaluate(
                     f"(futures {position.futures_entry:.1f}, option {position.entry_ltp:.2f})",
                 )
             )
-    if position.is_open and _reached(bar, position.t2, d):
-        t2_fill_price = max(bar.open, position.t2) if d > 0 else min(bar.open, position.t2)
+    if position.is_open and _reached(bar, position.t2_hit_level, d):
+        t2_fill_price = _t2_fill_price(bar, position, d)
         close_all(ExitReason.T2, t2_fill_price, live)
         return
 
@@ -264,6 +265,12 @@ def _evaluate(
 
 def _reached(bar: Bar, level: float, d: float) -> bool:
     return bar.high >= level if d > 0 else bar.low <= level
+
+
+def _t2_fill_price(bar: Bar, position: Position, d: float) -> float:
+    """Fill at T2 if tagged, else at the proximity band. A gap through T2 fills at the open."""
+    level = position.t2 if _reached(bar, position.t2, d) else position.t2_hit_level
+    return max(bar.open, level) if d > 0 else min(bar.open, level)
 
 
 def close_at_end_of_day(

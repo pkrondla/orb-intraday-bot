@@ -16,6 +16,11 @@ R2) are capped at R4 (S4). An entry beyond R4 (S4) has no room and is rejected.
 T1 [Assumption]: the nearest pivot strictly between the entry and T2, else halfway. Optionally
 (targets.t1_max_distance_points, off by default) T1 is pulled in to at most that many points.
 
+T2 is taken when the futures extreme comes within `t2_proximity_points` of the level (default 3),
+so an S2/R2 rejection a few points in front still books. The chart level stays T2; the fill is
+at the band (or at T2 / the open if price traded through). The buffer shrinks so T2 keeps at
+least `min_stop_points` of room from the entry.
+
 A target closer than the 10-point safety floor is rejected: the trade would have no room.
 """
 
@@ -135,3 +140,20 @@ def _t1(entry: float, t2: float, pivots: Pivots | None) -> tuple[float, str]:
             name, value = min(between, key=lambda nv: abs(nv[1] - entry))
             return value, f"nearest pivot {name}"
     return (entry + t2) / 2, "halfway to T2"
+
+
+def t2_trigger_price(
+    entry: float,
+    t2: float,
+    *,
+    long: bool,
+    proximity_points: float,
+    min_stop_points: float,
+) -> float:
+    """Futures price at which T2 fires. Equal to `t2` when proximity is 0 or T2 is too close."""
+    if proximity_points <= 0:
+        return t2
+    t2_pts = abs(t2 - entry)
+    buf = min(proximity_points, max(0.0, t2_pts - min_stop_points))
+    d = 1.0 if long else -1.0
+    return t2 - d * buf

@@ -24,5 +24,6 @@ def test_default_yaml_loads() -> None:
     cfg = load_strategy_config(Path(__file__).resolve().parents[2] / "config" / "default.yaml")
     assert cfg.instrument.underlying == "NIFTY"
     assert cfg.stops.hard_stop_points == 35
+    assert cfg.targets.t2_proximity_points == 3
     assert cfg.options.delta_target == 0.55
     assert cfg.enabled_setups.both_sides_trap is False

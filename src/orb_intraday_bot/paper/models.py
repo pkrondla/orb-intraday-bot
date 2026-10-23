@@ -91,6 +91,7 @@ class Position:
     t1_book_lots: int
     # state
     remaining_lots: int
+    t2_trigger: float | None = None  # T2 fires here (proximity band); None = exact t2
     t1_done: bool = False
     breakeven_after_t1: bool = True   # from config targets.move_sl_to_entry_after_t1
     strategy_hash: str = ""           # the rules this trade was opened under (config.fingerprint)
@@ -129,6 +130,11 @@ class Position:
     @property
     def remaining_quantity(self) -> int:
         return self.remaining_lots * self.lot_size
+
+    @property
+    def t2_hit_level(self) -> float:
+        """Futures price that counts as T2 (the proximity band, or T2 itself)."""
+        return self.t2 if self.t2_trigger is None else self.t2_trigger
 
     @property
     def is_open(self) -> bool:
