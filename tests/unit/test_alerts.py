@@ -5,13 +5,13 @@ from __future__ import annotations
 from orb_intraday_bot.core.events import LevelSet
 from orb_intraday_bot.core.models import Direction, Zone
 from orb_intraday_bot.core.signals import PatternEvent, PatternKind, Setup, SetupSignal
+from orb_intraday_bot.engine.signal_engine import PlannedTrade
 from orb_intraday_bot.paper.exits import ExitEvent
 from orb_intraday_bot.paper.models import ExitReason, Fill
-from orb_intraday_bot.runtime.alerts import Alerts
-from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
-from orb_intraday_bot.engine.signal_engine import PlannedTrade
 from orb_intraday_bot.risk.stops import StopPlan
 from orb_intraday_bot.risk.targets import TargetPlan
+from orb_intraday_bot.runtime.alerts import Alerts
+from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
 from orb_intraday_bot.runtime.report import _rr, sl_level_name, target_level_name
 from tests.helpers import at, candle
 from tests.runtime_support import Recorder, make_day, real_day
@@ -99,7 +99,9 @@ def test_opened_card_labels_sl_t1_t2_levels() -> None:
     assert sl_level_name(_planned("level is 18.5 pts away", level_name="ORL")) == "ORL"
     assert sl_level_name(_planned("level is 42.0 pts away: hard stop 35")) == "35 pts"
     assert sl_level_name(_planned("standard 35-point stop")) == "35 pts"
-    assert sl_level_name(_planned("level is 8.0 pts away: raised to the 10-point floor")) == "10 pts"
+    assert sl_level_name(
+        _planned("level is 8.0 pts away: raised to the 10-point floor")
+    ) == "10 pts"
     assert sl_level_name(_planned("level is 18.5 pts away", level_name="2HH")) == "2HH"
     assert target_level_name("nearest pivot P") == "P"
     assert target_level_name("nearest pivot S1") == "S1"
