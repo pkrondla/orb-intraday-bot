@@ -70,13 +70,29 @@ def _extract_status(payload: dict[str, Any]) -> str:
 
 def _extract_avg_price(payload: dict[str, Any]) -> float:
     # `price` is deliberately not read: it is the order's limit price, not what it filled at.
-    for key in ("average_fill_price", "average_price", "avg_price", "filled_price"):
-        try:
-            value = float(payload.get(key) or 0)
-        except (TypeError, ValueError):
-            continue
-        if value > 0:
-            return value
+    blobs: list[dict[str, Any]] = [payload]
+    for key in ("payload", "data", "order"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            blobs.append(nested)
+    for blob in blobs:
+        for key in ("average_fill_price", "average_price", "avg_price", "filled_price"):
+            try:
+                value = float(blob.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+    return 0.0
+
+
+def _fallback_fill_price(record: OrderRecord) -> float:
+    """When Groww reports a fill with no average price (today's PE stop was `65@0.00`)."""
+    intent = record.intent
+    if intent.trigger_price and intent.trigger_price > 0:
+        return float(intent.trigger_price)
+    if intent.price and intent.price > 0:
+        return float(intent.price)
     return 0.0
 
 
@@ -269,7 +285,18 @@ class GrowwVenue:
         now = self._clock.now().astimezone(IST)
         status = _extract_status(payload)
         filled = _extract_filled_qty(payload)
-        avg = _extract_avg_price(payload)
+        broker_avg = _extract_avg_price(payload)
+        avg = broker_avg if broker_avg > 0 else _fallback_fill_price(record)
+        if (
+            broker_avg <= 0
+            and avg > 0
+            and (filled > 0 or status in _FILLED_STATUSES)
+        ):
+            log.warning(
+                "broker fill for %s has no average price; using %.2f (%s)",
+                record.intent.trading_symbol, avg,
+                "trigger" if record.intent.trigger_price else "limit",
+            )
         if filled > record.filled_qty and avg > 0:
             qty = filled - record.filled_qty
             record.fills.append(

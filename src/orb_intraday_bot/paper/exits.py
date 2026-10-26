@@ -128,6 +128,12 @@ def _record(
     cfg: PaperConfig,
 ) -> Fill:
     """Write one exit fill into the position and close it when no lots are left."""
+    if price <= 0 and position.entry_ltp > 0:
+        log.warning(
+            "exit fill price missing for %s; using entry %.2f so P&L is not booked at 0",
+            position.trading_symbol, position.entry_ltp,
+        )
+        price = position.entry_ltp
     fill = Fill(
         time=time,
         reason=reason,

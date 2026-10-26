@@ -259,6 +259,47 @@ def test_trading_factory_reuses_shared_totp_key(tmp_path: Path) -> None:
     assert (Path(tmp_path) / "groww_token.json").parent == Path(tmp_path)
 
 
+def test_a_stop_fill_with_no_average_price_uses_the_trigger() -> None:
+    broker = FakeBroker()
+    venue = _venue(broker, fill_polls=0)
+    record = venue.submit(_stop())
+    broker.orders[record.broker_order_id].update(
+        order_status="EXECUTED", filled_quantity=75, average_fill_price=0
+    )
+    venue.poll(record)
+    assert record.status is OrderStatus.FILLED
+    assert record.filled_qty == 75
+    assert record.avg_price == 80.0          # the SL trigger, not ₹0
+
+
+def test_a_limit_fill_with_no_average_price_uses_the_limit() -> None:
+    broker = FakeBroker()
+    broker.fill = "none"
+    venue = _venue(broker, fill_polls=0)
+    record = venue.submit(_entry(price=100.0))
+    broker.orders[record.broker_order_id].update(
+        order_status="EXECUTED", filled_quantity=75, average_fill_price=0
+    )
+    venue.poll(record)
+    assert record.status is OrderStatus.FILLED
+    assert record.avg_price == 100.0
+
+
+def test_average_price_nested_under_payload_is_read() -> None:
+    broker = FakeBroker()
+    broker.fill = "none"
+    venue = _venue(broker, fill_polls=0)
+    record = venue.submit(_entry())
+    broker.orders[record.broker_order_id] = {
+        "order_status": "EXECUTED",
+        "filled_quantity": 75,
+        "payload": {"average_fill_price": 97.25},
+    }
+    venue.poll(record)
+    assert record.status is OrderStatus.FILLED
+    assert record.avg_price == 97.25
+
+
 @pytest.mark.parametrize("status", ["COMPLETED", "COMPLETE", "EXECUTED"])
 def test_every_filled_status_spelling_is_a_fill(status: str) -> None:
     broker = FakeBroker()

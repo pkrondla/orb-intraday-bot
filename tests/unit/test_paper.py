@@ -14,7 +14,7 @@ from orb_intraday_bot.options.pricing import OptionPlan, plan_option_trade
 from orb_intraday_bot.options.selector import OptionSelection
 from orb_intraday_bot.paper.charges import order_charges
 from orb_intraday_bot.paper.engine import PaperEngine
-from orb_intraday_bot.paper.exits import Bar, evaluate_bar, modeled_option_price
+from orb_intraday_bot.paper.exits import Bar, book_broker_stop, evaluate_bar, modeled_option_price
 from orb_intraday_bot.paper.models import ExitReason, Position
 from orb_intraday_bot.paper.report import (
     format_closed_position,
@@ -127,6 +127,16 @@ def test_hard_stop_on_touch_fills_at_the_stop_price() -> None:
     assert fill.lots == 6 and not p.is_open and p.closed_at == at(9, 36)
     assert fill.futures_points == -35.0
     assert fill.option_gross == pytest.approx((130.75 - 150.0) * 6 * LOT)
+
+
+def test_a_zero_broker_fill_is_booked_at_entry_not_as_a_wipe() -> None:
+    p = opened()
+    event = book_broker_stop(p, at(9, 48), 0.0, LOT, 22790.0, "live", CFG.paper)
+    fill = event.fill
+    assert fill is not None
+    assert fill.option_price == p.entry_ltp
+    assert fill.option_gross == 0.0
+    assert fill.quantity == LOT
 
 
 def test_gap_through_the_stop_fills_at_the_open() -> None:

@@ -25,6 +25,10 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
   the event, so the trigger can be marked on the chart.
 
 ### Fixed
+- Groww stop fills that report quantity but `average_fill_price` 0 are no longer
+  booked as a ₹0 sale (that turned a break-even PE stop into a −₹8,986 wipe).
+  Fill price falls back to the stop trigger, then the limit, then entry. The
+  already-stored 26 Oct books stay wrong until those fills are repaired.
 - Bump certifi to 2026.10.19 (PYSEC-2026-4320). growwapi 1.5.0 still declares
   `certifi<2026.0.0`, so lock installs use `--no-deps` (the lock is a full freeze).
 - EC2 deploy: stop OrbBot/OrbBotWatch with `sc.exe` (and a taskkill timeout)

@@ -282,6 +282,20 @@ def test_a_rejected_stop_is_alerted_and_retried_later(tmp_path: Path) -> None:
     assert len(rig.alerts) == count
 
 
+def test_a_stop_fill_with_no_broker_price_uses_the_trigger(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path, kind="live")
+    position = _enter(rig)
+    record = rig.executor._stops[position.position_id]
+    record.status = OrderStatus.FILLED
+    record.filled_qty = LOT
+    record.avg_price = 0.0
+    fills = rig.executor.poll_stops([position], NOW)
+    assert len(fills) == 1
+    assert fills[0].price == record.intent.trigger_price
+    assert fills[0].quantity == LOT
+    assert record.avg_price == record.intent.trigger_price
+
+
 def test_a_stop_that_fires_is_reported_once_with_its_fill(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     position = _enter(rig)

@@ -58,6 +58,30 @@ _ALERT_EVERY_SEC = 300.0
 _MARKET_RETRIES = 3
 
 
+def recorded_fill_price(record: OrderRecord, *, fallback: float = 0.0) -> float:
+    """Groww sometimes reports a fill with quantity and `average_fill_price` 0.
+
+    Prefer the broker average. If it is missing, the stop trigger, then the limit,
+    then the caller's fallback (the position's entry premium). Never return 0 when
+    any of those is known — booking a sale at ₹0 wipes the premium as a loss.
+    """
+    if record.avg_price > 0:
+        return float(record.avg_price)
+    intent = record.intent
+    for label, value in (
+        ("trigger", intent.trigger_price),
+        ("limit", intent.price),
+        ("entry", fallback),
+    ):
+        if value is not None and float(value) > 0:
+            log.warning(
+                "broker fill price missing for %s; using %s %.2f",
+                intent.trading_symbol, label, float(value),
+            )
+            return float(value)
+    return 0.0
+
+
 class LiveExecutor:
     def __init__(
         self,
@@ -269,7 +293,10 @@ class LiveExecutor:
             record = self._cancel(record)
         if record.status is OrderStatus.CANCELLED:
             if record.filled_qty > 0:        # the stop executed in part before it was cancelled
-                self._carry(position, record.filled_qty, record.avg_price)
+                self._carry(
+                    position, record.filled_qty,
+                    recorded_fill_price(record, fallback=position.entry_ltp),
+                )
             self._clear_stop_fields(position)
             return True
         return False
@@ -284,10 +311,11 @@ class LiveExecutor:
                 continue
             self._venue.poll(record)
             if record.status is OrderStatus.FILLED:
+                price = recorded_fill_price(record, fallback=position.entry_ltp)
+                if record.avg_price <= 0 and price > 0:
+                    record.avg_price = price
                 self._persist(record, "stop_filled")
-                fills.append(
-                    StopFill(position.position_id, record.avg_price, record.filled_qty, now)
-                )
+                fills.append(StopFill(position.position_id, price, record.filled_qty, now))
             elif record.status in {OrderStatus.CANCELLED, OrderStatus.REJECTED}:
                 self._persist(record, "stop_gone")
                 self._clear_stop_fields(position)
@@ -351,13 +379,19 @@ class LiveExecutor:
             raise ExitFailedError("the protective stop is not on record: not selling blind")
         self._venue.poll(record)
         if record.status is OrderStatus.FILLED:
+            price = recorded_fill_price(record, fallback=position.entry_ltp)
+            if record.avg_price <= 0 and price > 0:
+                record.avg_price = price
             self._persist(record, "stop_filled")
-            return record.avg_price, record.filled_qty
+            return price, record.filled_qty
         if not self._cancel_stop(position):
             record = self._stops.get(position.position_id) or record
             if record.status is OrderStatus.FILLED:       # it executed during the cancel
+                price = recorded_fill_price(record, fallback=position.entry_ltp)
+                if record.avg_price <= 0 and price > 0:
+                    record.avg_price = price
                 self._persist(record, "stop_filled")
-                return record.avg_price, record.filled_qty
+                return price, record.filled_qty
             raise ExitFailedError("the protective stop could not be cancelled: not selling")
         return None
 
