@@ -95,6 +95,7 @@ class SignalEngine:
                 targets = plan_targets(
                     sig, self._pivots, orh, orl, self._cfg.stops,
                     self._cfg.targets.t1_max_distance_points,
+                    zone=zone,
                 )
             except PlanError as exc:
                 result.rejected.append(Rejection(sig, "plan", str(exc)))

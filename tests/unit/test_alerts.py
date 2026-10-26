@@ -103,6 +103,8 @@ def test_opened_card_labels_sl_t1_t2_levels() -> None:
     assert sl_level_name(_planned("level is 18.5 pts away", level_name="2HH")) == "2HH"
     assert target_level_name("nearest pivot P") == "P"
     assert target_level_name("nearest pivot S1") == "S1"
+    assert target_level_name("P (neutral zone, nearest pivot)") == "P"
+    assert target_level_name("ORH") == "ORH"
     assert target_level_name("halfway to T2") == "halfway"
     assert target_level_name("S2") == "S2"
     assert target_level_name("ORL, capped at S2") == "S2"

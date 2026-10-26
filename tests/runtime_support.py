@@ -95,7 +95,9 @@ class FakeSource(SyntheticOptions):
         return [c for c in self.candles if c.start + timedelta(minutes=3) <= now]
 
     def ltp(self, trading_symbols: Sequence[str]) -> dict[str, float]:
-        price = self.candles[-1].close if self.candles else 22800.0
+        now = self.clock.now()
+        published = [c for c in self.candles if c.start + timedelta(minutes=3) <= now]
+        price = published[-1].close if published else 22800.0
         if self.price_override and self.clock.now() >= self.price_override[0]:
             price = self.price_override[1]
         return {

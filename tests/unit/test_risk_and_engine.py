@@ -252,6 +252,66 @@ def test_range_target_without_pivots_uses_the_signal_price() -> None:
         targets(make(target_ref="RANGE_OPPOSITE_END"))    # no price supplied
 
 
+# 26 Oct 2026 session levels (exchange close). Neutral is S1 22390.6 .. R1 22807.1.
+OCT26 = traditional_pivots(22851.5, 22435.0, 22576.6)
+
+
+def test_neutral_zone_3ll_scalps_orh_and_runs_to_p() -> None:
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, entry=22546.4, stop_level=22500.0, stop_on="touch",
+        target_ref="R2", level_name="3LL", level=22500.0,
+    )
+    t = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
+    assert t.t1 == pytest.approx(22575.0) and t.t1_basis == "ORH"
+    assert t.t2 == pytest.approx(22621.0333, abs=0.05) and t.t2_basis.startswith("P")
+    setup = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS)
+    assert setup.t2 == pytest.approx(23037.5, abs=0.05)
+    assert setup.t1 == pytest.approx(22621.0333, abs=0.05)
+
+
+def test_neutral_zone_short_scalps_orl_and_runs_to_p() -> None:
+    sig = make(
+        direction=Direction.SHORT, entry=22700.0, stop_level=22740.0, stop_on="touch",
+        target_ref="S2", level_name="2HH", level=22740.0, setup=Setup.STRUCTURE_WHIPSAW,
+    )
+    t = plan_targets(sig, OCT26, 22575.0, 22650.0, STOPS, zone=Zone.NEUTRAL)
+    assert t.t1 == pytest.approx(22650.0) and t.t1_basis == "ORL"
+    assert t.t2 == pytest.approx(22621.0333, abs=0.05) and t.t2_basis.startswith("P")
+
+
+def test_neutral_zone_above_p_runs_to_r1() -> None:
+    sig = make(entry=22650.0, stop_level=22620.0, target_ref="R2")
+    t = plan_targets(sig, OCT26, 22700.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
+    assert t.t2 == pytest.approx(22807.0666, abs=0.05) and t.t2_basis.startswith("R1")
+    assert t.t1 == pytest.approx(22700.0) and t.t1_basis == "ORH"
+
+
+def test_neutral_zone_skips_an_or_level_inside_the_floor() -> None:
+    sig = make(entry=22546.4, stop_level=22500.0, target_ref="R2")
+    t = plan_targets(sig, OCT26, 22550.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
+    assert t.t2 == pytest.approx(22621.0333, abs=0.05)
+    assert t.t1 == pytest.approx((22546.4 + t.t2) / 2) and t.t1_basis == "halfway to T2"
+
+
+def test_neutral_zone_rejects_when_the_zone_edge_is_too_close() -> None:
+    # WIDE: R1 120. Entry 112 is still neutral; R1 is only 8 pts away, P is behind.
+    sig = make(entry=112, stop_level=95, target_ref="R2")
+    with pytest.raises(PlanError, match="neutral zone: no pivot"):
+        plan_targets(sig, WIDE, 116.0, 80.0, STOPS, zone=Zone.NEUTRAL)
+
+
+def test_bullish_and_bearish_zones_keep_the_setup_targets() -> None:
+    long = plan_targets(make(entry=121, stop_level=110), WIDE, 110.0, 95.0, STOPS,
+                        zone=Zone.BULLISH)
+    assert long.t2 == 140 and long.t1 == pytest.approx(130.5)
+    short = plan_targets(
+        make(direction=Direction.SHORT, entry=70, level=95, stop_level=95, target_ref="S2",
+             level_name="ORL"),
+        WIDE, 110.0, 95.0, STOPS, zone=Zone.BEARISH,
+    )
+    assert short.t2 == 60
+
+
 # ---- sizing --------------------------------------------------------------------------------
 def test_risk_budget_and_lots() -> None:
     assert risk_budget_inr(SizingConfig()) == 5000
@@ -300,6 +360,18 @@ def test_engine_accepts_a_valid_signal_and_builds_the_plan() -> None:
     assert trade.stop.stop_points == 15 and trade.targets.t2 == 140
     assert trade.stop.price_stop == 110 and trade.stop.close_exit_level == 110
     assert trade.risk_budget_inr == 5000
+
+
+def test_engine_applies_neutral_zone_targets() -> None:
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, entry=100, stop_level=85, stop_on="touch",
+        target_ref="R2", sign="st", level_name="3LL", level=85,
+    )
+    res = engine().evaluate(bar(100), [sig], 110, 95)
+    assert res.zone is Zone.NEUTRAL
+    t = res.accepted[0].targets
+    assert t.t2 == pytest.approx(120) and t.t2_basis.startswith("R1")
+    assert t.t1 == pytest.approx(110) and t.t1_basis == "ORH"
 
 
 def test_engine_zone_block_is_reported() -> None:

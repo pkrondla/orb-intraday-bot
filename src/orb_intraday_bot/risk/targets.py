@@ -13,6 +13,11 @@ T2 is capped by the mandatory exits: touching R2 (S2) closes everything, so a tr
 R2 never targets beyond it; trades on a broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond
 R2) are capped at R4 (S4). An entry beyond R4 (S4) has no room and is rejected.
 
+Neutral zone (R1 to S1) [spec section 4]: scalp and run, every standard setup. T2 is the nearest
+pivot still inside the zone (P, else R1 / S1), at least `min_stop_points` away. T1 is the nearest
+level (ORH / ORL or a pivot) strictly between the entry and that T2 and at least the floor away;
+otherwise halfway. R2 / S2 are not aims in this zone.
+
 T1 [Assumption]: the nearest pivot strictly between the entry and T2, else halfway. Optionally
 (targets.t1_max_distance_points, off by default) T1 is pulled in to at most that many points.
 
@@ -29,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from orb_intraday_bot.config.settings import StopsConfig
-from orb_intraday_bot.core.models import Direction
+from orb_intraday_bot.core.models import Direction, Zone
 from orb_intraday_bot.core.signals import Setup, SetupSignal
 from orb_intraday_bot.indicators.pivots import Pivots
 from orb_intraday_bot.risk.stops import PlanError
@@ -52,7 +57,11 @@ def plan_targets(
     orl: float | None,
     stops: StopsConfig,
     t1_max_points: float | None = None,
+    zone: Zone | None = None,
 ) -> TargetPlan:
+    if zone is Zone.NEUTRAL:
+        return _neutral_targets(signal, pivots, orh, orl, stops, t1_max_points)
+
     long = signal.direction is Direction.LONG
     d = 1.0 if long else -1.0
     entry = signal.entry_price
@@ -120,9 +129,7 @@ def plan_targets(
         raise PlanError(f"target {label} is only {t2_points:.1f} pts away")
 
     t1, t1_basis = _t1(entry, raw, pivots)
-    if t1_max_points is not None and abs(t1 - entry) > t1_max_points:
-        t1 = entry + d * t1_max_points
-        t1_basis = f"{t1_basis}, capped at {t1_max_points:g} pts"
+    t1, t1_basis = _cap_t1(entry, t1, t1_basis, d, t1_max_points)
     return TargetPlan(
         t1=t1,
         t2=raw,
@@ -133,6 +140,73 @@ def plan_targets(
     )
 
 
+def _neutral_targets(
+    signal: SetupSignal,
+    pivots: Pivots | None,
+    orh: float | None,
+    orl: float | None,
+    stops: StopsConfig,
+    t1_max_points: float | None,
+) -> TargetPlan:
+    """Scalp and run inside R1–S1: T2 = nearest in-zone pivot, T1 = first magnet in front."""
+    if pivots is None:
+        raise PlanError("neutral-zone targets need previous-session pivots")
+
+    long = signal.direction is Direction.LONG
+    d = 1.0 if long else -1.0
+    entry = signal.entry_price
+    floor = stops.min_stop_points
+    edge_name, edge = ("R1", pivots.r1) if long else ("S1", pivots.s1)
+
+    in_zone = [
+        (n, v)
+        for n, v in pivots.ordered()
+        if (v - entry) * d >= floor and (edge - v) * d >= 0
+    ]
+    if not in_zone:
+        raise PlanError(
+            f"neutral zone: no pivot at least {floor:g} pts toward {edge_name}"
+        )
+    t2_name, t2 = min(in_zone, key=lambda nv: abs(nv[1] - entry))
+
+    t1, t1_basis = _neutral_t1(entry, t2, d, pivots, orh, orl, long, floor)
+    t1, t1_basis = _cap_t1(entry, t1, t1_basis, d, t1_max_points)
+    return TargetPlan(
+        t1=t1,
+        t2=t2,
+        t1_points=abs(t1 - entry),
+        t2_points=abs(t2 - entry),
+        t1_basis=t1_basis,
+        t2_basis=f"{t2_name} (neutral zone, nearest pivot)",
+    )
+
+
+def _neutral_t1(
+    entry: float,
+    t2: float,
+    d: float,
+    pivots: Pivots,
+    orh: float | None,
+    orl: float | None,
+    long: bool,
+    floor: float,
+) -> tuple[float, str]:
+    magnets: list[tuple[str, float]] = [
+        (n, v) for n, v in pivots.levels_between(entry, t2) if abs(v - entry) >= floor
+    ]
+    or_name, or_level = ("ORH", orh) if long else ("ORL", orl)
+    if or_level is not None:
+        between = (or_level - entry) * d > 0 and (t2 - or_level) * d > 0
+        if between and abs(or_level - entry) >= floor:
+            magnets.append((or_name, or_level))
+    if not magnets:
+        return (entry + t2) / 2, "halfway to T2"
+    name, value = min(magnets, key=lambda nv: abs(nv[1] - entry))
+    if name in ("ORH", "ORL"):
+        return value, name
+    return value, f"nearest pivot {name}"
+
+
 def _t1(entry: float, t2: float, pivots: Pivots | None) -> tuple[float, str]:
     if pivots is not None:
         between = pivots.levels_between(entry, t2)
@@ -140,6 +214,18 @@ def _t1(entry: float, t2: float, pivots: Pivots | None) -> tuple[float, str]:
             name, value = min(between, key=lambda nv: abs(nv[1] - entry))
             return value, f"nearest pivot {name}"
     return (entry + t2) / 2, "halfway to T2"
+
+
+def _cap_t1(
+    entry: float,
+    t1: float,
+    t1_basis: str,
+    d: float,
+    t1_max_points: float | None,
+) -> tuple[float, str]:
+    if t1_max_points is not None and abs(t1 - entry) > t1_max_points:
+        return entry + d * t1_max_points, f"{t1_basis}, capped at {t1_max_points:g} pts"
+    return t1, t1_basis
 
 
 def t2_trigger_price(

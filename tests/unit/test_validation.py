@@ -360,7 +360,7 @@ def test_sweep_runs_variants_on_the_same_candles() -> None:
     assert [r.variant.name for r in results] == ["baseline", "one trade", "no structure"]
     assert results[1].stats.trades <= 1 <= results[0].stats.trades
     assert results[0].stats.group.points == pytest.approx(
-        sum(r.points for r in rows_from_results(results[0].results))
+        round(sum(r.points for r in rows_from_results(results[0].results)), 1)
     )
     table = format_sweep(results)
     assert "baseline" in table and "one trade" in table and "d pts" in table

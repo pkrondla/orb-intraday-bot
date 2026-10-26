@@ -129,7 +129,7 @@ Two or more setups in the same direction mark a trending day.
 
 | Zone | Rule |
 |---|---|
-| R1 to P to S1 (neutral) | No aggressive trades. Only standard entries, in scalp and run mode, aiming at the nearest pivot. |
+| R1 to P to S1 (neutral) | No aggressive trades. Only standard entries, in scalp and run mode, aiming at the nearest pivot. **Targets:** T2 is the nearest pivot still inside the zone (P, else R1 / S1), at least 10 points away. T1 is the nearest level (ORH / ORL or a pivot) strictly between the entry and T2 and at least 10 points away; otherwise halfway. R2 / S2 are not aims in this zone. Every standard setup uses this pair (ORB, trap confirmation, additional whipsaw, 2LL/3LL/2HH/3HH, fake break). |
 | Above R1 | Bullish bias. Only bullish trades: ORH Breakout and Bear Trap. Blocked: Bull Traps, ORL Breakdown, Failed Bear Trap. **No shorts.** |
 | R1 to R2 | Standard bullish trade. Aggressive, do not miss it. |
 | Below S1 | Bearish bias. Only bearish trades: ORL Breakdown, Bull Trap, Failed Bear Trap. Blocked: all bullish trades. **No longs.** |
@@ -282,9 +282,10 @@ These are intentional, because the notes win:
 9. Phase 5 decisions (stops, targets, zone filter, arbiter):
    - **Stop reference (confirmed by you):** `stop_points` = the distance to the structural level, capped at 35 and raised to the 10-point floor. It is used **only to size the lots**. The trade's stop is 35 points (for close-based setups also the candle-close exit, whichever comes first). Example: the 15 Oct ORB is sized on 16.2 points but stopped at 35, so the loss at the stop is about twice the Rs 5,000 budget. This is accepted. `sizing.risk_basis: hard_stop` would size on the real stop instead.
    - **Touch stops (traps, structure, fake breaks)** still use the level when it is closer than 35 points, as in section 5, so their stop and lot sizing use the same distance. Say so if you want 35 points for those too.
-   - **T2:** from the setup's target reference (section 5 table). A trade entered below R2 is capped at R2 (touching R2 closes everything). A trade on a broken R2, or entered beyond R2, targets R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T2 also fires `t2_proximity_points` in front of the level (default 3).
+   - **T2:** from the setup's target reference (section 5 table), except in the neutral zone (below). A trade entered below R2 is capped at R2 (touching R2 closes everything). A trade on a broken R2, or entered beyond R2, targets R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T2 also fires `t2_proximity_points` in front of the level (default 3).
+   - **Neutral-zone targets (confirmed 26 Oct 2026):** every standard entry uses scalp-and-run. T2 is the nearest pivot still inside R1–S1 (P, else R1 for a long / S1 for a short), at least 10 points away. T1 is the nearest of ORH/ORL and any pivot strictly between the entry and that T2, also at least 10 points away; otherwise halfway. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22575 (ORH) and T2 22621 (P), not T1 P / T2 R2.
    - **Consolidation target:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
-   - **T1:** the nearest pivot strictly between entry and T2, else halfway. No minimum distance.
+   - **T1:** outside the neutral zone, the nearest pivot strictly between entry and T2, else halfway. No minimum distance.
    - **Aggressive entries** (blocked in the neutral zone): Case 1/2 follow-ups and the consolidation breakout (the notes label the direct no-retest entry "aggressive"). The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
    - **One trade per sign.** A signal blocked by the zone filter does not use up its sign, so the standard trigger of the same sign can still be taken.
    - **Priority on the same candle** (assumption, `arbiter.priority`): ORB, R2/S2 breakout, trap confirmation, Case 1, Case 2, consolidation, additional whipsaw, fake break, 2LL/3LL/2HH/3HH. A lower-priority signal in the opposite direction on the same candle is dropped.

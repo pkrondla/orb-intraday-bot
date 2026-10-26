@@ -7,6 +7,10 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 ## [Unreleased]
 
 ### Changed
+- Neutral-zone targets are scalp-and-run for every standard setup: T2 is the nearest
+  pivot still inside R1–S1 (P, else R1 / S1); T1 is the first magnet in front (ORH / ORL
+  or a pivot), else halfway. R2 / S2 are not aims in this zone. Other zones keep the
+  setup T2 table. Golden replay: 186 → 182 trades, fill-points 2655.74 → 2195.48.
 - T2 fires when futures come within 3 points of the target (`targets.t2_proximity_points`),
   so an S2/R2 rejection that misses the print still books. Fill is at the band (or at T2 /
   the open if price traded through). The OPENED card still shows the chart level. Golden

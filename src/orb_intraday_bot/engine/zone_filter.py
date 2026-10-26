@@ -2,7 +2,8 @@
 
 - Above R1 (bullish): no shorts. Longs are allowed.
 - Below S1 (bearish): no longs. Shorts are allowed.
-- R1 to P to S1 (neutral): no aggressive entries. Standard entries are allowed.
+- R1 to P to S1 (neutral): no aggressive entries. Standard entries are allowed, and
+  `plan_targets` switches them to scalp-and-run (T2 = nearest in-zone pivot, T1 = first magnet).
 
 "Aggressive" is an entry with no retest or confirmation: the Case 1/2 follow-up entries and the
 consolidation breakout. When one is blocked here, the standard trigger of the same sign (the trap
