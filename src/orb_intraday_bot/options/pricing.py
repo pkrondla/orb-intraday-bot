@@ -3,11 +3,12 @@
 The bot always buys the option (a CE for a long signal, a PE for a short one), so the option price
 rises when the trade works, for both directions:
 
-    option_SL = entry_LTP - futures_stop_points * |delta|   (the trade's real stop: the setup
-                                                             level for ORB / pivot-breakout
-                                                             and for touch stops, else 35)
-    option_T1 = entry_LTP + futures_T1_points   * |delta|
-    option_T2 = entry_LTP + futures_T2_points   * |delta|
+    option_SL = entry_LTP - futures_stop_points * |delta|   (sizing / display; the live stop
+                                                             is the futures level. The broker
+                                                             CE/PE order is a crash net, see
+                                                             safety_net_option_stop)
+    option_T1 = entry_LTP + futures_T1_points   * |delta|   (display; T1 fires on futures)
+    option_T2 = entry_LTP + futures_T2_points   * |delta|   (display; T2 fires on futures)
     lots      = floor(risk amount / (sizing option points * lot size))
 
 The lots are sized on the distance to the structural level (`sizing.risk_basis: stop_plan`).
@@ -75,6 +76,25 @@ class OptionPlan:
 
 def round_to_tick(price: float, tick: float) -> float:
     return round(round(price / tick) * tick, 4)
+
+
+def safety_net_option_stop(
+    *,
+    planned_sl: float,
+    fill: float,
+    delta_used: float,
+    hard_stop_points: float,
+    tick: float,
+) -> float:
+    """Broker CE/PE trigger: a crash net, never tighter than the plan after a worse fill.
+
+    The live strategy stop is the futures level. Groww only holds this option price so a
+    dead bot is not naked. It is the lower of the unshifted plan SL and a 35-point
+    conversion from the fill. A worse fill therefore adds rupee risk; it does not pull
+    the stop closer to the market.
+    """
+    from_fill = round_to_tick(fill - hard_stop_points * abs(delta_used), tick)
+    return max(tick, round_to_tick(min(planned_sl, from_fill), tick))
 
 
 def book_lots_at_t1(lots: int, fraction: float) -> int:

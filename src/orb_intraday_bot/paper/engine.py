@@ -6,8 +6,8 @@ and time comes from the data, so replay and live use the same code.
 
 With an executor (the dry run or live trading) the rules are exactly the same, but each entry and
 each exit is carried out by the executor, and the position records the price it really got. The
-executor also keeps a protective stop-loss at the broker; if that stop is executed, the engine
-books it here.
+executor also keeps a crash-net stop-loss at the broker (not the strategy SL); if that net is
+executed, the engine books it here. Strategy SL, T1 and T2 are futures prices.
 
 Opening a position (at the close of the signal candle):
   entry premium = the option LTP at signal time (plus the configured slippage), or, with an
@@ -26,7 +26,7 @@ from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.models import Candle, Direction
 from orb_intraday_bot.engine.signal_engine import PlannedTrade
-from orb_intraday_bot.options.pricing import OptionPlan, book_lots_at_t1
+from orb_intraday_bot.options.pricing import OptionPlan, book_lots_at_t1, safety_net_option_stop
 from orb_intraday_bot.paper.charges import order_charges
 from orb_intraday_bot.paper.exits import (
     Bar,
@@ -128,11 +128,16 @@ class PaperEngine:
             done = executor.enter(trade, plan, opened_at)
             entry = round(round(done.price / tick) * tick, 4)
             lots, order_id, order_mode = done.lots, done.order_id, executor.mode
-            # Keep the planned distances (stop, T1, T2 in option points) from the real fill.
-            shift = entry - plan.entry_ltp
-            sl_exit = max(tick, round(round((plan.sl + shift) / tick) * tick, 4))
-            t1_option = round(round((plan.t1 + shift) / tick) * tick, 4)
-            t2_option = round(round((plan.t2 + shift) / tick) * tick, 4)
+            # Futures SL / T1 / T2 stay on the chart levels. A worse option fill must not
+            # pull the broker CE/PE stop closer: that order is only a crash net.
+            sl_exit = safety_net_option_stop(
+                planned_sl=plan.sl,
+                fill=entry,
+                delta_used=plan.delta_used,
+                hard_stop_points=self._cfg.stops.hard_stop_points,
+                tick=tick,
+            )
+            t1_option, t2_option = plan.t1, plan.t2
             t1_book_lots = (
                 plan.t1_book_lots
                 if lots == plan.lots

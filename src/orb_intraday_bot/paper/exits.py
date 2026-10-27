@@ -2,8 +2,9 @@
 
 A position is closed by the first of:
 
-1. the futures price stop (35-point hard stop or the touch level), or the option stop
-2. T1 (partial booking, then the stop moves to entry) and T2
+1. the futures price stop (the setup level or the 35-point hard stop). The option price is a
+   crash net only (broker SL and, if that order is missing, live option LTP).
+2. T1 (partial booking, then the stop moves to entry) and T2 — both on futures
 3. a candle *close* back beyond the stop level (close-based setups: ORB, R2/S2 breakout)
 4. the end of the day
 
@@ -222,7 +223,7 @@ def _evaluate(
         )
         events.append(ExitEvent(position.position_id, bar.time, _describe(position, fill), fill))
 
-    # 1. Stops: futures price, then the option price.
+    # 1. Strategy stop on futures, then the option crash net (if the broker order is missing).
     stop = position.active_stop
     stop_touched = bar.low <= stop if d > 0 else bar.high >= stop
     if stop_touched:

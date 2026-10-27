@@ -131,6 +131,8 @@ def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     buy_block = card.split("<b>SL</b>", 1)[0]
     assert f"fut <code>{pos.futures_entry:.1f}</code>" in buy_block
     assert f"fut <code>{pos.hard_stop:.1f}</code>" in card
+    assert "broker net option" in card
+    assert f"<code>{pos.sl_exit:.2f}</code>" in card
     assert f"fut <code>{pos.t1:.1f}</code>" in card
     assert f"fut <code>{pos.t2:.1f}</code>" in card
     if abs(pos.t2_hit_level - pos.t2) >= 1e-6:

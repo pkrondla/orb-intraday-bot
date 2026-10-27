@@ -227,7 +227,7 @@ def progress_text(positions: Sequence[Position]) -> str:
             f"  entry premium {p.entry_ltp:.2f}{slip}, futures entry {p.futures_entry:.1f}\n"
             f"  futures stop {p.active_stop:.1f}{stop_note}, T1 {p.t1:.1f} ({t1}), "
             f"T2 {p.t2:.1f}{t2_note}\n"
-            f"  option stop {p.active_option_stop:.2f}, T1 {p.t1_option:.2f}, "
+            f"  broker net {p.active_option_stop:.2f}, T1 {p.t1_option:.2f}, "
             f"T2 {p.t2_option:.2f}"
         )
         if p.order_mode != "paper":

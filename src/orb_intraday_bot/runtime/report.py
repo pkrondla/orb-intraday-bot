@@ -8,7 +8,6 @@ from html import escape
 
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.engine.signal_engine import PlannedTrade
-from orb_intraday_bot.options.pricing import OptionPlan
 from orb_intraday_bot.paper.exits import ExitEvent
 from orb_intraday_bot.paper.models import ExitReason, Position
 from orb_intraday_bot.paper.report import (
@@ -39,11 +38,13 @@ def _rr(entry: float, stop: float, target: float) -> str:
     return f"1 : {abs(target - entry) / risk:.2f}"
 
 
-def _rr_line(plan: OptionPlan) -> str:
-    return (
-        f"R:R  {_rr(plan.entry_ltp, plan.sl, plan.t1)} (T1)   "
-        f"{_rr(plan.entry_ltp, plan.sl, plan.t2)} (T2)"
-    )
+def _rr_line(entry: float, sl: float, t1: float, t2: float) -> str:
+    return f"R:R  {_rr(entry, sl, t1)} (T1)   {_rr(entry, sl, t2)} (T2)"
+
+
+def _stop_risk_inr(pos: Position) -> float:
+    """Rupees at the broker net from the real fill (may exceed the sizing budget)."""
+    return round((pos.entry_ltp - pos.sl_exit) * pos.lots * pos.lot_size, 2)
 
 
 def _named_level(text: str) -> str | None:
@@ -115,12 +116,13 @@ def format_opened(outcome: SignalOutcome) -> str:
         f"      BUY {plan.contract.trading_symbol} ({plan.strike_label.upper()}, delta {delta}) "
         f"{pos.lots} lot(s) x {pos.lot_size} = {plan.quantity} @ {pos.entry_ltp:.2f}"
         f"  outlay Rs {plan.outlay_inr:,.0f}\n"
-        f"      SL {sl_name} futures {pos.hard_stop:.1f}{close}; option {plan.sl:.2f} "
-        f"(sized for Rs {plan.sized_risk_inr:,.0f}, loss at stop Rs {plan.risk_at_stop_inr:,.0f})\n"
-        f"      T1 {t1_name} futures {pos.t1:.1f} / option {plan.t1:.2f}"
+        f"      SL {sl_name} futures {pos.hard_stop:.1f}{close}; broker net option "
+        f"{pos.sl_exit:.2f} (sized for Rs {plan.sized_risk_inr:,.0f}, loss at net "
+        f"Rs {_stop_risk_inr(pos):,.0f})\n"
+        f"      T1 {t1_name} futures {pos.t1:.1f} / option {pos.t1_option:.2f}"
         f" (book {pos.t1_book_lots} lot(s)), T2 {t2_name} futures {pos.t2:.1f} / "
-        f"option {plan.t2:.2f}{_t2_trigger_note(pos, plain=True)}\n"
-        f"      {_rr_line(plan)}"
+        f"option {pos.t2_option:.2f}{_t2_trigger_note(pos, plain=True)}\n"
+        f"      {_rr_line(pos.entry_ltp, pos.sl_exit, pos.t1_option, pos.t2_option)}"
         f"{flags}"
     )
 
@@ -158,19 +160,19 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
         f"      option <code>{pos.entry_ltp:.2f}</code>   "
         f"fut <code>{pos.futures_entry:.1f}</code>   Rs {plan.outlay_inr:,.0f}\n"
         f"\n<b>SL</b>   {sl_name}\n"
-        f"      option <code>{plan.sl:.2f}</code>   "
-        f"fut <code>{pos.hard_stop:.1f}</code>"
+        f"      fut <code>{pos.hard_stop:.1f}</code>"
         f"{close}\n"
-        f"      risk Rs {plan.risk_at_stop_inr:,.0f}\n"
+        f"      broker net option <code>{pos.sl_exit:.2f}</code>\n"
+        f"      risk Rs {_stop_risk_inr(pos):,.0f}\n"
         f"\n<b>T1</b>   {t1_name}\n"
-        f"      option <code>{plan.t1:.2f}</code>   "
+        f"      option <code>{pos.t1_option:.2f}</code>   "
         f"fut <code>{pos.t1:.1f}</code>"
         f"  (book {pos.t1_book_lots} lot(s))\n"
         f"<b>T2</b>   {t2_name}\n"
-        f"      option <code>{plan.t2:.2f}</code>   "
+        f"      option <code>{pos.t2_option:.2f}</code>   "
         f"fut <code>{pos.t2:.1f}</code>"
         f"{_t2_trigger_note(pos)}\n"
-        f"\n<b>{escape(_rr_line(plan))}</b>"
+        f"\n<b>{escape(_rr_line(pos.entry_ltp, pos.sl_exit, pos.t1_option, pos.t2_option))}</b>"
         f"{flags}"
     )
 

@@ -100,6 +100,19 @@ def test_a_broker_side_stop_that_fires_is_booked_as_one(tmp_path: Path) -> None:
     assert engine.open_positions == []
 
 
+def test_a_worse_fill_does_not_pull_the_broker_net_closer(tmp_path: Path) -> None:
+    """Fill 150.2 used to shift the trigger to 130.95. The net stays at the plan 130.75."""
+    rig, hooks = make_rig(tmp_path), Hooks()
+    engine = _engine(rig, hooks)
+    trade, plan = make_trade()
+    position = engine.open(trade, plan, OPENED)
+    assert position is not None
+    assert position.stop_trigger == pytest.approx(130.75)
+    rig.quotes.set(130.80, 131.00, ltp=130.90)                       # below the old shifted stop
+    events = engine.on_tick(at(9, 45), 22790.0, {SYMBOL: 130.90})    # futures still above SL
+    assert events == [] and position.is_open and hooks.closed == []
+
+
 def test_t1_moves_the_broker_stop_to_cost(tmp_path: Path) -> None:
     rig, hooks = make_rig(tmp_path), Hooks()
     engine = _engine(rig, hooks)

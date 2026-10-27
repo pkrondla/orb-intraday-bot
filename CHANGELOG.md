@@ -7,6 +7,11 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 ## [Unreleased]
 
 ### Changed
+- Live SL / T1 / T2 stay on the **futures** chart levels. A worse CE/PE fill no longer
+  shifts the broker option stop closer to the market (that was stopping trades before
+  ORH / the 35-pt stop). Groww holds a crash net at the unshifted plan SL or a 35-point
+  conversion from the fill, whichever is lower. Extra rupee risk is allowed. The OPENED
+  card shows the futures SL and labels the option price as the broker net.
 - Neutral-zone targets are scalp-and-run for every standard setup: T2 is the nearest
   pivot still inside R1–S1 (P, else R1 / S1); T1 is the first magnet in front (ORH / ORL
   or a pivot), else halfway. R2 / S2 are not aims in this zone. Other zones keep the

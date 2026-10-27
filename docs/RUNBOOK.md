@@ -126,13 +126,15 @@ Per trade:
    One limit buy is sent 2% above the ask. If it has not filled after 10 seconds it is cancelled
    and the trade is skipped (never chased, no market fallback). A partial fill is sold straight
    back.
-2. **Protective stop.** Straight after the fill a stop-loss sell is placed at the broker, at the
-   option stop. It follows the position (moves to cost after T1, shrinks after a partial exit).
-   In live mode it protects the position if the bot dies.
-3. **Exits.** The bot decides when, with the same rules as paper (hard stop, close stop, T1, T2,
-   option stop). To exit it cancels the stop, sells with a limit just under the bid, waits 6 s,
-   then sells at market. It never sells while it cannot confirm the stop is gone. If the stop
-   itself was executed, that is booked as `BROKER_STOP`.
+2. **Broker crash net.** Straight after the fill a stop-loss sell is placed at the broker, at
+   the unshifted plan option SL or a 35-point conversion from the fill, whichever is *lower*
+   (a worse fill never pulls it closer). The real SL is the futures level; this order is only
+   there if the bot is late. It follows the position (moves to cost after T1, shrinks after a
+   partial exit).
+3. **Exits.** The bot decides when, on futures (hard stop, close stop, T1, T2). To exit it
+   cancels the net, sells with a limit just under the bid, waits 6 s, then sells at market. It
+   never sells while it cannot confirm the net is gone. If the net itself was executed, that is
+   booked as `BROKER_STOP`.
 4. **Square-off.** At `square_off_time` (15:20) every executed position is closed and no new
    entry is taken. Paper positions keep the 15:30 close.
 5. **Reconciliation.** Every minute the bot compares what it thinks it holds with the broker (in

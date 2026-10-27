@@ -25,6 +25,7 @@ from orb_intraday_bot.options.pricing import (
     OptionPlanError,
     book_lots_at_t1,
     plan_option_trade,
+    safety_net_option_stop,
 )
 from orb_intraday_bot.options.selector import (
     FLAG_DELTA_MISSING,
@@ -337,6 +338,24 @@ def test_outlay_above_capital_is_rejected() -> None:
 
 def test_book_lots_at_t1() -> None:
     assert [book_lots_at_t1(n, 0.5) for n in (1, 2, 3, 4, 5)] == [0, 1, 1, 2, 2]
+
+
+def test_safety_net_does_not_tighten_after_a_worse_fill() -> None:
+    # This morning's PE: 35-pt plan, fill 3.55 above the quote. Net stays at the plan.
+    assert safety_net_option_stop(
+        planned_sl=219.75, fill=241.50, delta_used=0.52, hard_stop_points=35, tick=0.05,
+    ) == pytest.approx(219.75)
+    # This afternoon's ORB: 28.9-pt plan 215.10, 35-pt from fill is 216.60. Keep 215.10.
+    assert safety_net_option_stop(
+        planned_sl=215.10, fill=235.50, delta_used=0.54, hard_stop_points=35, tick=0.05,
+    ) == pytest.approx(215.10)
+
+
+def test_safety_net_uses_the_35_point_floor_when_that_is_looser() -> None:
+    # 20-pt structure stop from the quote is 139.00; 35 pts from a 150.20 fill is 130.95.
+    assert safety_net_option_stop(
+        planned_sl=139.00, fill=150.20, delta_used=0.55, hard_stop_points=35, tick=0.05,
+    ) == pytest.approx(130.95)
 
 
 # ---- planner and Groww adapter with fakes --------------------------------------------------

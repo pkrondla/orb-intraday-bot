@@ -209,15 +209,16 @@ def test_open_places_a_protective_stop_below_the_entry(tmp_path: Path) -> None:
     position = _enter(rig)
     assert position.order_mode == "dry_run" and position.lots == 1
     assert position.entry_ltp == 150.2 and position.planned_entry == 150.0
-    assert position.sl_exit == pytest.approx(130.95)       # the plan's 130.75, shifted by the fill
+    assert position.sl_exit == pytest.approx(130.75)       # unshifted plan; fill must not tighten
+    assert position.t1_option == pytest.approx(166.5) and position.t2_option == pytest.approx(205.0)
     assert position.stop_order_id.startswith("DRY-ORB-")
-    assert position.stop_trigger == pytest.approx(130.95)
+    assert position.stop_trigger == pytest.approx(130.75)
     assert position.stop_quantity == LOT
     stop = rig.store.load_order(position.stop_order_key)
     assert stop is not None
     assert stop.intent.order_type == "SL" and stop.intent.side == "SELL"
-    assert stop.intent.trigger_price == pytest.approx(130.95)
-    assert 0 < (stop.intent.price or 0) < 130.95            # the limit sits under the trigger
+    assert stop.intent.trigger_price == pytest.approx(130.75)
+    assert 0 < (stop.intent.price or 0) < 130.75            # the limit sits under the trigger
 
 
 def test_protect_is_a_no_op_when_the_stop_already_matches(tmp_path: Path) -> None:
