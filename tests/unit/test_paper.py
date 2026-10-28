@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -44,8 +45,8 @@ def make_trade(
         entry_basis="previous candle low", sign_id=sign, stop_level=entry - s * 20,
         stop_on="close", target_ref="R2" if s > 0 else "S2",
     )
-    stop = StopPlan(20.0, entry - s * 35, entry - s * 20, "close level is 20.0 pts away")
-    targets = TargetPlan(entry + s * 30, entry + s * 100, 30, 100, "nearest pivot", "R2")
+    stop = StopPlan(35.0, entry - s * 35, entry - s * 20, "close through ORH or 35-pt hard stop")
+    targets = TargetPlan(entry + s * 100, entry + s * 100, 100, 100, "R2", "R2")
     quote = OptionQuote(22800, kind, f"NIFTY26O19{kind.value}", 150.0, 0.55)
     selection = OptionSelection(quote, 22800, "atm", (), (("atm", quote),))
     contract = OptionContract(quote.trading_symbol, "g", date(2026, 10, 19), 22800, kind, LOT, 0.05)
@@ -99,12 +100,12 @@ def test_no_charges_without_turnover() -> None:
 # ---- opening -------------------------------------------------------------------------------
 def test_open_copies_the_plan_and_books_entry_charges() -> None:
     p = opened()
-    assert (p.lots, p.lot_size, p.remaining_lots, p.t1_book_lots) == (6, LOT, 6, 3)
+    assert (p.lots, p.lot_size, p.remaining_lots, p.t1_book_lots) == (3, LOT, 3, 3)
     assert (p.entry_ltp, p.hard_stop, p.close_exit_level) == (150.0, 22765.0, 22780.0)
-    assert (p.t1, p.t2, p.futures_entry) == (22830.0, 22900.0, 22800.0)
-    assert p.t2_trigger == pytest.approx(22897.0)            # 3 pts in front of T2
+    assert (p.t1, p.t2, p.futures_entry) == (22900.0, 22900.0, 22800.0)
+    assert p.t2_trigger == pytest.approx(22897.0)            # 3 pts in front of T1
     assert p.sl_exit == 130.75                      # 35 points x 0.55 below entry, not 20 x 0.55
-    assert p.entry_charges == order_charges("BUY", 150.0, 6 * LOT, CFG.paper.charges).total
+    assert p.entry_charges == order_charges("BUY", 150.0, 3 * LOT, CFG.paper.charges).total
     assert p.is_open and p.opened_at == OPENED
 
 
@@ -124,9 +125,9 @@ def test_hard_stop_on_touch_fills_at_the_stop_price() -> None:
     assert fill is not None and fill.reason is ExitReason.HARD_STOP
     assert (fill.futures_price, fill.option_price) == (22765.0, 130.75)
     assert fill.price_source == "modeled"
-    assert fill.lots == 6 and not p.is_open and p.closed_at == at(9, 36)
+    assert fill.lots == 3 and not p.is_open and p.closed_at == at(9, 36)
     assert fill.futures_points == -35.0
-    assert fill.option_gross == pytest.approx((130.75 - 150.0) * 6 * LOT)
+    assert fill.option_gross == pytest.approx((130.75 - 150.0) * 3 * LOT)
 
 
 def test_a_zero_broker_fill_is_booked_at_entry_not_as_a_wipe() -> None:
@@ -202,108 +203,114 @@ def test_bars_before_the_position_opened_are_ignored() -> None:
 
 
 # ---- targets -------------------------------------------------------------------------------
-def test_t1_books_part_and_moves_the_stop_to_entry() -> None:
+def test_t1_closes_the_whole_position() -> None:
     p = opened()
-    events = evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, CFG.paper)
+    events = evaluate_bar(p, bar(9, 36, 22850, 22905, 22840, 22900), None, CFG.paper)
     fill = events[0].fill
-    assert fill is not None and fill.reason is ExitReason.T1 and fill.lots == 3
-    assert fill.option_price == pytest.approx(150 + 30 * 0.55, abs=0.03)
-    assert events[1].fill is None and "stop moved to entry" in events[1].message
-    assert p.remaining_lots == 3 and p.t1_done and p.stop_at_entry and p.active_stop == 22800.0
-    assert p.is_open
+    assert fill is not None and fill.reason is ExitReason.T1 and fill.lots == p.lots
+    assert fill.futures_price == pytest.approx(22900.0)
+    assert not p.is_open and p.stop_at_entry is False
 
 
-def test_after_t1_a_return_to_entry_exits_at_cost() -> None:
-    p = opened()
-    evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, CFG.paper)
-    evaluate_bar(p, bar(9, 39, 22830, 22831, 22799, 22805), None, CFG.paper)
-    last = p.fills[-1]
-    assert last.reason is ExitReason.BREAKEVEN_STOP and last.lots == 3
-    assert (last.futures_price, last.option_price, last.option_gross) == (22800.0, 150.0, 0.0)
-    assert not p.is_open
-
-
-def test_break_even_stop_waits_for_the_next_bar() -> None:
-    p = opened()
-    # The same candle hit T1 and came back to entry: T1 is booked, the position stays open.
-    evaluate_bar(p, bar(9, 36, 22800, 22832, 22795, 22810), None, CFG.paper)
-    assert reasons(p) == [ExitReason.T1] and p.is_open
-
-
-def test_t2_fires_a_few_points_in_front_of_the_level() -> None:
+def test_t1_fires_a_few_points_in_front_of_the_level() -> None:
     p = opened()
     assert p.t2_hit_level == pytest.approx(22897.0)
     evaluate_bar(p, bar(9, 36, 22850, 22898, 22840, 22890), None, CFG.paper)
-    t2 = next(f for f in p.fills if f.reason is ExitReason.T2)
-    assert t2.futures_price == pytest.approx(22897.0)
+    t1 = next(f for f in p.fills if f.reason is ExitReason.T1)
+    assert t1.futures_price == pytest.approx(22897.0)
     assert not p.is_open
 
 
-def test_t2_still_misses_outside_the_proximity_band() -> None:
+def test_t1_still_misses_outside_the_proximity_band() -> None:
     p = opened()
     evaluate_bar(p, bar(9, 36, 22850, 22896, 22840, 22890), None, CFG.paper)
-    assert ExitReason.T2 not in reasons(p)
-    assert p.is_open and p.t1_done
+    assert reasons(p) == []
+    assert p.is_open
 
 
-def test_t2_proximity_off_requires_an_exact_touch() -> None:
+def test_t1_proximity_off_requires_an_exact_touch() -> None:
     cfg = StrategyConfig.model_validate({"targets": {"t2_proximity_points": 0}})
     p = opened(config=cfg)
     assert p.t2_trigger == pytest.approx(22900.0)
     evaluate_bar(p, bar(9, 36, 22850, 22898, 22840, 22890), None, cfg.paper)
-    assert ExitReason.T2 not in reasons(p)
+    assert ExitReason.T1 not in reasons(p)
 
 
-def test_t2_short_near_miss_fills_at_the_band() -> None:
+def test_t1_short_near_miss_fills_at_the_band() -> None:
     p = opened(Direction.SHORT)
     assert p.t2_trigger == pytest.approx(22703.0)
     evaluate_bar(p, bar(9, 36, 22750, 22760, 22702, 22720), None, CFG.paper)
-    t2 = next(f for f in p.fills if f.reason is ExitReason.T2)
-    assert t2.futures_price == pytest.approx(22703.0)
+    t1 = next(f for f in p.fills if f.reason is ExitReason.T1)
+    assert t1.futures_price == pytest.approx(22703.0)
 
 
-def test_t1_and_t2_in_one_candle() -> None:
+def test_three_lots_leave_one_runner_for_t2() -> None:
+    trade, _ = make_trade()
+    targets = TargetPlan(22900.0, 22980.0, 100, 180, "R2", "T1 + OR-range")
+    trade = replace(trade, targets=targets)
+    plan = plan_option_trade(
+        direction=Direction.LONG, futures_entry=22800.0, stop=trade.stop, targets=targets,
+        selection=OptionSelection(
+            OptionQuote(22800, OptionKind.CE, "X", 150.0, 0.55), 22800, "atm", (), ()
+        ),
+        contract=OptionContract("X", "g", date(2026, 10, 19), 22800, OptionKind.CE, LOT, 0.05),
+        config=CFG,
+    )
+    assert plan.lots == 3 and plan.t1_book_lots == 2
+    p = PaperEngine(CFG).open(trade, plan, OPENED)
+    assert p is not None and p.t1_book_lots == 2
+    events = evaluate_bar(p, bar(9, 36, 22850, 22905, 22840, 22900), None, CFG.paper)
+    fill = events[0].fill
+    assert fill is not None and fill.reason is ExitReason.T1 and fill.lots == 2
+    assert p.is_open and p.remaining_lots == 1 and p.stop_at_entry
+    evaluate_bar(p, bar(9, 39, 22950, 22985, 22940, 22980), None, CFG.paper)
+    assert ExitReason.T2 in reasons(p) and not p.is_open
+
+
+def test_legacy_distinct_t2_still_books_part_then_t2() -> None:
     p = opened()
-    evaluate_bar(p, bar(9, 36, 22800, 22905, 22799, 22900), None, CFG.paper)
-    assert reasons(p) == [ExitReason.T1, ExitReason.T2] and not p.is_open
-    assert p.fills[1].futures_price == 22900.0
-    assert p.fills[1].option_price == pytest.approx(150 + 100 * 0.55, abs=0.03)
+    p.t1 = 22830.0
+    p.t1_trigger = 22830.0
+    p.t1_book_lots = 1
+    events = evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, CFG.paper)
+    fill = events[0].fill
+    assert fill is not None and fill.reason is ExitReason.T1 and fill.lots == 1
+    assert p.is_open and p.stop_at_entry
+    evaluate_bar(p, bar(9, 39, 22850, 22905, 22840, 22900), None, CFG.paper)
+    assert ExitReason.T2 in reasons(p) and not p.is_open
 
 
 def test_gap_above_the_target_fills_at_the_open() -> None:
     p = opened()
     evaluate_bar(p, bar(9, 36, 22910, 22920, 22905, 22915), None, CFG.paper)
-    assert [f.futures_price for f in p.fills] == [22910.0, 22910.0]
+    assert [f.futures_price for f in p.fills] == [22910.0]
 
 
-def test_single_lot_has_no_partial_booking() -> None:
-    cfg = StrategyConfig.model_validate({"sizing": {"capital_inr": 100_000}})
+def test_single_lot_closes_at_t1() -> None:
+    cfg = StrategyConfig.model_validate({"sizing": {"capital_inr": 200_000}})
     trade, plan = make_trade()
     plan1 = plan_option_trade(
         direction=Direction.LONG, futures_entry=22800.0, stop=trade.stop, targets=trade.targets,
         selection=OptionSelection(
             OptionQuote(22800, OptionKind.CE, "X", 150.0, 0.55), 22800, "atm", (), ()
         ),
-        contract=plan.contract, config=StrategyConfig.model_validate(
-            {"sizing": {"capital_inr": 100_000, "risk_pct_per_trade": 0.0125}}
-        ),
+        contract=plan.contract, config=cfg,
     )
-    assert plan1.lots == 1 and plan1.t1_book_lots == 0
+    assert plan1.lots == 1 and plan1.t1_book_lots == 1
     p = PaperEngine(cfg).open(trade, plan1, OPENED)
     assert p is not None
-    events = evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, cfg.paper)
-    assert [e.fill for e in events] == [None, ]  # one state-change event, no order
-    assert p.remaining_lots == 1 and p.stop_at_entry
+    events = evaluate_bar(p, bar(9, 36, 22850, 22905, 22840, 22900), None, cfg.paper)
+    fill = events[0].fill
+    assert fill is not None and fill.reason is ExitReason.T1 and fill.lots == 1
+    assert not p.is_open
 
 
 def test_short_trade_mirrors_stops_and_targets() -> None:
     p = opened(Direction.SHORT)
-    assert (p.hard_stop, p.close_exit_level, p.t1, p.t2) == (22835.0, 22820.0, 22770.0, 22700.0)
-    evaluate_bar(p, bar(9, 36, 22800, 22802, 22768, 22770), None, CFG.paper)
+    assert (p.hard_stop, p.close_exit_level, p.t1, p.t2) == (22835.0, 22820.0, 22700.0, 22700.0)
+    evaluate_bar(p, bar(9, 36, 22750, 22760, 22695, 22710), None, CFG.paper)
     assert reasons(p) == [ExitReason.T1]
-    assert p.fills[0].option_price == pytest.approx(150 + 30 * 0.55, abs=0.03)
-    evaluate_bar(p, bar(9, 39, 22770, 22801, 22765, 22790), None, CFG.paper)
-    assert reasons(p) == [ExitReason.T1, ExitReason.BREAKEVEN_STOP]
+    assert not p.is_open
 
 
 def test_short_close_stop_needs_a_close_above_the_level() -> None:
@@ -316,23 +323,19 @@ def test_short_close_stop_needs_a_close_above_the_level() -> None:
 # ---- P&L -----------------------------------------------------------------------------------
 def test_full_trade_pnl_both_ways() -> None:
     p = opened()
-    evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, CFG.paper)      # T1: 3 lots
-    evaluate_bar(p, bar(9, 39, 22830, 22905, 22829, 22900), None, CFG.paper)      # T2: 3 lots
-    t1_price, t2_price = p.fills[0].option_price, p.fills[1].option_price
-    gross = (t1_price - 150) * 3 * LOT + (t2_price - 150) * 3 * LOT
+    evaluate_bar(p, bar(9, 36, 22850, 22905, 22840, 22900), None, CFG.paper)
+    t1_price = p.fills[0].option_price
+    gross = (t1_price - 150) * p.lots * LOT
     assert p.gross_option_pnl == pytest.approx(gross)
-    assert p.total_charges == pytest.approx(
-        p.entry_charges + p.fills[0].charges + p.fills[1].charges
-    )
+    assert p.total_charges == pytest.approx(p.entry_charges + p.fills[0].charges)
     assert p.net_option_pnl == pytest.approx(gross - p.total_charges, abs=0.01)
-    assert p.futures_points == pytest.approx((30 + 100) / 2)                       # lot-weighted
+    assert p.futures_points == pytest.approx(100.0)
     assert p.net_option_pnl < p.gross_option_pnl
 
 
 def test_unrealized_pnl_uses_remaining_lots() -> None:
     p = opened()
-    evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, CFG.paper)
-    assert p.unrealized(170.0) == pytest.approx(20 * 3 * LOT)
+    assert p.unrealized(170.0) == pytest.approx(20 * p.lots * LOT)
 
 
 # ---- paper engine --------------------------------------------------------------------------
@@ -391,13 +394,13 @@ def test_mark_to_market_prefers_live_premium() -> None:
     (_, live), = engine.mark_to_market(22820.0, {position.trading_symbol: 163.0})
     assert live == 163.0
     text = format_open_position(position, 22820.0, live)
-    assert "+20.0 pts" in text and "6/6 lot(s)" in text
+    assert "+20.0 pts" in text and f"{position.lots}/{position.lots} lot(s)" in text
 
 
 # ---- storage -------------------------------------------------------------------------------
 def test_position_round_trips_through_json() -> None:
     p = opened()
-    evaluate_bar(p, bar(9, 36, 22800, 22832, 22798, 22830), None, CFG.paper)
+    evaluate_bar(p, bar(9, 36, 22850, 22905, 22840, 22900), None, CFG.paper)
     assert Position.from_dict(p.to_dict()) == p
 
 
@@ -422,23 +425,21 @@ def test_store_saves_fills_and_restores_open_positions(tmp_path: Path) -> None:
     trade, plan = make_trade()
     position = engine.open(trade, plan, OPENED)
     assert position is not None
-    engine.on_candle(candle(9, 36, 22800, 22832, 22798, 22830))       # T1: partial, stays open
+    engine.on_candle(candle(9, 36, 22800, 22810, 22790, 22805))       # no target, stays open
     rows = store.fills_for_position(position.position_id)
-    assert [(r["reason"], r["lots"]) for r in rows] == [("T1", 3)]
+    assert rows == []
     store.close()
 
     # A restart: the open position comes back with its state and cannot be opened again.
     store2 = TradeStore(db)
     engine2 = PaperEngine(CFG, store2)
     (restored,) = engine2.open_positions
-    assert restored.remaining_lots == 3 and restored.stop_at_entry and restored.t1_done
+    assert restored.remaining_lots == restored.lots and not restored.t1_done
     assert restored.opened_at.utcoffset() == timedelta(hours=5, minutes=30)
     assert engine2.open(trade, plan, OPENED) is None
-    engine2.on_candle(candle(9, 39, 22830, 22831, 22799, 22805))       # break-even exit
+    engine2.on_candle(candle(9, 39, 22850, 22905, 22840, 22900))       # T1 closes all
     assert engine2.open_positions == []
-    assert [r["reason"] for r in store2.fills_for_position(position.position_id)] == [
-        "T1", "BREAKEVEN_STOP"
-    ]
+    assert [r["reason"] for r in store2.fills_for_position(position.position_id)] == ["T1"]
     assert store2.open_positions() == []
     store2.close()
 
@@ -449,7 +450,7 @@ def test_saving_twice_does_not_duplicate_fills() -> None:
     trade, plan = make_trade()
     position = engine.open(trade, plan, OPENED)
     assert position is not None
-    engine.on_candle(candle(9, 36, 22800, 22832, 22798, 22830))
+    engine.on_candle(candle(9, 36, 22850, 22905, 22840, 22900))
     store.save_position(position, at(9, 40))
     assert len(store.fills_for_position(position.position_id)) == 1
 
@@ -474,7 +475,7 @@ def test_format_closed_position() -> None:
     p = opened()
     evaluate_bar(p, bar(9, 36, 22790, 22795, 22760, 22790), None, CFG.paper)
     text = format_closed_position(p)
-    assert "HARD_STOPx6" in text and "net Rs -" in text and "-35.0 pts" in text
+    assert f"HARD_STOPx{p.lots}" in text and "net Rs -" in text and "-35.0 pts" in text
 
 
 # ---- signal engine release -----------------------------------------------------------------

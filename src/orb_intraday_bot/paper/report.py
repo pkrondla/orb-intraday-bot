@@ -45,14 +45,18 @@ def summarize(day: date, positions: Iterable[Position]) -> DaySummary:
 
 def format_open_position(position: Position, futures_price: float, option_price: float) -> str:
     move = position.sign * (futures_price - position.futures_entry)
+    t2 = (
+        f" T2 {position.t2:.1f}"
+        if abs(position.t1 - position.t2) > position.tick_size
+        else ""
+    )
     return (
         f"{position.direction.value} {position.setup} {position.trading_symbol} "
         f"{position.remaining_lots}/{position.lots} lot(s) | entry {position.entry_ltp:.2f} "
         f"now {option_price:.2f} | futures {futures_price:.1f} ({move:+.1f} pts) | "
         f"open P&L Rs {position.unrealized(option_price):+,.0f} | "
         f"stop {position.active_stop:.1f}"
-        f"{' (at entry)' if position.stop_at_entry else ''} T1 {position.t1:.1f} "
-        f"T2 {position.t2:.1f}"
+        f"{' (at entry)' if position.stop_at_entry else ''} T1 {position.t1:.1f}{t2}"
     )
 
 

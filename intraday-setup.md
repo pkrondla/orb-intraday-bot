@@ -129,15 +129,15 @@ Two or more setups in the same direction mark a trending day.
 
 | Zone | Rule |
 |---|---|
-| R1 to P to S1 (neutral) | No aggressive trades. Only standard entries, in scalp and run mode, aiming at the nearest pivot. **Targets:** T2 is the nearest pivot still inside the zone (P, else R1 / S1), at least 10 points away. T1 is the nearest level (ORH / ORL or a pivot) strictly between the entry and T2 and at least 10 points away; otherwise halfway. R2 / S2 are not aims in this zone. Every standard setup uses this pair (ORB, trap confirmation, additional whipsaw, 2LL/3LL/2HH/3HH, fake break). |
-| Above R1 | Bullish bias. Only bullish trades: ORH Breakout and Bear Trap. Blocked: Bull Traps, ORL Breakdown, Failed Bear Trap. **No shorts.** |
-| R1 to R2 | Standard bullish trade. Aggressive, do not miss it. |
-| Below S1 | Bearish bias. Only bearish trades: ORL Breakdown, Bull Trap, Failed Bear Trap. Blocked: all bullish trades. **No longs.** |
-| S1 to S2 | Standard bearish trade. Aggressive, do not miss it. |
+| R1 to P to S1 (neutral) | No aggressive trades (Case 1/2, consolidation). Standard entries are allowed, in scalp and run mode. **T1** is the nearest pivot still inside the zone (P, else R1 / S1), at least 10 points away. R2 / S2 are not aims in this zone. |
+| Above R1 | Bullish bias (shown on the report). Longs and shorts are both allowed; entries still come from the OR rules, not from a pivot bounce. |
+| R1 to R2 | Standard bullish area. Aggressive entries are allowed. |
+| Below S1 | Bearish bias (shown on the report). Longs and shorts are both allowed; entries still come from the OR rules. |
+| S1 to S2 | Standard bearish area. Aggressive entries are allowed. |
 
 **R2 and S2**
 - They are strong resistance and support. Price rarely breaks them in one attempt, and there is a lot of consolidation and rejection there.
-- Touching R2 or S2 closes all positions in the matching direction. T2 also fires when the futures extreme comes within `targets.t2_proximity_points` (default 3) of that level, so a rejection a few points in front still books. The fill is at the band (or at R2/S2 / the open if price traded through).
+- Touching R2 or S2 closes all positions in the matching direction. T1 also fires when the futures extreme comes within `targets.t2_proximity_points` (default 3) of that level, so a rejection a few points in front still books. The fill is at the band (or at R2/S2 / the open if price traded through).
 - If R2 is broken, price tends to go through R3 to R4. If S2 is broken, it goes through S3 to S4.
 - **R2 and S2 as OR levels:** a break of R2 is traded as an ORB long with R2 acting as ORH. A break of S2 is traded as an ORB short with S2 acting as ORL. The target is R4 or S4.
 - **R4 and S4:** close all positions.
@@ -155,26 +155,25 @@ Two or more setups in the same direction mark a trending day.
 | Consolidation breakout | 35 points |
 | R2 or S2 broken and traded as an OR level | A close back below R2 (above S2), or 35 points |
 
-- The hard stop distance is the position-size reference. It is 35 points, or the distance to the level if that is closer.
-- The close-below-ORH exit has no price. It triggers at candle close and acts as an extra early exit.
-- **[Assumption]** There is a safety floor of 10 points on the stop distance.
+- Close-based setups (ORB, R2/S2 as OR) size lots on the 35-point hard stop. The close-through of the level is an extra early exit with no price of its own.
+- Touch stops size on the distance to the level, capped at 35.
+- **[Assumption]** There is a safety floor of 10 points on a touch-stop distance and on target room.
 
-### Targets
+### Target (T1) and runner (T2)
 
-**T2 (final target)**
+The notes give one Target per setup. That is T1. T2 is a one-lot runner: **T1 ± OR-range (ORH − ORL), or the nearer pivot still beyond T1**. Capped at R4/S4 (R5/S5 when T1 is already R4/S4). Neutral-zone T2 is capped at R1/S1. If there is no room, T2 = T1.
 
-| Setup | T2 |
-|---|---|
-| Bull trap | ORL |
-| Bear trap | ORH |
-| Consolidation breakout | OR range projected from ORH or ORL, or the pivot target, whichever is nearer |
-| ORB and the rest | R2 (long) or S2 (short). R4 or S4 for trades on a broken R2 or S2. |
+| Setup | T1 | T2 |
+|---|---|---|
+| Bull trap / Case 1 / Case 2 short | ORL | T1 − OR-range, or nearer pivot |
+| Bear trap / Case 1 / Case 2 long | ORH | T1 + OR-range, or nearer pivot |
+| Consolidation breakout | OR range projected from ORH or ORL, or the nearer pivot | T1 ± OR-range, or next nearer pivot |
+| ORB and the rest | R2 (long) or S2 (short). R4 or S4 for trades on a broken R2 or S2. | T1 ± OR-range, or nearer of R3/R4 (S3/S4) |
+| Neutral zone (any standard setup) | Nearest pivot still inside R1–S1 (P, else R1 / S1) | T1 ± OR-range, or nearer in-zone pivot, capped at R1/S1 |
 
-T2 is capped by the mandatory exits in Section 4.
+T1 is capped by the mandatory exits in Section 4. ORL sitting on S2 (or ORH on R2) is one magnet. The runner may go past R2/S2 because T1 already booked the notes Target.
 
-**T2 proximity [Assumption]:** T2 is reached when the bar's high (long) or low (short) comes within `targets.t2_proximity_points` of T2 (default 3, max 5, 0 = exact touch). R2/S2 often reject a few points in front of the print. The OPENED card still shows the chart level (S2); the trigger is that many points in front. The buffer shrinks so T2 keeps at least 10 points of room from the entry. Fill at the band; if price tagged T2 or gapped through it, fill at T2 or the open (unchanged). This does not start a new trade; a break of S2 is still a later `PIVOT_BREAKOUT` after close + retest + confirm.
-
-**T1 [Assumption]:** the notes do not define T1. It is the nearest pivot level between entry and T2. If there is none, it is the halfway point to T2.
+**T1 proximity [Assumption]:** T1 is reached when the bar's high (long) or low (short) comes within `targets.t2_proximity_points` of T1 (default 3, max 5, 0 = exact touch). R2/S2 often reject a few points in front of the print. The OPENED card still shows the chart level; the trigger is that many points in front. The buffer shrinks so T1 keeps at least 10 points of room from the entry. Fill at the band; if price tagged T1 or gapped through it, fill at T1 or the open. This does not start a new trade; a break of S2 is still a later `PIVOT_BREAKOUT` after close + retest + confirm.
 
 ## 6. Option Layer (CE and PE)
 
@@ -199,24 +198,22 @@ option_premium_change = futures_points_moved × |delta|
 
 option_SL = entry_LTP − (futures_stop_points × |delta|)
 option_T1 = entry_LTP + (futures_T1_points × |delta|)
-option_T2 = entry_LTP + (futures_T2_points × |delta|)
 ```
 
 - The notes give a fixed 20-point option stop. The delta formula reproduces it: 35 points × about 0.55 gives about 19. If delta is missing, the fixed 20 points is the fallback.
-- Delta and the three option prices are fixed at entry and recorded with the trade.
+- Delta and the option SL / T1 prices are fixed at entry and recorded with the trade. They are display only: exits fire on futures.
 
-**Worked example (from the plan):**
+**Worked example:**
 - Nifty futures 22,600, a 22,600 CE at ₹150, delta 0.55.
-- The futures stop is 40 points, T1 is 60 points and T2 is 120 points.
-- Option stop = 150 − 40 × 0.55 = **₹128**.
-- Option T1 = 150 + 60 × 0.55 = **₹183**, where 50% of the quantity is booked.
-- Option T2 = 150 + 120 × 0.55 = **₹216**, where the remainder is closed.
+- The futures stop is 35 points, T1 is 100 points.
+- Option stop = 150 − 35 × 0.55 = **₹130.75** (broker crash net).
+- Option T1 = 150 + 100 × 0.55 = **₹205** (display; the exit is the futures T1).
 
 ### 6.3 Booking and sizing
 
-- **At T1:** book 50% of the quantity and move the stop on the rest to the entry price. **[Assumption]**
-- **At T2:** close the remainder.
-- **With 1 lot:** there is no partial booking. T1 only moves the stop to cost.
+- **At T1:** 1 lot closes the whole position. 2 or more lots book all but one; the leftover lot is the T2 runner.
+- After a partial T1 the futures stop on the runner moves to entry. The broker CE/PE crash net stays put.
+- The broker CE/PE stop-loss is a crash net only. It is never used as the strategy SL.
 - **Lots** = floor(risk amount ÷ (option stop points × lot size)).
   - **[Assumption]** Capital is ₹5,00,000 and risk is 1% per trade, which is ₹5,000.
   - The lot size comes from the broker's instruments file, not a hard-coded number.
@@ -227,10 +224,11 @@ option_T2 = entry_LTP + (futures_T2_points × |delta|)
 An open paper trade is closed by the first of these:
 
 1. The hard stop on futures, or a candle close beyond the stop level (Section 5).
-2. The option stop from Section 6.2.
-3. T1 (partial) and T2.
-4. The mandatory pivot exits: R2 or S2 touched, and R4 or S4 for trades on a broken R2 or S2.
-5. End of day at 15:30 IST.
+2. The option crash net from Section 6.2 (only if the broker order is missing).
+3. T1 (the notes Target). 1 lot closes everything; 2+ lots leave a one-lot runner.
+4. T2 (T1 ± OR-range or nearer pivot) on the runner, if the plan has room.
+5. The mandatory pivot exits: R2 or S2 touched (T1 for a trade entered below them), and R4 or S4 for trades on a broken R2 or S2.
+6. End of day at 15:30 IST.
 
 Exit checks run on the live futures price where available, and always at candle close.
 
@@ -258,7 +256,7 @@ These are intentional, because the notes win:
 
 ## 10. Open Items
 
-1. T1 definition and the 50% booking with the stop moved to entry.
+1. T1 is the notes Target. T2 is a one-lot runner (T1 ± OR-range or nearer pivot).
 2. The ORB "previous candle low" fill rule.
 3. The 10-point stop floor.
 4. The Failed Bear Trap and Failed Bull Trap definitions.
@@ -270,23 +268,25 @@ These are intentional, because the notes win:
    - A retest is a candle whose low comes within the tolerance of the level (or below it) while it does not close back inside. Failure (close back inside) has no tolerance.
    - The notes say "retests ORH and makes high to previous swing/candle". The swing rule and the 1-point retest tolerance are assumptions. The looser "previous candle high is enough" reading is not used.
    - Bull/bear trap pullback: the most recent green (red) candle after the sign; a gap through its low (high) fills at the open.
-   - Case 1 and Case 2 aggressive entries use the opposite OR level as target (the notes give the target only for the trap confirmation entry).
+   - Case 1 and Case 2 aggressive entries use the opposite OR level as T1 (the notes give the target only for the trap confirmation entry).
    - R2/S2 breakouts have no trap or Case 1/2 follow-up (the notes say not to trade rejections from R2/S2).
 8. Phase 4 detection details (all candle-close based, all config under `whipsaw`, `structure`, `fake_break`, `consolidation`):
    - **Additional whipsaw:** starts after an ORB confirmation (ORH/ORL only) or a trap's reverse-retest entry. A rejection is a candle whose low (high for shorts) comes within the retest tolerance of the level; consecutive touching candles count once. The ORB version is cancelled by a close beyond the level, the trap version by price trading through it. After 2 rejections, the entry is the break of the last rejection candle's high (low). One entry per parent. Aggressive Case 1/2 entries do not start whipsaw tracking.
    - **Consolidation breakout:** a rejection is a candle reaching ORH (ORL) within the tolerance and closing inside. At least 3 rejections, the oldest 45 to 60 minutes old (rolling window), then a close beyond the level: enter at that close. It shares its sign with the ORB sign on the same candle, so only one trade is taken. Target is the OR range projected from the level or the next pivot, whichever is nearer (Phase 5 resolves the pivot).
-   - **2LL/3LL and 2HH/3HH:** a rise is tracked as the highest high so far, with a rise low that steps up each time a pullback holds. A pullback counts the candles that make a new low after the peak (the peak candle's low is the first reference). With 2 or 3 such lows, a break of the peak is the entry (a gap fills at the open). 4 or more lower lows, or a pullback below the rise low, breaks the structure. The rise must be at least 20 points. Stop is the pullback extreme (or 35 points), target R2 (S2 for shorts).
+   - **2LL/3LL and 2HH/3HH:** a rise is tracked as the highest high so far, with a rise low that steps up each time a pullback holds. A pullback counts the candles that make a new low after the peak (the peak candle's low is the first reference). With 2 or 3 such lows, a break of the peak is the entry (a gap fills at the open). 4 or more lower lows, or a pullback below the rise low, breaks the structure. The rise must be at least 20 points. Stop is the pullback extreme (or 35 points), T1 is R2 (S2 for shorts), or the nearest in-zone pivot in the neutral zone.
    - **Fake breakdown/breakout:** a consolidation is the last 10 candles within 45 points, with each edge touched at least twice. A fake break leaves the range and closes back inside within 3 candles. The reversal leg runs from the fake extreme to the highest high since, must reach 20 points, and the entry is its 50% retracement. Stop is the fake extreme (or 35 points), target the opposite end of the range. Cancelled if price trades through the fake extreme, closes outside the range again, reaches the range end without retracing, or 10 candles pass.
    - **Trending day:** informational label only. Uptrend = ORH breakout with a Bear Trap or Failed Bull Trap. Downtrend = ORL breakdown with a Bull Trap or Failed Bear Trap. A Failed Bear/Bull Trap is a new close beyond ORL/ORH after the trap.
    - **Both-sides trap:** not implemented. Enabling the flag raises an error.
 9. Phase 5 decisions (stops, targets, zone filter, arbiter):
-   - **Stop reference (confirmed by you):** `stop_points` = the distance to the structural level, capped at 35 and raised to the 10-point floor. It is used **only to size the lots**. The trade's stop is 35 points (for close-based setups also the candle-close exit, whichever comes first). Example: the 15 Oct ORB is sized on 16.2 points but stopped at 35, so the loss at the stop is about twice the Rs 5,000 budget. This is accepted. `sizing.risk_basis: hard_stop` would size on the real stop instead.
-   - **Touch stops (traps, structure, fake breaks)** still use the level when it is closer than 35 points, as in section 5, so their stop and lot sizing use the same distance. Say so if you want 35 points for those too.
-   - **T2:** from the setup's target reference (section 5 table), except in the neutral zone (below). A trade entered below R2 is capped at R2 (touching R2 closes everything). A trade on a broken R2, or entered beyond R2, targets R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T2 also fires `t2_proximity_points` in front of the level (default 3).
-   - **Neutral-zone targets (confirmed 26 Oct 2026):** every standard entry uses scalp-and-run. T2 is the nearest pivot still inside R1–S1 (P, else R1 for a long / S1 for a short), at least 10 points away. T1 is the nearest of ORH/ORL and any pivot strictly between the entry and that T2, also at least 10 points away; otherwise halfway. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22575 (ORH) and T2 22621 (P), not T1 P / T2 R2.
-   - **Consolidation target:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
-   - **T1:** outside the neutral zone, the nearest pivot strictly between entry and T2, else halfway. No minimum distance.
-   - **Aggressive entries** (blocked in the neutral zone): Case 1/2 follow-ups and the consolidation breakout (the notes label the direct no-retest entry "aggressive"). The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
+   - **ORB / R2-S2 breakout stop (notes):** candle close back through the level, or a 35-point hard stop, whichever first. Lots are sized on 35. The trade is not skipped when the level is farther than 35 or closer than 10.
+   - **Touch stops (traps, structure, fake breaks)** still use the level when it is closer than 35 points, as in section 5, so their stop and lot sizing use the same distance.
+   - **T1:** from the setup's target reference (section 5 table), except in the neutral zone (below). 1 lot closes the whole position; 2+ lots leave a one-lot runner for T2. A trade entered below R2 has T1 at R2. A trade on a broken R2, or entered beyond R2, has T1 at R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T1 also fires `t2_proximity_points` in front of the level (default 3).
+   - **T2:** T1 ± OR-range, or the nearer pivot beyond T1, capped at R4/S4 (R5/S5 when T1 is already R4/S4). No room → T2 = T1.
+   - **Neutral-zone T1:** nearest pivot still inside R1–S1 (P, else R1 / S1), at least 10 points away. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22621 (P). Neutral T2 is capped at R1/S1.
+   - **Consolidation T1:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
+   - **Trap / Case 1/2 T1** is the opposite OR, capped at R2/S2. ORL ≈ S2 or ORH ≈ R2 (within 10 points) is one magnet. The 28 Oct 2026 Case 2 short at 22671 with ORL 22635 sitting on S2 is T1 ORL≈S2.
+   - **Broker crash net:** Groww's CE/PE trigger stays at the unshifted plan SL (or a 35-point conversion from a worse fill, whichever is lower). All strategy exits fire on futures.
+   - **Zone filter:** pivots are reference. Longs below S1 and shorts above R1 are taken. The only hard block is aggressive entries (Case 1/2, consolidation) in the neutral zone. The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
    - **One trade per sign.** A signal blocked by the zone filter does not use up its sign, so the standard trigger of the same sign can still be taken.
    - **Priority on the same candle** (assumption, `arbiter.priority`): ORB, R2/S2 breakout, trap confirmation, Case 1, Case 2, consolidation, additional whipsaw, fake break, 2LL/3LL/2HH/3HH. A lower-priority signal in the opposite direction on the same candle is dropped.
    - **Opposite open position** blocks a new trade (assumption, `arbiter.allow_opposite_positions`).
@@ -294,19 +294,19 @@ These are intentional, because the notes win:
 10. Phase 6 decisions (option layer):
    - **Chain data:** Groww reports a delta of 0 when it has no value. Zero, a wrong-signed delta (a negative CE or positive PE) and anything above 1 are treated as missing. A quote with no price is never selected.
    - **Strike:** ATM is the futures price rounded to the nearest 50, with halves rounding up. The ITM1 candidate is one step lower for a CE and one step higher for a PE. Of the candidates with |delta| in 0.50 to 0.60 (inclusive), the one closest to 0.55 wins, and ATM wins a tie. On the live check, a 23,049 futures price picked the 23,000 CE (delta 0.53) and the 23,050 PE (delta 0.53).
-   - **Fallbacks** (flagged on the plan): no candidate in the band takes the closest delta (`delta_out_of_band`). No delta at all takes ATM (`delta_missing`), the option stop becomes the fixed 20 points, and T1/T2 use the 0.55 target delta (`target_delta_assumed`). The notes give no fallback for the targets, so that last part is an assumption.
+   - **Fallbacks** (flagged on the plan): no candidate in the band takes the closest delta (`delta_out_of_band`). No delta at all takes ATM (`delta_missing`), the option stop becomes the fixed 20 points, and T1 uses the 0.55 target delta (`target_delta_assumed`). The notes give no fallback for the targets, so that last part is an assumption.
    - **Entry price:** the chain LTP at signal time, with prices rounded to the 0.05 tick. Slippage and charges come in Phase 7.
    - **Lots:** `floor(budget / (option stop points x lot size))`, where the lot size comes from the instruments file. If one lot already risks more than the budget, the trade is rejected. A premium outlay above the capital is also rejected.
-   - **Option stop and sizing:** the option stop is `entry - futures_stop x delta`, where the futures stop is the trade's real stop (35 points, or the level for touch stops). The lot count is sized on the level distance (`sizing.risk_basis: stop_plan`, the default you chose). `hard_stop` sizes on the real stop instead. Each plan records the loss it was sized for (`sized_risk_inr`) and the loss if stopped out (`risk_at_stop_inr`).
-   - **Partial booking:** at T1 whole lots are booked (`t1_book_fraction`, at least 1, at most lots minus 1). With one lot nothing is booked and the stop only moves to cost.
+   - **Option stop and sizing:** the option stop is `entry - futures_stop x delta`, where the futures stop is the trade's real stop (35 points for close-based setups, or the level for touch stops). Lots are sized on that same distance (`sizing.risk_basis: stop_plan`). `hard_stop` sizes on the real stop instead. Each plan records the loss it was sized for (`sized_risk_inr`) and the loss if stopped out (`risk_at_stop_inr`).
+   - **T1 books all but one lot** when T2 is distinct. 1 lot (or T2 = T1) closes everything.
    - **Expiry:** the nearest weekly expiry strictly after today, from the API (today it is Monday 19 Oct 2026, two sessions away, so theta is heavy).
 11. Phase 7 decisions (paper engine, exits, charges, storage):
-   - **What triggers an exit:** futures prices drive SL, T1 and T2. The option price supplies the fill. A worse CE/PE fill must not move those futures levels (extra rupee risk is accepted). The broker CE/PE stop-loss is a **crash net only**: the lower of the unshifted plan option SL and a 35-point conversion from the fill, never raised after a worse fill. If that net is missing, live option LTP at the same price is the fallback (`OPTION_STOP`). The option-price T1/T2 from section 6.2 are recorded but do not trigger exits.
-   - **Option stop for close-based setups (ORB, R2/S2 breakout):** the exit is a candle close back inside the level or the 35-point stop, whichever comes first, so the option-price stop is `entry - 35 x delta`. The level distance is used only for the lot count.
-   - **Order inside one candle** is unknown, so replay is conservative: the stop is checked before targets (a candle that reaches both is a loss), and after T1 the break-even stop applies from the next candle. A gap through a stop fills at the open (worse). A gap through a target fills at the open (better).
+   - **What triggers an exit:** futures prices drive SL and T1. The option price supplies the fill. A worse CE/PE fill must not move those futures levels (extra rupee risk is accepted). The broker CE/PE stop-loss is a **crash net only**: the lower of the unshifted plan option SL and a 35-point conversion from the fill, never raised after a worse fill. If that net is missing, live option LTP at the same price is the fallback (`OPTION_STOP`). The option-price T1 from section 6.2 is recorded but does not trigger exits.
+   - **Option stop for close-based setups (ORB, R2/S2 breakout):** the exit is a candle close back inside the level or the 35-point stop, whichever comes first. The option crash net and the lot count both use 35 (`entry - 35 x delta`).
+   - **Order inside one candle** is unknown, so replay is conservative: the stop is checked before targets (a candle that reaches both is a loss). T1 closes the whole position, so the break-even-after-T1 path is only for a restored trade that still has a distinct T2. A gap through a stop fills at the open (worse). A gap through a target fills at the open (better).
    - **Candle-close exit:** a close strictly beyond the level exits at that close. A close exactly on the level does not. Live polls never trigger it.
    - **Entry timing:** a position opens at the close of the signal candle and is first checked on the next candle. Anything the signal candle did after the entry price traded is not checked (an unavoidable blind spot at candle granularity).
-   - **T1:** books `t1_book_lots` whole lots and moves the stop to the futures entry (option: the entry premium). With one lot only the stop moves. T2 closes what is left, including when the extreme comes within `t2_proximity_points` of T2. R2/S2 and R4/S4 are mandatory exits because T2 is capped at them.
+   - **T1 / T2:** T1 books all but one lot (or all, if one lot or no T2 room), including when the extreme comes within `t2_proximity_points` of T1. The runner exits at T2 the same way. After T1 the futures stop moves to entry; the crash net does not.
    - **End of day:** open positions close at the close of the 15:27 candle (15:30), at the live LTP if given.
    - **Fill prices:** a live poll fills at the live option LTP. A replay, or a touch inside a closed candle, models the option price as `entry + sign x futures move x delta`. Slippage (`paper.slippage_option_points`, default 0) is paid on entry and on every exit.
    - **Charges** (`paper.charges`, all assumptions): brokerage the lower of Rs 20 and 0.1% per order, STT 0.15% on the sell side, exchange 0.03503%, SEBI 0.0001%, stamp 0.003% on the buy side, GST 18% on brokerage, exchange and SEBI. Check them against a Groww contract note.
@@ -325,11 +325,11 @@ These are intentional, because the notes win:
    - **Baseline:** 212 trades (3.9 a day), win rate 52%, +373 futures points (+0.07 R a trade), profit factor 0.97 after charges. Excluding the single best day (13 Oct, +344 points) the total is about +29 points. The result is **not distinguishable from zero** and the two halves of the sample disagree (setup and zone results flip), so no tuning below is a proven improvement.
    - **By setup:** structure whipsaws carry the result (80 trades, +514 points), ORB breakout is negative (48 trades, -177 points, 46% wins), pivot breakout and Case 2 are slightly negative, traps, Case 1, fake breaks about flat or positive. Neutral-zone trades lose (-186 points), bullish-zone trades win (+405 on 23 trades), which fits the zone rules in section 4.
    - **Costs decide it:** with one option point of slippage per fill the profit factor falls to 0.79, with two to 0.65. The edge per trade (+1.8 futures points, about 1 option point) is smaller than realistic costs. The forward test must measure the real option spread at entry and exit.
-   - **T1 cap (`targets.t1_max_distance_points`, off):** capping a far T1 at 50, 75, 100 or 150 points changes the result by -90, -13, -6 and 0 points. It does not help, so it stays off. A far T1 is harmless because T1 only books half and moves the stop to cost.
-   - **Break-even stop after T1 (`targets.move_sl_to_entry_after_t1`, now wired):** it was a config switch that did nothing. Without it the replay gives +693 points (win rate 40%, longest losing streak 9 instead of 7). Left at true as the notes say; it is your call.
+   - **T1 cap (`targets.t1_max_distance_points`, off):** capping a far T1 at 50, 75, 100 or 150 points changed the (then T1/T2 split) result by -90, -13, -6 and 0 points. It does not help, so it stays off. From 0.17.0 T1 is the notes Target and closes the whole position, so a far T1 is the full-trade target.
+   - **Break-even stop after T1 (`targets.move_sl_to_entry_after_t1`):** futures stop on the one-lot runner moves to entry after T1. The crash net does not.
    - **Sizing on the real stop (`sizing.risk_basis: hard_stop`):** same points, but profit factor 1.10 against 0.97 and the maximum drawdown falls from Rs 124k to Rs 72k, because a stopped-out trade loses the budget instead of up to twice it. Your rule (level distance for lots) is unchanged.
    - **Structure whipsaw knobs:** `min_rise_points` 10/20/30/40 gives +336/+373/+302/+488 points, no pattern, so it stays at 20. Switching structure off loses 531 points. One or three trades a day instead of two both do worse.
    - **Data:** Groww serves 3-minute candles for the current contract only, and only back to the contract's listing (about three months). 26 of the 54 sessions have missing candles (thin trading, mostly July and August; 29 Sep has 95). Results on the 28 complete sessions: +421 points, profit factor 0.99, the same picture.
-   - **Replay behaviour:** a session whose last candle is missing is closed at the last price (as the live runner does). Sanity checks (daily cap, duplicates, fills add up, stop at most 35 points, T1 before T2, no overlapping opposite trades) pass on all sessions.
+   - **Replay behaviour:** a session whose last candle is missing is closed at the last price (as the live runner does). Sanity checks (daily cap, duplicates, fills add up, stop at most 35 points, T1 in front of the entry, no overlapping opposite trades) pass on all sessions.
    - **Tools:** `orb-bot replay [DATE...] [--from --to --last N] [--set key=value] [--csv FILE]`, `orb-bot sweep` (variants on the same cached candles), `orb-bot report` (forward-test statistics from the database), `orb-bot reconcile [DATE]` (a live day against a replay of the same candles). Candles are cached in `DATA_DIR/history`.
    - **Forward test:** `FORWARD_TEST.md` and `scripts/forward_test/` (a scheduled task that starts the session every weekday and reconciles after it).

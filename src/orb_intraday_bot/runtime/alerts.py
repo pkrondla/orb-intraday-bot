@@ -4,7 +4,7 @@ All messages go through one object so the rules (which events alert, what they s
 place and a second channel is a change here only.
 
 A quiet candle is not sent. Decision alerts (opening-range levels, a zone change, a new SIGN,
-a failed or cancelled pattern, a blocked signal) are. OPENED and SL / T1 / T2 exits are HTML
+a failed or cancelled pattern, a blocked signal) are. OPENED and SL / T1 exits are HTML
 cards; other exits use the same card with the reason as the heading.
 `notify_candle_reports` still adds the full per-candle report on top.
 """
@@ -55,7 +55,9 @@ class Alerts:
             self._pattern_alerts(report)
             self._blocked_alerts(report)
         for outcome in report.opened:
-            self._notifier.send(as_telegram_html(format_opened_alert(outcome)))
+            self._notifier.send(
+                as_telegram_html(format_opened_alert(outcome, trend=report.trend))
+            )
         for outcome in report.outcomes:
             if outcome.status == "stale":
                 self._notifier.send(self._missed(outcome))
@@ -116,7 +118,9 @@ class Alerts:
         for outcome in report.outcomes:
             if outcome.status == "rejected":
                 stamp = outcome.signal.candle_start.strftime("%H:%M")
-                self._notifier.send(f"{stamp} {format_outcome(outcome)}")
+                self._notifier.send(
+                    f"{stamp} {format_outcome(outcome, zone=report.zone.value, trend=report.trend)}"
+                )
 
     @staticmethod
     def _missed(outcome: SignalOutcome) -> str:

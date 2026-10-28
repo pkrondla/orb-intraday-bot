@@ -1,32 +1,32 @@
-"""Target plan: T2 (final) and T1 (partial), in futures prices (spec section 5).
+"""Target plan: T1 is the notes Target; T2 is a one-lot runner.
 
-T2 comes from the signal's `target_ref`:
+T1 comes from the signal's `target_ref`:
 
-| target_ref               | T2                                                                  |
+| target_ref               | T1                                                                  |
 |--------------------------|---------------------------------------------------------------------|
 | R2 / S2 / R4 / S4        | that pivot. R2/S2 with the entry already beyond it become R4/S4      |
-| ORH / ORL                | that opening-range level (trap setups)                               |
+| ORH / ORL                | that opening-range level (trap / Case 1/2)                           |
 | OR_PROJECTION_OR_PIVOT   | the nearer of the signal's OR-range projection and the next pivot    |
 | RANGE_OPPOSITE_END       | the signal's own price (opposite end of the consolidation)           |
 
-T2 is capped by the mandatory exits: touching R2 (S2) closes everything, so a trade entered below
-R2 never targets beyond it; trades on a broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond
-R2) are capped at R4 (S4). An entry beyond R4 (S4) has no room and is rejected.
+T2 is T1 ± OR-range (ORH − ORL), or the nearer pivot still beyond T1, capped at R4/S4
+(R5/S5 when T1 is already R4/S4). Neutral-zone T2 is capped at R1/S1. If there is no
+room (OR unset, or closer than `min_stop_points`), T2 = T1 and the whole position
+closes at T1.
 
-Neutral zone (R1 to S1) [spec section 4]: scalp and run, every standard setup. T2 is the nearest
-pivot still inside the zone (P, else R1 / S1), at least `min_stop_points` away. T1 is the nearest
-level (ORH / ORL or a pivot) strictly between the entry and that T2 and at least the floor away;
-otherwise halfway. R2 / S2 are not aims in this zone.
+T1 is capped by the mandatory exits: a trade entered below R2 never has T1 beyond it;
+trades on a broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond R2) have T1 at
+R4 (S4). An entry beyond R4 (S4) has no room and is rejected. The runner may go past
+R2/S2 because T1 already booked the notes Target.
 
-T1 [Assumption]: the nearest pivot strictly between the entry and T2, else halfway. Optionally
-(targets.t1_max_distance_points, off by default) T1 is pulled in to at most that many points.
+Neutral zone (R1 to S1): T1 is the nearest pivot still inside the zone (P, else R1 / S1).
+R2 / S2 are not aims.
 
-T2 is taken when the futures extreme comes within `t2_proximity_points` of the level (default 3),
-so an S2/R2 rejection a few points in front still books. The chart level stays T2; the fill is
-at the band (or at T2 / the open if price traded through). The buffer shrinks so T2 keeps at
-least `min_stop_points` of room from the entry.
+Both levels fire when the futures extreme comes within `t2_proximity_points` (default 3).
 
-A target closer than the 10-point safety floor is rejected: the trade would have no room.
+Booking: 1 lot closes all at T1; 2+ lots leave one runner for T2.
+
+A T1 closer than the 10-point safety floor is rejected.
 """
 
 from __future__ import annotations
@@ -59,8 +59,14 @@ def plan_targets(
     t1_max_points: float | None = None,
     zone: Zone | None = None,
 ) -> TargetPlan:
+    _ = t1_max_points  # retired: T1 is the notes target, not a pulled-in scalp
     if zone is Zone.NEUTRAL:
-        return _neutral_targets(signal, pivots, orh, orl, stops, t1_max_points)
+        t1_plan = _neutral_t1(signal, pivots, stops)
+        return _attach_runner(
+            entry=signal.entry_price, t1=t1_plan.t1, t1_label=t1_plan.t1_basis,
+            long=signal.direction is Direction.LONG, floor=stops.min_stop_points,
+            orh=orh, orl=orl, pivots=pivots, setup=signal.setup, zone=zone,
+        )
 
     long = signal.direction is Direction.LONG
     d = 1.0 if long else -1.0
@@ -89,7 +95,6 @@ def plan_targets(
         if signal.target_price is not None:
             candidates.append((signal.target_price, "OR range projection"))
         if pivots is not None:
-            # the next pivot that leaves a real target (at least the 10-point floor away)
             beyond = [
                 (n, v) for n, v in pivots.ordered()
                 if (v - entry) * d >= stops.min_stop_points
@@ -123,32 +128,26 @@ def plan_targets(
             raise PlanError(f"entry {entry:.1f} is beyond {ceiling_name}: no room")
         if (raw - ceiling) * d > 0:
             raw, label = ceiling, f"{label}, capped at {ceiling_name}"
+        if ceiling_name in ("R2", "S2"):
+            raw, label = _merge_or_with_cap(
+                raw, label, ref, ceiling_name, levels[ceiling_name],
+                entry, d, stops.min_stop_points,
+            )
 
-    t2_points = abs(raw - entry)
-    if t2_points < stops.min_stop_points:
-        raise PlanError(f"target {label} is only {t2_points:.1f} pts away")
-
-    t1, t1_basis = _t1(entry, raw, pivots)
-    t1, t1_basis = _cap_t1(entry, t1, t1_basis, d, t1_max_points)
-    return TargetPlan(
-        t1=t1,
-        t2=raw,
-        t1_points=abs(t1 - entry),
-        t2_points=t2_points,
-        t1_basis=t1_basis,
-        t2_basis=label,
+    t1_plan = _plan(entry, raw, raw, label, label, stops.min_stop_points)
+    return _attach_runner(
+        entry=entry, t1=t1_plan.t1, t1_label=t1_plan.t1_basis,
+        long=long, floor=stops.min_stop_points, orh=orh, orl=orl, pivots=pivots,
+        setup=signal.setup, zone=zone,
     )
 
 
-def _neutral_targets(
+def _neutral_t1(
     signal: SetupSignal,
     pivots: Pivots | None,
-    orh: float | None,
-    orl: float | None,
     stops: StopsConfig,
-    t1_max_points: float | None,
 ) -> TargetPlan:
-    """Scalp and run inside R1–S1: T2 = nearest in-zone pivot, T1 = first magnet in front."""
+    """Scalp inside R1–S1: T1 = nearest in-zone pivot."""
     if pivots is None:
         raise PlanError("neutral-zone targets need previous-session pivots")
 
@@ -167,65 +166,112 @@ def _neutral_targets(
         raise PlanError(
             f"neutral zone: no pivot at least {floor:g} pts toward {edge_name}"
         )
-    t2_name, t2 = min(in_zone, key=lambda nv: abs(nv[1] - entry))
+    name, value = min(in_zone, key=lambda nv: abs(nv[1] - entry))
+    return _plan(entry, value, value, f"{name} (neutral zone, nearest pivot)",
+                 f"{name} (neutral zone, nearest pivot)", floor)
 
-    t1, t1_basis = _neutral_t1(entry, t2, d, pivots, orh, orl, long, floor)
-    t1, t1_basis = _cap_t1(entry, t1, t1_basis, d, t1_max_points)
+
+def _attach_runner(
+    *,
+    entry: float,
+    t1: float,
+    t1_label: str,
+    long: bool,
+    floor: float,
+    orh: float | None,
+    orl: float | None,
+    pivots: Pivots | None,
+    setup: Setup,
+    zone: Zone | None,
+) -> TargetPlan:
+    """T2 = T1 ± OR-range, or the nearer pivot beyond T1, else T1 (no runner)."""
+    d = 1.0 if long else -1.0
+    collapsed = _plan(entry, t1, t1, t1_label, t1_label, floor)
+
+    width = (orh - orl) if orh is not None and orl is not None and orh > orl else None
+    candidates: list[tuple[float, str]] = []
+    if width is not None and width >= floor:
+        sign = "+" if long else "−"
+        candidates.append((t1 + d * width, f"T1 {sign} OR-range {width:g}"))
+    if pivots is not None:
+        beyond = [
+            (n, v) for n, v in pivots.ordered()
+            if (v - t1) * d >= floor
+        ]
+        if beyond:
+            name, value = min(beyond, key=lambda nv: abs(nv[1] - t1))
+            candidates.append((value, f"pivot {name}"))
+    candidates = [c for c in candidates if (c[0] - t1) * d >= floor]
+    if not candidates:
+        return collapsed
+
+    raw, label = min(candidates, key=lambda c: abs(c[0] - t1))
+    ceiling_name, ceiling = _runner_ceiling(long, setup, t1, pivots, zone)
+    if ceiling is not None and ceiling_name is not None:
+        if (ceiling - t1) * d < floor:
+            return collapsed
+        if (raw - ceiling) * d > 0:
+            raw, label = ceiling, f"{label}, capped at {ceiling_name}"
+    if (raw - t1) * d < floor:
+        return collapsed
+    return _plan(entry, t1, raw, t1_label, label, floor)
+
+
+def _runner_ceiling(
+    long: bool,
+    setup: Setup,
+    t1: float,
+    pivots: Pivots | None,
+    zone: Zone | None,
+) -> tuple[str | None, float | None]:
+    if pivots is None:
+        return None, None
+    levels = pivots.levels()
+    d = 1.0 if long else -1.0
+    if zone is Zone.NEUTRAL:
+        name = "R1" if long else "S1"
+        return name, levels[name]
+    far = "R5" if long else "S5"
+    mid = "R4" if long else "S4"
+    if setup is Setup.PIVOT_BREAKOUT or (mid in levels and (t1 - levels[mid]) * d >= -1e-9):
+        return far, levels[far]
+    return mid, levels[mid]
+
+
+def _plan(
+    entry: float, t1: float, t2: float, t1_label: str, t2_label: str, floor: float,
+) -> TargetPlan:
+    points = abs(t1 - entry)
+    if points < floor:
+        raise PlanError(f"target {t1_label} is only {points:.1f} pts away")
     return TargetPlan(
         t1=t1,
         t2=t2,
-        t1_points=abs(t1 - entry),
+        t1_points=points,
         t2_points=abs(t2 - entry),
-        t1_basis=t1_basis,
-        t2_basis=f"{t2_name} (neutral zone, nearest pivot)",
+        t1_basis=t1_label,
+        t2_basis=t2_label,
     )
 
 
-def _neutral_t1(
+def _merge_or_with_cap(
+    raw: float,
+    label: str,
+    ref: str | None,
+    cap_name: str,
+    cap: float,
     entry: float,
-    t2: float,
     d: float,
-    pivots: Pivots,
-    orh: float | None,
-    orl: float | None,
-    long: bool,
     floor: float,
 ) -> tuple[float, str]:
-    magnets: list[tuple[str, float]] = [
-        (n, v) for n, v in pivots.levels_between(entry, t2) if abs(v - entry) >= floor
-    ]
-    or_name, or_level = ("ORH", orh) if long else ("ORL", orl)
-    if or_level is not None:
-        between = (or_level - entry) * d > 0 and (t2 - or_level) * d > 0
-        if between and abs(or_level - entry) >= floor:
-            magnets.append((or_name, or_level))
-    if not magnets:
-        return (entry + t2) / 2, "halfway to T2"
-    name, value = min(magnets, key=lambda nv: abs(nv[1] - entry))
-    if name in ("ORH", "ORL"):
-        return value, name
-    return value, f"nearest pivot {name}"
-
-
-def _t1(entry: float, t2: float, pivots: Pivots | None) -> tuple[float, str]:
-    if pivots is not None:
-        between = pivots.levels_between(entry, t2)
-        if between:
-            name, value = min(between, key=lambda nv: abs(nv[1] - entry))
-            return value, f"nearest pivot {name}"
-    return (entry + t2) / 2, "halfway to T2"
-
-
-def _cap_t1(
-    entry: float,
-    t1: float,
-    t1_basis: str,
-    d: float,
-    t1_max_points: float | None,
-) -> tuple[float, str]:
-    if t1_max_points is not None and abs(t1 - entry) > t1_max_points:
-        return entry + d * t1_max_points, f"{t1_basis}, capped at {t1_max_points:g} pts"
-    return t1, t1_basis
+    """ORL sitting on S2 (or ORH on R2) is one magnet."""
+    if ref not in ("ORH", "ORL") or (cap - entry) * d <= 0:
+        return raw, label
+    if abs(raw - cap) > floor:
+        return raw, label
+    if "≈" in label or "capped at" in label:
+        return raw, label
+    return raw, f"{label} ≈ {cap_name}"
 
 
 def t2_trigger_price(
@@ -236,7 +282,10 @@ def t2_trigger_price(
     proximity_points: float,
     min_stop_points: float,
 ) -> float:
-    """Futures price at which T2 fires. Equal to `t2` when proximity is 0 or T2 is too close."""
+    """Futures price at which a target fires.
+
+    Equal to the level when proximity is 0 or the target is too close.
+    """
     if proximity_points <= 0:
         return t2
     t2_pts = abs(t2 - entry)

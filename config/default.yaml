@@ -16,16 +16,16 @@ session:
   candle_publish_delay_sec: 5  # wait after a boundary before fetching the closed candle
 
 stops:
-  hard_stop_points: 35         # ORB / pivot-breakout: skip if the level is farther than this
-  min_stop_points: 10          # ORB / pivot-breakout: skip if closer; touch stops: floor
-  option_fallback_points: 20   # used only if delta is unavailable
+  hard_stop_points: 35         # notes: max SL on Nifty futures; ORB also exits on close through OR
+  min_stop_points: 10          # [assumption] touch-stop floor and minimum target room
+  option_fallback_points: 20   # notes: option SL when delta is missing
 
 targets:
-  t1_rule: nearest_pivot_else_half   # [assumption]
-  t1_book_fraction: 0.5              # [assumption]
-  move_sl_to_entry_after_t1: true    # [assumption]
-  t1_max_distance_points: null       # [tuning] null = no cap; else T1 is at most this far from entry
-  t2_proximity_points: 3             # T2 fires this many pts in front of the level (0 = exact, max 5)
+  t1_rule: nearest_pivot_else_half   # retired: T1 is the notes Target
+  t1_book_fraction: 0.5              # retired: 1 lot all at T1; 2+ leave one runner for T2
+  move_sl_to_entry_after_t1: true    # leftover runner: futures stop to entry after T1
+  t1_max_distance_points: null       # retired: T1 is not pulled in
+  t2_proximity_points: 3             # T1 fires this many pts in front of the level (0 = exact, max 5)
 
 options:
   strike_step: 50
@@ -38,8 +38,7 @@ sizing:
   capital_inr: 500000          # [assumption]
   risk_pct_per_trade: 0.01     # [assumption]
   max_open_positions: 5        # [assumption]
-  risk_basis: stop_plan        # lots from the level distance (ORB / pivot-breakout: that
-                               # distance is also the live stop; 10–35 or skip).
+  risk_basis: stop_plan        # lots from stop_points (ORB / pivot-breakout: the 35-pt hard stop).
                                # hard_stop = lots from the real stop distance
 
 consolidation:

@@ -247,11 +247,11 @@ def test_lots_follow_the_risk_budget() -> None:
     assert plan.risk_budget_inr == 5000
     assert plan.risk_at_stop_inr == 22 * 195
     assert plan.risk_at_stop_inr <= plan.risk_budget_inr
-    assert plan.t1_book_lots == 1
+    assert plan.t1_book_lots == 2                          # 3 lots: one runner for T2
 
 
 def close_stop_plan(config: StrategyConfig = CFG, delta: float | None = 0.55) -> Any:
-    """A close-based setup: 16 points from the level, with the 35-point stop behind it."""
+    """A close-based setup: 35-point hard stop plus close-through of the level."""
     selection = select_option(
         Direction.LONG, 22600,
         parse_option_chain({"strikes": {"22600": {"CE": side("X", delta or 0, 150.0)}}}, EXPIRY),
@@ -259,19 +259,19 @@ def close_stop_plan(config: StrategyConfig = CFG, delta: float | None = 0.55) ->
     )
     return plan_option_trade(
         direction=Direction.LONG, futures_entry=22600.0,
-        stop=StopPlan(16.0, 22565.0, 22584.0, "close"),
-        targets=TargetPlan(22640.0, 22700.0, 40, 100, "a", "b"),
+        stop=StopPlan(35.0, 22565.0, 22584.0, "close through ORH or 35-pt hard stop"),
+        targets=TargetPlan(22700.0, 22700.0, 100, 100, "R2", "R2"),
         selection=selection, contract=contract("X", 22600), config=config,
     )
 
 
-def test_stop_is_35_points_but_lots_use_the_level_distance() -> None:
+def test_close_based_stop_sizes_on_35() -> None:
     plan = close_stop_plan()
-    assert plan.sl == 130.75 and plan.sl_points == 19.25        # 35 x 0.55: the trade's stop
-    assert plan.lots == 8                                       # 5000 / (8.8 x 65) = 8.74
-    assert plan.sized_risk_inr == pytest.approx(8.8 * 8 * 65, abs=1)
-    assert plan.risk_at_stop_inr == pytest.approx(19.25 * 8 * 65)
-    assert plan.risk_at_stop_inr > plan.risk_budget_inr         # accepted: size on 16, stop at 35
+    assert plan.sl == 130.75 and plan.sl_points == 19.25        # 35 x 0.55
+    assert plan.lots == 3                                       # 5000 / (19.25 x 65) = 3.99
+    assert plan.sized_risk_inr == pytest.approx(19.25 * 3 * 65, abs=1)
+    assert plan.risk_at_stop_inr == plan.sized_risk_inr
+    assert plan.t1_book_lots == plan.lots
 
 
 def test_touch_stop_uses_the_same_distance_for_stop_and_lots() -> None:
@@ -291,13 +291,12 @@ def test_hard_35_point_stop_gives_about_19_option_points() -> None:
     assert plan.sl_points == 19.25 and plan.sl == 130.75
 
 
-def test_optional_hard_stop_basis_sizes_on_the_real_stop() -> None:
+def test_optional_hard_stop_basis_matches_when_stop_points_are_35() -> None:
     default = close_stop_plan()
     safe = close_stop_plan(StrategyConfig.model_validate({"sizing": {"risk_basis": "hard_stop"}}))
-    assert default.lots == 8
-    assert safe.lots == 3                                      # 5000 / (19.25 x 65) = 3.996
+    assert default.lots == safe.lots == 3
     assert safe.risk_at_stop_inr <= safe.risk_budget_inr
-    assert safe.sl == default.sl                               # only the size changes
+    assert safe.sl == default.sl
 
 
 def test_missing_delta_uses_fixed_option_stop_and_flags() -> None:
@@ -337,7 +336,7 @@ def test_outlay_above_capital_is_rejected() -> None:
 
 
 def test_book_lots_at_t1() -> None:
-    assert [book_lots_at_t1(n, 0.5) for n in (1, 2, 3, 4, 5)] == [0, 1, 1, 2, 2]
+    assert [book_lots_at_t1(n) for n in (0, 1, 2, 3, 4, 5, 11)] == [0, 1, 1, 2, 3, 4, 10]
 
 
 def test_safety_net_does_not_tighten_after_a_worse_fill() -> None:

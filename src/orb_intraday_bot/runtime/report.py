@@ -38,8 +38,11 @@ def _rr(entry: float, stop: float, target: float) -> str:
     return f"1 : {abs(target - entry) / risk:.2f}"
 
 
-def _rr_line(entry: float, sl: float, t1: float, t2: float) -> str:
-    return f"R:R  {_rr(entry, sl, t1)} (T1)   {_rr(entry, sl, t2)} (T2)"
+def _rr_line(entry: float, sl: float, t1: float, t2: float | None = None) -> str:
+    line = f"R:R  {_rr(entry, sl, t1)} (T1)"
+    if t2 is not None and abs(t2 - t1) > 1e-6:
+        line += f"   {_rr(entry, sl, t2)} (T2)"
+    return line
 
 
 def _stop_risk_inr(pos: Position) -> float:
@@ -59,20 +62,24 @@ def _named_level(text: str) -> str | None:
     return found[-1] if found else None
 
 
-def _t2_trigger_note(pos: Position, *, plain: bool = False) -> str:
-    """Shown when T2 fires in front of the chart level (proximity band)."""
-    trigger = pos.t2_hit_level
-    if abs(trigger - pos.t2) < 1e-6:
+def _target_trigger_note(level: float, trigger: float, *, plain: bool = False) -> str:
+    """Shown when a target fires in front of the chart level (proximity band)."""
+    if abs(trigger - level) < 1e-6:
         return ""
     if plain:
         return f" (trigger {trigger:.1f})"
     return f"\n      trigger <code>{trigger:.1f}</code>"
 
 
+def _t1_trigger_note(pos: Position, *, plain: bool = False) -> str:
+    """Shown when T1 fires in front of the chart level (proximity band)."""
+    return _target_trigger_note(pos.t1, pos.t1_hit_level, plain=plain)
+
+
 def sl_level_name(trade: PlannedTrade) -> str:
     """Short stop label: ORH, ORL, 35 pts, 2HH, ..."""
     basis = trade.stop.basis
-    if "hard stop" in basis or basis.startswith("standard "):
+    if "close through" in basis or "hard stop" in basis or basis.startswith("standard "):
         found = _HARD_STOP_PTS.search(basis)
         pts = found.group(1) if found else "35"
         if pts.endswith(".0"):
@@ -90,14 +97,25 @@ def target_level_name(basis: str) -> str:
     named = _named_level(basis)
     if named:
         return named
-    if "projection" in basis:
+    if "projection" in basis or "OR-range" in basis:
         return "OR proj"
     if "consolidation" in basis or "opposite end" in basis:
         return "range"
     return basis
 
 
-def format_opened(outcome: SignalOutcome) -> str:
+def trend_label(trend: str) -> str:
+    """Notes 3.9 trending-day state for the trade-signal line."""
+    if not trend or trend == "none":
+        return "no trend"
+    return trend
+
+
+def signal_context(zone: str, trend: str) -> str:
+    return f"{zone} · {trend_label(trend)}"
+
+
+def format_opened(outcome: SignalOutcome, *, trend: str = "none") -> str:
     sig, plan, pos = outcome.signal, outcome.plan, outcome.position
     assert plan is not None and pos is not None and outcome.trade is not None
     flags = f"  FLAGS: {', '.join(plan.flags)}" if plan.flags else ""
@@ -110,9 +128,17 @@ def format_opened(outcome: SignalOutcome) -> str:
     sl_name = sl_level_name(outcome.trade)
     t1_name = target_level_name(outcome.trade.targets.t1_basis)
     t2_name = target_level_name(outcome.trade.targets.t2_basis)
+    t2_line = ""
+    if abs(pos.t1 - pos.t2) > pos.tick_size:
+        t2_trig = _target_trigger_note(pos.t2, pos.t2_hit_level, plain=True)
+        t2_line = (
+            f"      T2 {t2_name} futures {pos.t2:.1f} / option {pos.t2_option:.2f}"
+            f"{t2_trig} (1 lot runner)\n"
+        )
     return (
         f"OPENED {_opened_stamp(pos)} {sig.setup.value} {sig.level_name} {sig.direction.value} "
-        f"[{outcome.trade.zone.value}] futures {sig.entry_price:.1f} ({sig.entry_basis})\n"
+        f"[{signal_context(outcome.trade.zone.value, trend)}] futures {sig.entry_price:.1f} "
+        f"({sig.entry_basis})\n"
         f"      BUY {plan.contract.trading_symbol} ({plan.strike_label.upper()}, delta {delta}) "
         f"{pos.lots} lot(s) x {pos.lot_size} = {plan.quantity} @ {pos.entry_ltp:.2f}"
         f"  outlay Rs {plan.outlay_inr:,.0f}\n"
@@ -120,14 +146,14 @@ def format_opened(outcome: SignalOutcome) -> str:
         f"{pos.sl_exit:.2f} (sized for Rs {plan.sized_risk_inr:,.0f}, loss at net "
         f"Rs {_stop_risk_inr(pos):,.0f})\n"
         f"      T1 {t1_name} futures {pos.t1:.1f} / option {pos.t1_option:.2f}"
-        f" (book {pos.t1_book_lots} lot(s)), T2 {t2_name} futures {pos.t2:.1f} / "
-        f"option {pos.t2_option:.2f}{_t2_trigger_note(pos, plain=True)}\n"
+        f"{_t1_trigger_note(pos, plain=True)}\n"
+        f"{t2_line}"
         f"      {_rr_line(pos.entry_ltp, pos.sl_exit, pos.t1_option, pos.t2_option)}"
         f"{flags}"
     )
 
 
-def format_opened_alert(outcome: SignalOutcome) -> str:
+def format_opened_alert(outcome: SignalOutcome, *, trend: str = "none") -> str:
     """Telegram card: time, BUY / SL / targets, and R:R. HTML; send with parse_mode."""
     sig, plan, pos = outcome.signal, outcome.plan, outcome.position
     assert plan is not None and pos is not None and outcome.trade is not None
@@ -136,7 +162,7 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
     setup = escape(sig.setup.value)
     level = escape(sig.level_name)
     direction = escape(sig.direction.value)
-    zone = escape(outcome.trade.zone.value)
+    context = escape(signal_context(outcome.trade.zone.value, trend))
     basis = escape(sig.entry_basis)
     strike = escape(plan.strike_label.upper())
     close = (
@@ -151,9 +177,17 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
     sl_name = escape(sl_level_name(outcome.trade))
     t1_name = escape(target_level_name(outcome.trade.targets.t1_basis))
     t2_name = escape(target_level_name(outcome.trade.targets.t2_basis))
+    t2_block = ""
+    if abs(pos.t1 - pos.t2) > pos.tick_size:
+        t2_block = (
+            f"\n<b>T2</b>   {t2_name}  (1 lot runner)\n"
+            f"      option <code>{pos.t2_option:.2f}</code>   "
+            f"fut <code>{pos.t2:.1f}</code>"
+            f"{_target_trigger_note(pos.t2, pos.t2_hit_level)}\n"
+        )
     return (
         f"🟢 <b>OPENED</b>  <code>{_opened_stamp(pos)}</code>\n"
-        f"{setup} · {level} · {direction} · {zone}\n"
+        f"{setup} · {level} · {direction} · {context}\n"
         f"<i>{basis}</i>\n"
         f"\n<b>BUY</b>  <code>{symbol}</code>\n"
         f"      {strike}  δ {delta} · {pos.lots} lot(s) × {pos.lot_size}\n"
@@ -167,23 +201,23 @@ def format_opened_alert(outcome: SignalOutcome) -> str:
         f"\n<b>T1</b>   {t1_name}\n"
         f"      option <code>{pos.t1_option:.2f}</code>   "
         f"fut <code>{pos.t1:.1f}</code>"
-        f"  (book {pos.t1_book_lots} lot(s))\n"
-        f"<b>T2</b>   {t2_name}\n"
-        f"      option <code>{pos.t2_option:.2f}</code>   "
-        f"fut <code>{pos.t2:.1f}</code>"
-        f"{_t2_trigger_note(pos)}\n"
+        f"{_t1_trigger_note(pos)}\n"
+        f"{t2_block}"
         f"\n<b>{escape(_rr_line(pos.entry_ltp, pos.sl_exit, pos.t1_option, pos.t2_option))}</b>"
         f"{flags}"
     )
 
 
-def format_outcome(outcome: SignalOutcome) -> str:
+def format_outcome(
+    outcome: SignalOutcome, *, zone: str | None = None, trend: str = "none"
+) -> str:
     sig = outcome.signal
     head = f"{sig.setup.value} {sig.level_name} {sig.direction.value} @ {sig.entry_price:.1f}"
+    context = f" [{signal_context(zone, trend)}]" if zone else ""
     if outcome.status == "opened":
-        return format_opened(outcome)
+        return format_opened(outcome, trend=trend)
     if outcome.status == "rejected":
-        return f"BLOCKED {head} [{outcome.stage}] {outcome.detail}"
+        return f"BLOCKED {head}{context} [{outcome.stage}] {outcome.detail}"
     if outcome.status == "stale":
         return f"MISSED  {head}: {outcome.detail}"
     return f"SKIPPED {head}: {outcome.detail}"
@@ -222,7 +256,7 @@ def _exit_heading(reason: ExitReason | None, message: str) -> tuple[str, str]:
 
 
 def format_exit_alert(event: ExitEvent) -> str:
-    """Telegram card: SL / T1 / T2 (or other exit) with the futures fill. HTML."""
+    """Telegram card: SL / T1 (or other exit) with the futures fill. HTML."""
     fill = event.fill
     reason = fill.reason if fill is not None else None
     emoji, heading = _exit_heading(reason, event.message)
@@ -272,7 +306,9 @@ def format_candle_report(report: CandleReport) -> str:
         lines.append(f"  pattern: {ev.kind.value} {ev.level_name} {ev.direction.value} {ev.detail}")
 
     for outcome in report.outcomes:
-        lines.append("  " + format_outcome(outcome))
+        lines.append(
+            "  " + format_outcome(outcome, zone=report.zone.value, trend=report.trend)
+        )
     for exit_event in report.exits:
         lines.append("  " + format_exit(exit_event))
     if not report.outcomes and not report.exits:

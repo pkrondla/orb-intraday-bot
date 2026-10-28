@@ -215,20 +215,25 @@ def progress_text(positions: Sequence[Position]) -> str:
         if p.planned_entry > 0:
             slip = f" (planned {p.planned_entry:.2f})"
         stop_note = " (moved to entry after T1)" if p.stop_at_entry else ""
-        t1 = "done" if p.t1_done else "pending"
-        t2_note = (
-            f" (trigger {p.t2_hit_level:.1f})"
-            if abs(p.t2_hit_level - p.t2) >= 1e-6
+        t1_note = (
+            f" (trigger {p.t1_hit_level:.1f})"
+            if abs(p.t1_hit_level - p.t1) >= 1e-6
             else ""
         )
+        t2_note = ""
+        if abs(p.t1 - p.t2) > p.tick_size:
+            t2_trig = (
+                f" (trigger {p.t2_hit_level:.1f})"
+                if abs(p.t2_hit_level - p.t2) >= 1e-6
+                else ""
+            )
+            t2_note = f", T2 {p.t2:.1f}{t2_trig}"
         out.append(
             f"- {p.direction.value} {p.setup} {p.trading_symbol} [{p.order_mode}] "
             f"{p.remaining_lots}/{p.lots} lot(s)\n"
             f"  entry premium {p.entry_ltp:.2f}{slip}, futures entry {p.futures_entry:.1f}\n"
-            f"  futures stop {p.active_stop:.1f}{stop_note}, T1 {p.t1:.1f} ({t1}), "
-            f"T2 {p.t2:.1f}{t2_note}\n"
-            f"  broker net {p.active_option_stop:.2f}, T1 {p.t1_option:.2f}, "
-            f"T2 {p.t2_option:.2f}"
+            f"  futures stop {p.active_stop:.1f}{stop_note}, T1 {p.t1:.1f}{t1_note}{t2_note}\n"
+            f"  broker net {p.active_option_stop:.2f}, T1 {p.t1_option:.2f}"
         )
         if p.order_mode != "paper":
             if p.stop_order_id:

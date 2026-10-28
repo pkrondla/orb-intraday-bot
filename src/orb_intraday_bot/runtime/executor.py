@@ -7,7 +7,7 @@ else is shared, so a dry run on the real market exercises the whole pipeline:
 - the pre-trade risk gate (limits, spread, price sanity, margin) before any order
 - an entry limit buy a little above the ask; wait a few seconds; cancel and skip if not filled
 - a crash-net stop-loss sell kept at the broker (not the futures SL), in step with the position
-  (T1 moves it to cost, partial exits shrink it)
+  (T1 books all but a one-lot runner; the net is only a safety stop and is never raised)
 - bot-managed exits (the position engine decides *when*, this executor makes it happen)
 - order tracking in the database and the structured log
 - reconciliation of the bot's books against the broker's positions
@@ -219,7 +219,11 @@ class LiveExecutor:
     # the protective stop at the broker
     # ==================================================================================
     def protect(self, position: Position, now: datetime) -> None:
-        """Keep the broker crash-net stop at the option safety-net (not the futures SL)."""
+        """Keep the broker crash-net stop at the option safety-net (not the futures SL).
+
+        All strategy exits (SL, T1, T2, close-through) fire on futures. This Groww order is
+        only a dead-bot safety net and is never raised after a worse fill.
+        """
         if position.order_mode != self.mode or not position.is_open:
             return
         quantity = position.remaining_quantity - position.unbooked_qty

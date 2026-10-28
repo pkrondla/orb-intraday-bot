@@ -1,17 +1,14 @@
-"""Stop plan in Nifty futures points (spec section 5, with the ORB level-bound rule).
+"""Stop plan in Nifty futures points (teacher notes).
 
-- ORB / R2-S2 breakout: `price_stop` and `close_exit_level` are both the setup level.
-  Distance to that level must be in [min_stop_points, hard_stop_points] (10-35);
-  otherwise skip. 35 is a skip, not a nearer stop sitting in front of the level.
-- touch: `stop_level` or 35 points, whichever is closer (traps, structure, fake breaks).
-- none: the standard 35 points (Case 1/2, consolidation).
-- other `close`: candle close beyond `stop_level`, or a hard stop of 35 points, first
-  (additional whipsaw after an ORB).
+- ORB / R2-S2 breakout / additional ORB whipsaw (`close`): candle close back through the
+  setup level, **or** a hard stop of 35 points, whichever comes first.
+- trap / structure / fake break (`touch`): the stop level or 35 points, whichever is closer.
+- Case 1/2 and consolidation (`none`): the standard 35 points.
 
-`stop_points` is the futures distance used for the position-size reference and the option stop
-(`option_SL = LTP - stop_points * |delta|`). For ORB / pivot-breakout it equals the distance to
-the level (and matches the live stop). For touch stops it is 35, or the distance to the level if
-that is closer, never below the 10-point safety floor.
+`stop_points` is the futures distance used for lot sizing and the option crash-net
+(`option_SL = LTP - stop_points * |delta|`). For close-based setups that is 35 (the live
+hard stop). For touch stops it is 35, or the distance to the level if that is closer,
+never below the 10-point safety floor [assumption].
 """
 
 from __future__ import annotations
@@ -23,9 +20,7 @@ from orb_intraday_bot.core.errors import TradePlanError
 from orb_intraday_bot.core.models import Direction
 from orb_intraday_bot.core.signals import Setup, SetupSignal
 
-# Price stop sits on the setup level. 35 is a maximum *distance* (skip if farther), not a
-# relocated stop that can fire before the level.
-_LEVEL_BOUND_SETUPS = frozenset({Setup.ORB_BREAKOUT, Setup.PIVOT_BREAKOUT})
+_CLOSE_THROUGH_SETUPS = frozenset({Setup.ORB_BREAKOUT, Setup.PIVOT_BREAKOUT})
 
 
 class PlanError(TradePlanError, ValueError):
@@ -50,9 +45,6 @@ def plan_stop(signal: SetupSignal, cfg: StopsConfig) -> StopPlan:
 
     dist = (entry - signal.stop_level) * d          # positive: the level is behind the entry
 
-    if signal.setup in _LEVEL_BOUND_SETUPS:
-        return _level_bound_stop(signal, dist, hard, floor)
-
     if signal.stop_on == "touch":
         if dist <= 0:
             raise PlanError(
@@ -61,34 +53,16 @@ def plan_stop(signal: SetupSignal, cfg: StopsConfig) -> StopPlan:
         points = max(floor, min(hard, dist))
         return StopPlan(points, entry - d * points, None, _basis(dist, hard, floor, "level"))
 
-    # stop_on == "close" (additional whipsaw after an ORB / trap)
-    points = max(floor, min(hard, max(dist, 0.0)))
-    basis = _basis(max(dist, 0.0), hard, floor, "close level")
+    # stop_on == "close": ORB, R2/S2 as OR, additional ORB whipsaw.
+    # Notes: close back through the level, or max 35 points, whichever first.
+    if signal.setup in _CLOSE_THROUGH_SETUPS and dist <= 0:
+        raise PlanError(
+            f"entry {entry} is already beyond {signal.level_name} {signal.stop_level}"
+        )
+    basis = f"close through {signal.level_name} or {hard:g}-pt hard stop"
     if dist <= 0:
         basis += f"; entry is already beyond the level {signal.stop_level}"
-    return StopPlan(points, entry - d * hard, signal.stop_level, basis)
-
-
-def _level_bound_stop(
-    signal: SetupSignal, dist: float, hard: float, floor: float
-) -> StopPlan:
-    """ORB / pivot-breakout: stop at the setup level, skip if the fill is too close or too far."""
-    level = signal.stop_level
-    assert level is not None
-    name = signal.level_name
-    if dist < floor:
-        if dist <= 0:
-            raise PlanError(
-                f"entry {signal.entry_price} is already beyond {name} {level}"
-            )
-        raise PlanError(
-            f"{name} is {dist:.1f} pts away: below the {floor:g}-point floor"
-        )
-    if dist > hard:
-        raise PlanError(
-            f"{name} is {dist:.1f} pts away: above the {hard:g}-point cap"
-        )
-    return StopPlan(dist, level, level, f"{name} is {dist:.1f} pts away")
+    return StopPlan(hard, entry - d * hard, signal.stop_level, basis)
 
 
 def _basis(dist: float, hard: float, floor: float, what: str) -> str:

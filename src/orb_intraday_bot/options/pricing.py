@@ -8,12 +8,11 @@ rises when the trade works, for both directions:
                                                              CE/PE order is a crash net, see
                                                              safety_net_option_stop)
     option_T1 = entry_LTP + futures_T1_points   * |delta|   (display; T1 fires on futures)
-    option_T2 = entry_LTP + futures_T2_points   * |delta|   (display; T2 fires on futures)
     lots      = floor(risk amount / (sizing option points * lot size))
 
-The lots are sized on the distance to the structural level (`sizing.risk_basis: stop_plan`).
-For ORB / pivot-breakout that distance is also the live stop (10–35 or the trade is skipped).
-Touch stops still floor at 10 and cap at 35. `hard_stop` sizes on the real stop instead.
+The lots are sized on `stop_points` (`sizing.risk_basis: stop_plan`). For ORB / pivot-breakout
+that is the 35-point hard stop (close-through of the level is an extra early exit). Touch
+stops still floor at 10 and cap at 35. `hard_stop` sizes on the real stop instead.
 
 Delta and the three prices are fixed at entry. If delta is missing, the stop falls back to the
 fixed 20 points of the notes. The notes give no fallback for the targets, so they use the target
@@ -22,7 +21,6 @@ delta (0.55) and the plan is flagged. [Assumption]
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import date
 
@@ -59,7 +57,7 @@ class OptionPlan:
     sl_points: float                # option points from entry to the trade stop
     lots: int
     quantity: int
-    t1_book_lots: int               # lots booked at T1 (0 when there is only one lot)
+    t1_book_lots: int               # lots closed at T1 (all but one runner when T2 exists)
     risk_budget_inr: float
     risk_at_stop_inr: float         # loss if the trade is stopped out (the real stop)
     sized_risk_inr: float           # the loss the lot count was sized for (level distance)
@@ -97,11 +95,15 @@ def safety_net_option_stop(
     return max(tick, round_to_tick(min(planned_sl, from_fill), tick))
 
 
-def book_lots_at_t1(lots: int, fraction: float) -> int:
-    """Whole lots booked at T1. With one lot nothing is booked; the stop just moves to cost."""
-    if lots < 2:
-        return 0
-    return min(lots - 1, max(1, math.floor(lots * fraction)))
+def book_lots_at_t1(lots: int, fraction: float | None = None) -> int:
+    """Lots closed at T1. One lot: all of them. Two or more: one runner left for T2.
+
+    `fraction` is ignored (retired 50% book). Kept so existing callers still type-check.
+    """
+    _ = fraction
+    if lots <= 1:
+        return lots
+    return lots - 1
 
 
 def plan_option_trade(
@@ -121,8 +123,7 @@ def plan_option_trade(
     flags = list(selection.flags)
 
     delta = quote.delta
-    # The trade's stop in futures points: the real price stop (the setup level for ORB /
-    # pivot-breakout, the structural level when that is closer for touch stops, else 35).
+    # The trade's stop in futures points: 35 for close-based setups, or the touch level.
     stop_futures_points = abs(futures_entry - stop.price_stop)
     if delta is None:
         if FLAG_DELTA_MISSING not in flags:
@@ -145,6 +146,7 @@ def plan_option_trade(
     t1 = round_to_tick(entry + targets.t1_points * delta_used, contract.tick_size)
     t2 = round_to_tick(entry + targets.t2_points * delta_used, contract.tick_size)
     sl_points = round(entry - sl, 4)
+    single_target = abs(targets.t1 - targets.t2) < 1e-9
 
     budget = risk_budget_inr(config.sizing)
     if config.sizing.risk_basis == "hard_stop":
@@ -181,7 +183,7 @@ def plan_option_trade(
         sl_points=sl_points,
         lots=lots,
         quantity=quantity,
-        t1_book_lots=book_lots_at_t1(lots, config.targets.t1_book_fraction),
+        t1_book_lots=lots if single_target else book_lots_at_t1(lots),
         risk_budget_inr=budget,
         risk_at_stop_inr=round(sl_points * quantity, 2),
         sized_risk_inr=round(sizing_points * quantity, 2),

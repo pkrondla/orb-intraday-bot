@@ -45,12 +45,12 @@ def test_open_through_the_executor_records_the_real_fill_and_calls_the_hook(
     assert saved is not None and saved.order_mode == "dry_run" and saved.stop_order_id
 
 
-def test_a_one_lot_cap_leaves_nothing_to_book_at_t1(tmp_path: Path) -> None:
+def test_a_one_lot_fill_closes_all_at_t1(tmp_path: Path) -> None:
     rig, hooks = make_rig(tmp_path), Hooks()
     trade, plan = make_trade()
-    assert plan.t1_book_lots == 3                           # six planned lots book three at T1
+    assert plan.t1_book_lots == plan.lots
     position = _engine(rig, hooks).open(trade, plan, OPENED)
-    assert position is not None and position.t1_book_lots == 0
+    assert position is not None and position.t1_book_lots == position.lots
 
 
 def test_an_unfilled_entry_opens_nothing(tmp_path: Path) -> None:
@@ -113,20 +113,19 @@ def test_a_worse_fill_does_not_pull_the_broker_net_closer(tmp_path: Path) -> Non
     assert events == [] and position.is_open and hooks.closed == []
 
 
-def test_t1_moves_the_broker_stop_to_cost(tmp_path: Path) -> None:
+def test_t1_closes_on_futures_and_does_not_use_the_broker_net(tmp_path: Path) -> None:
     rig, hooks = make_rig(tmp_path), Hooks()
     engine = _engine(rig, hooks)
     trade, plan = make_trade()
     position = engine.open(trade, plan, OPENED)
     assert position is not None
-    old_key = position.stop_order_key
-    rig.quotes.set(158.0, 158.4, ltp=158.2)
-    engine.on_tick(at(9, 45), 22831.0, {SYMBOL: 158.2})              # T1 is 22830
-    assert position.t1_done and position.stop_at_entry and position.is_open
-    assert position.stop_trigger == pytest.approx(150.2)             # now at cost
-    assert position.stop_order_key != old_key
-    first = rig.store.load_order(old_key)
-    assert first is not None and first.status.value == "CANCELLED"
+    old_trigger = position.stop_trigger
+    rig.quotes.set(205.0, 205.4, ltp=205.2)
+    events = engine.on_tick(at(9, 45), 22900.0, {SYMBOL: 205.2})     # notes T1
+    fill = events[0].fill
+    assert fill is not None and fill.reason is ExitReason.T1
+    assert not position.is_open
+    assert old_trigger == pytest.approx(position.sl_exit)            # net was never raised
 
 
 def test_a_failed_sale_leaves_the_position_open_and_is_retried(tmp_path: Path) -> None:

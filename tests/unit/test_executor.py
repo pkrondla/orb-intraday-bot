@@ -44,7 +44,7 @@ def test_entry_buys_at_the_ask_with_a_protective_limit(tmp_path: Path) -> None:
     trade, plan = make_trade()
     done = rig.executor.enter(trade, plan, OPENED)
     assert done.price == 150.2                      # the ask, not the plan's 150.0
-    assert done.lots == 1                           # capped from the plan's 6 by the risk limit
+    assert done.lots == 1                           # capped from the plan's 3 by the risk limit
     assert done.order_id.startswith("DRY-ORB-")
     rows = rig.store.orders_for_signal(trade.signal.signal_id)
     assert [(r["leg"], r["side"], r["order_type"], r["mode"]) for r in rows] == [
@@ -210,7 +210,7 @@ def test_open_places_a_protective_stop_below_the_entry(tmp_path: Path) -> None:
     assert position.order_mode == "dry_run" and position.lots == 1
     assert position.entry_ltp == 150.2 and position.planned_entry == 150.0
     assert position.sl_exit == pytest.approx(130.75)       # unshifted plan; fill must not tighten
-    assert position.t1_option == pytest.approx(166.5) and position.t2_option == pytest.approx(205.0)
+    assert position.t1_option == pytest.approx(205.0) and position.t2_option == pytest.approx(205.0)
     assert position.stop_order_id.startswith("DRY-ORB-")
     assert position.stop_trigger == pytest.approx(130.75)
     assert position.stop_quantity == LOT
@@ -229,15 +229,15 @@ def test_protect_is_a_no_op_when_the_stop_already_matches(tmp_path: Path) -> Non
     assert len(rig.store.orders_for_signal(position.position_id)) == before
 
 
-def test_protect_replaces_the_stop_when_the_trigger_moves(tmp_path: Path) -> None:
+def test_protect_does_not_raise_the_crash_net_after_t1(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     position = _enter(rig)
     old_key = position.stop_order_key
-    position.stop_at_entry = True                          # what T1 does: stop moves to cost
+    old_trigger = position.stop_trigger
+    position.stop_at_entry = True                          # futures stop moves to cost
     rig.executor.protect(position, NOW)
-    assert position.stop_trigger == pytest.approx(150.2)
-    assert position.stop_order_key != old_key
-    assert _status(rig, old_key) is OrderStatus.CANCELLED
+    assert position.stop_trigger == pytest.approx(old_trigger)
+    assert position.stop_order_key == old_key
 
 
 def test_protect_follows_a_smaller_quantity_after_a_partial_exit(tmp_path: Path) -> None:

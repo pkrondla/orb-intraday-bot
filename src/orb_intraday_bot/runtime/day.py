@@ -67,6 +67,7 @@ class CandleReport:
     marks: list[tuple[Position, float]] = field(default_factory=list)
     summary: DaySummary | None = None
     catch_up: bool = False
+    trend: str = "none"
 
     @property
     def opened(self) -> list[SignalOutcome]:
@@ -117,6 +118,7 @@ class TradingDay:
         report.orh, report.orl = self.tracker.orh, self.tracker.orl
         step = self.detector.update(candle, report.orh, report.orl)
         report.events = step.events
+        report.trend = self.detector.trending.state
 
         decision = self.signals.evaluate(
             candle, step.signals, report.orh, report.orl, self.paper.open_directions()

@@ -2,15 +2,15 @@
 
 A position is closed by the first of:
 
-1. the futures price stop (the setup level or the 35-point hard stop). The option price is a
+1. the futures price stop (35-point hard stop, or the touch level). The option price is a
    crash net only (broker SL and, if that order is missing, live option LTP).
-2. T1 (partial booking, then the stop moves to entry) and T2 — both on futures
+2. T1 — the notes Target, on futures. One lot closes here; two or more leave a
+   one-lot runner for T2 (T1 ± OR-range or the nearer pivot). Both fire when the
+   extreme comes within `t2_proximity_points` of the level (a near-miss at S2/R2).
+   After a partial T1 the futures stop on the runner moves to entry; the broker
+   crash net stays.
 3. a candle *close* back beyond the stop level (close-based setups: ORB, R2/S2 breakout)
 4. the end of the day
-
-The mandatory pivot exits (R2/S2 touched, R4/S4) are already T2: the target planner caps T2 at
-them, so reaching T2 closes whatever is left. T2 also fires when the extreme comes within
-`t2_proximity_points` of that level (a near-miss at S2/R2).
 
 Prices are checked on a `Bar`. A live poll is a bar with open = high = low = close = the price.
 A closed candle is a bar with its own OHLC. Inside one candle the order of events is unknown, so
@@ -235,13 +235,19 @@ def _evaluate(
         close_all(ExitReason.OPTION_STOP, bar.close, True)
         return
 
-    # 2. Targets. T2 closes everything left; T1 books part and moves the stop to cost.
-    if not position.t1_done and _reached(bar, position.t1, d):
-        t1_fill_price = max(bar.open, position.t1) if d > 0 else min(bar.open, position.t1)
-        if position.t1_book_lots > 0:
-            # Booked before t1_done is set: if the sale fails, T1 is still pending next poll.
+    # 2. T1, then a one-lot T2 runner when the plan has room beyond T1.
+    distinct_t2 = abs(position.t1 - position.t2) > position.tick_size
+    if not position.t1_done and _reached(bar, position.t1_hit_level, d):
+        t1_fill = _target_fill_price(bar, position.t1, position.t1_hit_level, d)
+        book_now = position.remaining_lots if (
+            not distinct_t2 or position.t1_book_lots >= position.remaining_lots
+        ) else position.t1_book_lots
+        if book_now >= position.remaining_lots:
+            close_all(ExitReason.T1, t1_fill, live)
+            return
+        if book_now > 0:
             fill = _book(
-                position, bar.time, ExitReason.T1, position.t1_book_lots, t1_fill_price,
+                position, bar.time, ExitReason.T1, book_now, t1_fill,
                 option_ltp, cfg, live, executor,
             )
             events.append(
@@ -258,9 +264,8 @@ def _evaluate(
                     f"(futures {position.futures_entry:.1f}, option {position.entry_ltp:.2f})",
                 )
             )
-    if position.is_open and _reached(bar, position.t2_hit_level, d):
-        t2_fill_price = _t2_fill_price(bar, position, d)
-        close_all(ExitReason.T2, t2_fill_price, live)
+    if distinct_t2 and position.is_open and _reached(bar, position.t2_hit_level, d):
+        close_all(ExitReason.T2, _t2_fill_price(bar, position, d), live)
         return
 
     # 3. A candle close back beyond the level (close-based stops only).
@@ -274,10 +279,15 @@ def _reached(bar: Bar, level: float, d: float) -> bool:
     return bar.high >= level if d > 0 else bar.low <= level
 
 
+def _target_fill_price(bar: Bar, level: float, trigger: float, d: float) -> float:
+    """Fill at the chart level if tagged, else at the proximity band. A gap fills at the open."""
+    fill = level if _reached(bar, level, d) else trigger
+    return max(bar.open, fill) if d > 0 else min(bar.open, fill)
+
+
 def _t2_fill_price(bar: Bar, position: Position, d: float) -> float:
     """Fill at T2 if tagged, else at the proximity band. A gap through T2 fills at the open."""
-    level = position.t2 if _reached(bar, position.t2, d) else position.t2_hit_level
-    return max(bar.open, level) if d > 0 else min(bar.open, level)
+    return _target_fill_price(bar, position.t2, position.t2_hit_level, d)
 
 
 def close_at_end_of_day(

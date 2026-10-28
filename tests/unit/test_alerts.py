@@ -12,7 +12,12 @@ from orb_intraday_bot.risk.stops import StopPlan
 from orb_intraday_bot.risk.targets import TargetPlan
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
-from orb_intraday_bot.runtime.report import _rr, sl_level_name, target_level_name
+from orb_intraday_bot.runtime.report import (
+    _rr,
+    format_opened_alert,
+    sl_level_name,
+    target_level_name,
+)
 from tests.helpers import at, candle
 from tests.runtime_support import Recorder, make_day, real_day
 
@@ -95,6 +100,9 @@ def _planned(
 
 
 def test_opened_card_labels_sl_t1_t2_levels() -> None:
+    assert sl_level_name(
+        _planned("close through ORH or 35-pt hard stop", level_name="ORH")
+    ) == "35 pts"
     assert sl_level_name(_planned("ORH is 20.0 pts away", level_name="ORH")) == "ORH"
     assert sl_level_name(_planned("level is 18.5 pts away", level_name="ORL")) == "ORL"
     assert sl_level_name(_planned("level is 42.0 pts away: hard stop 35")) == "35 pts"
@@ -126,7 +134,7 @@ def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     card = next(m for m in notes.messages if "<b>BUY</b>" in m)
     pos = opened.position
     assert "IST" in card and "OPENED" in card
-    assert "<b>SL</b>" in card and "<b>T1</b>" in card and "<b>T2</b>" in card
+    assert "<b>SL</b>" in card and "<b>T1</b>" in card and "<b>T2</b>" not in card
     assert "R:R" in card and "1 :" in card
     buy_block = card.split("<b>SL</b>", 1)[0]
     assert f"fut <code>{pos.futures_entry:.1f}</code>" in buy_block
@@ -134,14 +142,15 @@ def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     assert "broker net option" in card
     assert f"<code>{pos.sl_exit:.2f}</code>" in card
     assert f"fut <code>{pos.t1:.1f}</code>" in card
-    assert f"fut <code>{pos.t2:.1f}</code>" in card
-    if abs(pos.t2_hit_level - pos.t2) >= 1e-6:
+    if abs(pos.t2_hit_level - pos.t1) >= 1e-6:
         assert f"trigger <code>{pos.t2_hit_level:.1f}</code>" in card
     trade = opened.trade
     assert trade is not None
     assert sl_level_name(trade) in card
     assert target_level_name(trade.targets.t1_basis) in card
-    assert target_level_name(trade.targets.t2_basis) in card
+    label = next(line for line in card.splitlines() if " · " in line)
+    assert trade.zone.value in label
+    assert "no trend" in label or "UPTREND" in label or "DOWNTREND" in label
 
 
 def _exit_fill(reason: ExitReason, futures: float, option: float, points: float) -> Fill:
@@ -173,21 +182,15 @@ def test_exit_telegram_card_has_futures_on_sl_t1_t2() -> None:
         _exit_fill(ExitReason.T1, 22830.0, 166.50, 30.0),
     ))
     alerts.exit(ExitEvent(
-        "p1", at(10, 21),
-        "NIFTY26O1922800CE T1 reached: stop moved to entry (futures 22800.0, option 150.00)",
-    ))
-    alerts.exit(ExitEvent(
         "p1", at(10, 45),
-        "NIFTY26O1922800CE T2: sold 1 lot(s) at 205.00 (live), futures 22900.0",
-        _exit_fill(ExitReason.T2, 22900.0, 205.00, 100.0),
+        "NIFTY26O1922800CE T1: sold 1 lot(s) at 205.00 (live), futures 22900.0",
+        _exit_fill(ExitReason.T1, 22900.0, 205.00, 100.0),
     ))
-    sl, t1, moved, t2 = notes.messages
+    sl, t1, t1_full = notes.messages
     assert "<b>SL</b>" in sl and "HARD_STOP" in sl
     assert "fut <code>22765.0</code>" in sl and "option <code>130.75</code>" in sl
     assert "<b>T1</b>" in t1 and "fut <code>22830.0</code>" in t1
-    assert "<b>T1</b>" in moved and "stop moved to entry" in moved
-    assert "fut <code>22800.0</code>" in moved and "option <code>150.00</code>" in moved
-    assert "<b>T2</b>" in t2 and "fut <code>22900.0</code>" in t2
+    assert "<b>T1</b>" in t1_full and "fut <code>22900.0</code>" in t1_full
 
 
 def test_candle_reports_are_sent_only_when_enabled() -> None:
@@ -264,17 +267,53 @@ def test_pattern_decisions_are_alerted_and_noise_is_not() -> None:
     assert "CONSOLIDATION_TOUCH" not in joined
 
 
+def test_opened_telegram_label_includes_zone_and_trend() -> None:
+    opened = next(o for r in _reports() for o in r.opened)
+    assert opened.trade is not None
+    zone = opened.trade.zone.value
+    card = format_opened_alert(opened, trend="UPTREND")
+    assert f"{opened.signal.setup.value} · {opened.signal.level_name} · " in card
+    assert f"{opened.signal.direction.value} · {zone} · UPTREND" in card
+    none = format_opened_alert(opened, trend="none")
+    assert f"{zone} · no trend" in none
+
+
+def test_alerts_copy_report_trend_onto_opened_card() -> None:
+    notes = Recorder()
+    report = next(r for r in _reports() if r.opened)
+    report.trend = "DOWNTREND"
+    Alerts(notes).candle(report)
+    card = next(m for m in notes.messages if "<b>BUY</b>" in m)
+    assert report.opened[0].trade is not None
+    assert f"{report.opened[0].trade.zone.value} · DOWNTREND" in card
+
+
+def test_candle_report_carries_trending_state() -> None:
+    day = make_day()
+    last = None
+    for c in real_day():
+        last = day.on_candle(c)
+        assert last.trend in {"none", "UPTREND", "DOWNTREND", "UP and DOWN (choppy)"}
+        assert last.trend == day.detector.trending.state
+    assert last is not None
+
+
 def test_blocked_signals_are_alerted_opened_is_not_duplicated() -> None:
     notes = Recorder()
     sig = _signal()
     report = _bar(9, 33)
     report.outcomes = [
-        SignalOutcome(sig, "rejected", "above R1: no shorts", "zone"),
+        SignalOutcome(
+            sig, "rejected",
+            "neutral zone (R1 to S1): no aggressive entries, wait for the standard trigger",
+            "zone",
+        ),
         SignalOutcome(sig, "skipped", "already rejected earlier"),
     ]
     Alerts(notes).candle(report)
     assert notes.messages == [
-        "09:33 BLOCKED ORB_BREAKOUT ORH LONG @ 22810.0 [zone] above R1: no shorts"
+        "09:33 BLOCKED ORB_BREAKOUT ORH LONG @ 22810.0 [NEUTRAL · no trend] [zone] "
+        "neutral zone (R1 to S1): no aggressive entries, wait for the standard trigger"
     ]
 
 

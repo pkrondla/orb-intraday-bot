@@ -87,53 +87,37 @@ def test_apply_overrides_rejects_bad_input(bad: str) -> None:
 
 
 # ---- T1 cap and the break-even flag ------------------------------------------------------
-def test_t1_is_not_capped_by_default() -> None:
-    sig = make(entry=121)             # WIDE: R2 140; T1 halfway 130.5
-    assert plan_targets(sig, WIDE, 110.0, 95.0, STOPS).t1 == pytest.approx(130.5)
+def test_t1_is_the_notes_target_not_a_halfway_scalp() -> None:
+    sig = make(entry=121)             # WIDE: R2 140
+    assert plan_targets(sig, WIDE, 110.0, 95.0, STOPS).t1 == 140
 
 
-def test_t1_cap_pulls_a_far_t1_in() -> None:
+def test_t1_cap_is_ignored() -> None:
     sig = make(entry=121)
     plan = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, t1_max_points=5)
-    assert plan.t1 == pytest.approx(126.0) and plan.t1_points == pytest.approx(5)
-    assert "capped at 5 pts" in plan.t1_basis
-    assert plan.t2 == 140
+    assert plan.t1 == 140 and plan.t2 == 155
 
 
-def test_t1_cap_leaves_a_near_t1_alone_and_mirrors_for_shorts() -> None:
-    near = plan_targets(make(entry=121), WIDE, 110.0, 95.0, STOPS, t1_max_points=50)
-    assert near.t1 == pytest.approx(130.5)
+def test_t1_cap_is_ignored_for_shorts() -> None:
     short = plan_targets(
         make(direction=Direction.SHORT, entry=79, level=95, stop_level=95, target_ref="S2",
              level_name="ORL"),
         WIDE, 110.0, 95.0, STOPS, t1_max_points=4,
     )
-    assert short.t1 == pytest.approx(75.0)
+    assert short.t1 == 60
 
 
-def run_t1(config: StrategyConfig) -> tuple[list[ExitReason], float]:
+def test_t1_closes_the_trade() -> None:
     from orb_intraday_bot.paper.engine import PaperEngine
-
-    trade, plan = make_trade(Direction.LONG)
-    engine = PaperEngine(config)
     from tests.unit.test_paper import OPENED
 
+    trade, plan = make_trade(Direction.LONG)
+    engine = PaperEngine(CFG)
     position = engine.open(trade, plan, OPENED)
     assert position is not None
-    engine.on_candle(Candle(at(9, 36), 22800, 22835, 22795, 22830))     # T1 22830 reached
-    engine.on_candle(Candle(at(9, 39), 22825, 22826, 22760, 22765))      # falls back below entry
-    return [f.reason for f in position.fills], position.active_stop
-
-
-def test_break_even_stop_after_t1_by_default() -> None:
-    reasons, _ = run_t1(CFG)
-    assert reasons == [ExitReason.T1, ExitReason.BREAKEVEN_STOP]
-
-
-def test_break_even_flag_off_keeps_the_original_stop() -> None:
-    cfg = apply_overrides(CFG, ["targets.move_sl_to_entry_after_t1=false"])
-    reasons, stop = run_t1(cfg)
-    assert reasons == [ExitReason.T1, ExitReason.HARD_STOP] and stop == 22765.0
+    engine.on_candle(Candle(at(9, 36), 22850, 22905, 22840, 22900))
+    assert [f.reason for f in position.fills] == [ExitReason.T1]
+    assert not position.is_open
 
 
 def test_unused_bar_helper_is_importable() -> None:

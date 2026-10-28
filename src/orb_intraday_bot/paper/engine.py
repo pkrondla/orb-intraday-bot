@@ -128,7 +128,7 @@ class PaperEngine:
             done = executor.enter(trade, plan, opened_at)
             entry = round(round(done.price / tick) * tick, 4)
             lots, order_id, order_mode = done.lots, done.order_id, executor.mode
-            # Futures SL / T1 / T2 stay on the chart levels. A worse option fill must not
+            # Futures SL / T1 stay on the chart levels. A worse option fill must not
             # pull the broker CE/PE stop closer: that order is only a crash net.
             sl_exit = safety_net_option_stop(
                 planned_sl=plan.sl,
@@ -138,10 +138,10 @@ class PaperEngine:
                 tick=tick,
             )
             t1_option, t2_option = plan.t1, plan.t2
+            single_target = abs(trade.targets.t1 - trade.targets.t2) < 1e-9
             t1_book_lots = (
-                plan.t1_book_lots
-                if lots == plan.lots
-                else book_lots_at_t1(lots, self._cfg.targets.t1_book_fraction)
+                lots if single_target
+                else (plan.t1_book_lots if lots == plan.lots else book_lots_at_t1(lots))
             )
         quantity = lots * plan.contract.lot_size
         position = Position(
@@ -166,6 +166,13 @@ class PaperEngine:
             close_exit_level=trade.stop.close_exit_level,
             t1=trade.targets.t1,
             t2=trade.targets.t2,
+            t1_trigger=t2_trigger_price(
+                signal.entry_price,
+                trade.targets.t1,
+                long=signal.direction is Direction.LONG,
+                proximity_points=self._cfg.targets.t2_proximity_points,
+                min_stop_points=self._cfg.stops.min_stop_points,
+            ),
             t2_trigger=t2_trigger_price(
                 signal.entry_price,
                 trade.targets.t2,
@@ -336,7 +343,7 @@ class PaperEngine:
         else:
             executor = self._executor_for(position)
             if executor is not None:
-                executor.protect(position, now)     # keeps the broker stop in step (T1, partial)
+                executor.protect(position, now)     # keeps the broker crash net on what's left
         self._save(position, now)
 
     def _save(self, position: Position, now: datetime) -> None:

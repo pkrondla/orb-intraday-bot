@@ -187,7 +187,7 @@ def test_progress_text_for_paper_and_executed_positions() -> None:
     assert "broker stop: order S-9, trigger 99.50, qty 75" in text
     assert "broker stop: NONE" in text and "25 unit(s)" in text
     assert "planned 150.00" in text
-    assert f"T2 {paper.t2:.1f} (trigger {paper.t2_hit_level:.1f})" in text
+    assert f"T1 {paper.t1:.1f} (trigger {paper.t2_hit_level:.1f})" in text
 
 
 def test_levels_text_before_and_after_the_session_loads_them() -> None:
@@ -253,7 +253,7 @@ def test_reports_read_the_database(tmp_path: Path) -> None:
     _database(ctx).close()
     orders = _send(CommandKind.ORDERS, "", ctx=ctx, state=state, now=at(10, 0))[0]
     assert "Orders on 2026-10-15: 1" in orders and "ENTRY BUY" in orders
-    assert "FILLED" in orders and "[dry_run]" in orders and "filled 390@151.50" in orders
+    assert "FILLED" in orders and "[dry_run]" in orders and "filled 195@151.50" in orders
     assert "Entry vs plan" in orders and "planned 150.00, filled 151.50 (+1.0%)" in orders
     signals = _send(CommandKind.SIGNALS, "", ctx=ctx, state=state)[0]
     assert "Signals on 2026-10-15: 1 (1 accepted)" in signals and "ORB_BREAKOUT" in signals

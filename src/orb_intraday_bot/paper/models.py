@@ -23,8 +23,8 @@ class ExitReason(StrEnum):
     BREAKEVEN_STOP = "BREAKEVEN_STOP"  # stop had moved to entry after T1
     CLOSE_STOP = "CLOSE_STOP"          # candle closed back beyond the level
     OPTION_STOP = "OPTION_STOP"        # option price hit its stop (live prices only)
-    T1 = "T1"                          # partial booking
-    T2 = "T2"                          # final target / mandatory pivot exit
+    T1 = "T1"                          # notes Target (all lots, or all but one runner)
+    T2 = "T2"                          # one-lot runner (T1 ± OR-range or nearer pivot)
     EOD = "EOD"                        # end of day
     SQUARE_OFF = "SQUARE_OFF"          # the intraday square-off time (before the broker's own)
     FLATTEN = "FLATTEN"                # an operator or kill-switch flatten
@@ -80,8 +80,8 @@ class Position:
     futures_entry: float
     hard_stop: float             # futures price stop (the 35-point stop, or the touch level)
     close_exit_level: float | None
-    t1: float
-    t2: float
+    t1: float                          # notes Target (futures)
+    t2: float                          # runner: T1 ± OR-range or nearer pivot; equals t1 if no room
     # option-price equivalents
     sl_exit: float
     t1_option: float
@@ -92,8 +92,9 @@ class Position:
     # state
     remaining_lots: int
     t2_trigger: float | None = None  # T2 fires here (proximity band); None = exact t2
+    t1_trigger: float | None = None  # T1 fires here (proximity band); None = exact t1
     t1_done: bool = False
-    breakeven_after_t1: bool = True   # from config targets.move_sl_to_entry_after_t1
+    breakeven_after_t1: bool = True   # leftover runner: futures stop moves to entry after T1
     strategy_hash: str = ""           # the rules this trade was opened under (config.fingerprint)
     stop_at_entry: bool = False
     status: PositionStatus = PositionStatus.OPEN
@@ -132,8 +133,18 @@ class Position:
         return self.remaining_lots * self.lot_size
 
     @property
+    def t1_hit_level(self) -> float:
+        """Futures price that counts as T1 (the proximity band, or the chart level)."""
+        if self.t1_trigger is not None:
+            return self.t1_trigger
+        # 0.17 stored the T1 band on t2_trigger when T1 = T2.
+        if abs(self.t1 - self.t2) <= self.tick_size and self.t2_trigger is not None:
+            return self.t2_trigger
+        return self.t1
+
+    @property
     def t2_hit_level(self) -> float:
-        """Futures price that counts as T2 (the proximity band, or T2 itself)."""
+        """Futures price that counts as T2 (the proximity band, or the chart level)."""
         return self.t2 if self.t2_trigger is None else self.t2_trigger
 
     @property
@@ -142,12 +153,13 @@ class Position:
 
     @property
     def active_stop(self) -> float:
-        """The futures price stop in force (moves to entry after T1)."""
+        """The futures price stop in force (legacy: moves to entry after a partial T1)."""
         return self.futures_entry if self.stop_at_entry else self.hard_stop
 
     @property
     def active_option_stop(self) -> float:
-        return max(self.sl_exit, self.entry_ltp) if self.stop_at_entry else self.sl_exit
+        """Broker CE/PE crash net. T1 moves only the futures stop; this trigger never rises."""
+        return self.sl_exit
 
     @property
     def gross_option_pnl(self) -> float:

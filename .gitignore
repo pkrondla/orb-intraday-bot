@@ -12,6 +12,7 @@ trading_logs/
 *.tmp
 *.temp
 ~$*
+.tmp-notes-imgs/
 
 # OS generated files
 .DS_Store

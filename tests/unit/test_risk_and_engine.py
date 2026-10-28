@@ -51,29 +51,19 @@ def make(
 
 
 # ---- stop plan -----------------------------------------------------------------------------
-def test_orb_stop_sits_on_the_level_when_distance_is_in_band() -> None:
+def test_orb_stop_is_35_points_plus_close_through_the_level() -> None:
     plan = plan_stop(make(entry=130, stop_level=110), STOPS)
-    assert plan.stop_points == 20
-    assert plan.price_stop == 110
+    assert plan.stop_points == 35
+    assert plan.price_stop == 95
     assert plan.close_exit_level == 110
-    assert plan.basis == "ORH is 20.0 pts away"
+    assert "close through ORH" in plan.basis
 
 
-def test_orb_stop_accepts_the_floor_and_the_cap() -> None:
-    at_floor = plan_stop(make(entry=120, stop_level=110), STOPS)
-    assert at_floor.stop_points == 10 and at_floor.price_stop == 110
-    at_cap = plan_stop(make(entry=145, stop_level=110), STOPS)
-    assert at_cap.stop_points == 35 and at_cap.price_stop == 110
-
-
-def test_orb_stop_rejects_a_fill_inside_the_floor() -> None:
-    with pytest.raises(PlanError, match="below the 10-point floor"):
-        plan_stop(make(entry=112, stop_level=110), STOPS)
-
-
-def test_orb_stop_rejects_a_fill_beyond_the_cap() -> None:
-    with pytest.raises(PlanError, match="above the 35-point cap"):
-        plan_stop(make(entry=160, stop_level=110), STOPS)
+def test_orb_stop_still_takes_a_close_level_and_a_far_level() -> None:
+    close = plan_stop(make(entry=112, stop_level=110), STOPS)
+    assert close.stop_points == 35 and close.price_stop == 77 and close.close_exit_level == 110
+    far = plan_stop(make(entry=160, stop_level=110), STOPS)
+    assert far.stop_points == 35 and far.price_stop == 125 and far.close_exit_level == 110
 
 
 def test_orb_stop_rejects_entry_already_beyond_the_level() -> None:
@@ -81,36 +71,36 @@ def test_orb_stop_rejects_entry_already_beyond_the_level() -> None:
         plan_stop(make(entry=109, stop_level=110), STOPS)
 
 
-def test_orb_short_stop_sits_on_orl() -> None:
+def test_orb_short_stop_is_35_plus_close_through_orl() -> None:
     plan = plan_stop(
         make(direction=Direction.SHORT, entry=80, stop_level=95, level=95, level_name="ORL"),
         STOPS,
     )
-    assert plan.stop_points == 15
-    assert plan.price_stop == 95
+    assert plan.stop_points == 35
+    assert plan.price_stop == 115
     assert plan.close_exit_level == 95
 
 
-def test_pivot_breakout_uses_the_same_level_bound_stop() -> None:
+def test_pivot_breakout_uses_the_same_close_or_35_stop() -> None:
     plan = plan_stop(
         make(setup=Setup.PIVOT_BREAKOUT, entry=135, stop_level=120, level=120, level_name="R2"),
         STOPS,
     )
-    assert plan.stop_points == 15 and plan.price_stop == 120 and plan.close_exit_level == 120
-    with pytest.raises(PlanError, match="above the 35-point cap"):
-        plan_stop(
-            make(setup=Setup.PIVOT_BREAKOUT, entry=160, stop_level=120, level=120, level_name="R2"),
-            STOPS,
-        )
+    assert plan.stop_points == 35 and plan.price_stop == 100 and plan.close_exit_level == 120
+    far = plan_stop(
+        make(setup=Setup.PIVOT_BREAKOUT, entry=160, stop_level=120, level=120, level_name="R2"),
+        STOPS,
+    )
+    assert far.stop_points == 35 and far.close_exit_level == 120
 
 
-def test_additional_whipsaw_close_stop_still_relocates_to_35() -> None:
+def test_additional_whipsaw_close_stop_is_35_plus_close_through() -> None:
     plan = plan_stop(
         make(setup=Setup.ADDITIONAL_WHIPSAW, entry=130, stop_level=110, stop_on="close"),
         STOPS,
     )
-    assert plan.stop_points == 20
-    assert plan.price_stop == 95                         # entry - 35, in front of the level
+    assert plan.stop_points == 35
+    assert plan.price_stop == 95
     assert plan.close_exit_level == 110
 
 
@@ -168,40 +158,66 @@ def test_t2_trigger_shrinks_so_the_level_keeps_ten_points_of_room() -> None:
     ) == 22810
 
 
-def test_orb_long_targets_r2_with_nearest_pivot_as_t1() -> None:
+def test_orb_long_t1_is_r2() -> None:
     t = targets(make(entry=105))
-    assert t.t2 == 120 and t.t2_points == 15
-    assert t.t1 == 110 and "R1" in t.t1_basis
+    assert t.t1 == 120 and t.t1_points == 15
+    assert "R2" in t.t1_basis
+    # OR-range 15 → 135; R3 130 is nearer.
+    assert t.t2 == 130 and "R3" in t.t2_basis
 
 
-def test_t1_is_halfway_when_no_pivot_between() -> None:
+def test_orb_long_t1_is_r2_when_no_pivot_between() -> None:
     t = targets(make(entry=121), pivots=WIDE)          # R2 140; R1 120 is behind the entry
-    assert t.t2 == 140
-    assert t.t1 == pytest.approx(130.5) and t.t1_basis == "halfway to T2"
+    assert t.t1 == 140
+    assert t.t2 == 155 and "OR-range" in t.t2_basis    # 140 + 15; R3 160 is farther
 
 
-def test_orb_short_targets_s2() -> None:
+def test_orb_short_t1_is_s2() -> None:
     t = targets(make(direction=Direction.SHORT, entry=95, level=95, stop_level=95,
                      target_ref="S2", level_name="ORL"))
-    assert t.t2 == 80 and t.t1 == 90 and "S1" in t.t1_basis
+    assert t.t1 == 80
+    assert t.t2 == 70 and "S3" in t.t2_basis           # 80 − 15 = 65; S3 70 is nearer
 
 
 def test_entry_already_beyond_r2_targets_r4() -> None:
     t = targets(make(entry=125))
-    assert t.t2 == 140 and "R4" in t.t2_basis
-    assert t.t1 == 130                                   # R3 is between 125 and 140
+    assert t.t1 == 140 and "R4" in t.t1_basis
+    assert t.t2 == 150 and "R5" in t.t2_basis          # 140 + 15 = 155; R5 150 is nearer
 
 
 def test_pivot_breakout_targets_r4() -> None:
     t = targets(make(setup=Setup.PIVOT_BREAKOUT, entry=121, target_ref="R4", level=120,
                      stop_level=120, level_name="R2"))
-    assert t.t2 == 140
+    assert t.t1 == 140
+    assert t.t2 == 150 and "R5" in t.t2_basis
 
 
 def test_target_is_capped_at_r2_for_trap_setups() -> None:
-    # bear trap long, target ORH = 135 but R2 (120) closes all positions first
+    # bear trap long, T1 capped at R2; runner may go past R2
     t = targets(make(setup=Setup.TRAP_REVERSE_RETEST, entry=105, target_ref="ORH"), orh=135)
-    assert t.t2 == 120 and "capped at R2" in t.t2_basis
+    assert t.t1 == 120 and "capped at R2" in t.t1_basis
+    assert t.t2 == 130 and "R3" in t.t2_basis
+
+
+def test_orl_on_s2_is_one_magnet() -> None:
+    # 28 Oct 2026: Case 2 short at 22671, ORL 22635 sitting on S2.
+    sig = make(
+        setup=Setup.FOLLOWUP_CASE_2, direction=Direction.SHORT, entry=75,
+        target_ref="ORL", stop_level=None, stop_on="none", level_name="ORH", aggressive=True,
+    )
+    t = plan_targets(sig, WIDE, 110.0, 62.0, STOPS, zone=Zone.BEARISH)
+    assert t.t1 == 62 and "≈ S2" in t.t1_basis
+    assert t.t2 == 40 and "S3" in t.t2_basis           # 62 − 48 = 14; S3 40 is nearer
+
+
+def test_case2_short_caps_at_s2_when_orl_is_well_beyond() -> None:
+    sig = make(
+        setup=Setup.FOLLOWUP_CASE_2, direction=Direction.SHORT, entry=95,
+        target_ref="ORL", stop_level=None, stop_on="none", level_name="ORH", aggressive=True,
+    )
+    t = plan_targets(sig, WIDE, 110.0, 50.0, STOPS, zone=Zone.BEARISH)
+    assert t.t1 == 60 and "capped at S2" in t.t1_basis
+    assert t.t2 == 40 and "S3" in t.t2_basis
 
 
 def test_orh_target_below_entry_is_rejected() -> None:
@@ -231,23 +247,23 @@ def test_consolidation_target_is_the_nearer_of_projection_and_pivot() -> None:
                 target_ref="OR_PROJECTION_OR_PIVOT", stop_level=None, stop_on="none")
     # pivot candidates must be at least 10 points away: R1 (110) is only 5 away, so R2 (120)
     far_projection = targets(make(**base, target_price=125))        # type: ignore[arg-type]
-    assert far_projection.t2 == 120 and "pivot R2" in far_projection.t2_basis
+    assert far_projection.t1 == 120 and "pivot R2" in far_projection.t1_basis
     near_projection = targets(make(**base, target_price=116))       # type: ignore[arg-type]
-    assert near_projection.t2 == 116 and "projection" in near_projection.t2_basis
+    assert near_projection.t1 == 116 and "projection" in near_projection.t1_basis
 
 
 def test_consolidation_short_target() -> None:
     sig = make(setup=Setup.CONSOLIDATION_BREAKOUT, direction=Direction.SHORT, entry=95,
                target_ref="OR_PROJECTION_OR_PIVOT", target_price=70, stop_level=None,
                stop_on="none", level_name="ORL")
-    assert targets(sig).t2 == 80                          # S2 is nearer than the projection
+    assert targets(sig).t1 == 80                          # S2 is nearer than the projection
 
 
 def test_range_target_without_pivots_uses_the_signal_price() -> None:
     sig = make(setup=Setup.FAKE_BREAK, entry=100, target_ref="RANGE_OPPOSITE_END",
                target_price=130, stop_level=90, stop_on="touch")
-    t = targets(sig, pivots=None)
-    assert t.t2 == 130 and t.t1 == 115 and t.t1_basis == "halfway to T2"
+    t = plan_targets(sig, None, None, None, STOPS)
+    assert t.t1 == 130 and t.t2 == 130
     with pytest.raises(PlanError):
         targets(make(target_ref="RANGE_OPPOSITE_END"))    # no price supplied
 
@@ -256,41 +272,34 @@ def test_range_target_without_pivots_uses_the_signal_price() -> None:
 OCT26 = traditional_pivots(22851.5, 22435.0, 22576.6)
 
 
-def test_neutral_zone_3ll_scalps_orh_and_runs_to_p() -> None:
+def test_neutral_zone_3ll_t1_is_p() -> None:
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, entry=22546.4, stop_level=22500.0, stop_on="touch",
         target_ref="R2", level_name="3LL", level=22500.0,
     )
     t = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
-    assert t.t1 == pytest.approx(22575.0) and t.t1_basis == "ORH"
-    assert t.t2 == pytest.approx(22621.0333, abs=0.05) and t.t2_basis.startswith("P")
+    assert t.t1 == pytest.approx(22621.0333, abs=0.05) and t.t1_basis.startswith("P")
+    assert t.t2 == pytest.approx(t.t1 + (22575.0 - 22444.6), abs=0.05)
     setup = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS)
-    assert setup.t2 == pytest.approx(23037.5, abs=0.05)
-    assert setup.t1 == pytest.approx(22621.0333, abs=0.05)
+    assert setup.t1 == pytest.approx(23037.5, abs=0.05)
+    assert setup.t2 != setup.t1
 
 
-def test_neutral_zone_short_scalps_orl_and_runs_to_p() -> None:
+def test_neutral_zone_short_t1_is_p() -> None:
     sig = make(
         direction=Direction.SHORT, entry=22700.0, stop_level=22740.0, stop_on="touch",
         target_ref="S2", level_name="2HH", level=22740.0, setup=Setup.STRUCTURE_WHIPSAW,
     )
     t = plan_targets(sig, OCT26, 22575.0, 22650.0, STOPS, zone=Zone.NEUTRAL)
-    assert t.t1 == pytest.approx(22650.0) and t.t1_basis == "ORL"
-    assert t.t2 == pytest.approx(22621.0333, abs=0.05) and t.t2_basis.startswith("P")
+    assert t.t1 == pytest.approx(22621.0333, abs=0.05) and t.t1_basis.startswith("P")
+    assert t.t2 == pytest.approx(22390.5666, abs=0.05) and "S1" in t.t2_basis
 
 
-def test_neutral_zone_above_p_runs_to_r1() -> None:
+def test_neutral_zone_above_p_t1_is_r1() -> None:
     sig = make(entry=22650.0, stop_level=22620.0, target_ref="R2")
     t = plan_targets(sig, OCT26, 22700.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
-    assert t.t2 == pytest.approx(22807.0666, abs=0.05) and t.t2_basis.startswith("R1")
-    assert t.t1 == pytest.approx(22700.0) and t.t1_basis == "ORH"
-
-
-def test_neutral_zone_skips_an_or_level_inside_the_floor() -> None:
-    sig = make(entry=22546.4, stop_level=22500.0, target_ref="R2")
-    t = plan_targets(sig, OCT26, 22550.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
-    assert t.t2 == pytest.approx(22621.0333, abs=0.05)
-    assert t.t1 == pytest.approx((22546.4 + t.t2) / 2) and t.t1_basis == "halfway to T2"
+    assert t.t1 == pytest.approx(22807.0666, abs=0.05) and t.t1_basis.startswith("R1")
+    assert t.t2 == t.t1
 
 
 def test_neutral_zone_rejects_when_the_zone_edge_is_too_close() -> None:
@@ -303,13 +312,13 @@ def test_neutral_zone_rejects_when_the_zone_edge_is_too_close() -> None:
 def test_bullish_and_bearish_zones_keep_the_setup_targets() -> None:
     long = plan_targets(make(entry=121, stop_level=110), WIDE, 110.0, 95.0, STOPS,
                         zone=Zone.BULLISH)
-    assert long.t2 == 140 and long.t1 == pytest.approx(130.5)
+    assert long.t1 == 140 and long.t2 == 155
     short = plan_targets(
         make(direction=Direction.SHORT, entry=70, level=95, stop_level=95, target_ref="S2",
              level_name="ORL"),
         WIDE, 110.0, 95.0, STOPS, zone=Zone.BEARISH,
     )
-    assert short.t2 == 60
+    assert short.t1 == 60 and short.t2 == 45               # 60 − 15; S3 40 is farther
 
 
 # ---- sizing --------------------------------------------------------------------------------
@@ -324,10 +333,10 @@ def test_risk_budget_and_lots() -> None:
 @pytest.mark.parametrize(
     ("zone", "direction", "aggressive", "blocked"),
     [
-        (Zone.BULLISH, Direction.SHORT, False, True),
+        (Zone.BULLISH, Direction.SHORT, False, False),
         (Zone.BULLISH, Direction.LONG, False, False),
         (Zone.BULLISH, Direction.LONG, True, False),
-        (Zone.BEARISH, Direction.LONG, False, True),
+        (Zone.BEARISH, Direction.LONG, False, False),
         (Zone.BEARISH, Direction.SHORT, True, False),
         (Zone.NEUTRAL, Direction.LONG, True, True),
         (Zone.NEUTRAL, Direction.SHORT, True, True),
@@ -357,8 +366,9 @@ def test_engine_accepts_a_valid_signal_and_builds_the_plan() -> None:
     res = engine().evaluate(bar(125), [LONG_ORB], 110, 95)
     assert res.zone is Zone.BULLISH and res.rejected == []
     (trade,) = res.accepted
-    assert trade.stop.stop_points == 15 and trade.targets.t2 == 140
-    assert trade.stop.price_stop == 110 and trade.stop.close_exit_level == 110
+    assert trade.stop.stop_points == 35 and trade.targets.t1 == 140
+    assert trade.targets.t2 == 155
+    assert trade.stop.price_stop == 90 and trade.stop.close_exit_level == 110
     assert trade.risk_budget_inr == 5000
 
 
@@ -370,16 +380,23 @@ def test_engine_applies_neutral_zone_targets() -> None:
     res = engine().evaluate(bar(100), [sig], 110, 95)
     assert res.zone is Zone.NEUTRAL
     t = res.accepted[0].targets
-    assert t.t2 == pytest.approx(120) and t.t2_basis.startswith("R1")
-    assert t.t1 == pytest.approx(110) and t.t1_basis == "ORH"
+    assert t.t1 == pytest.approx(120) and t.t1_basis.startswith("R1")
+    assert t.t2 == t.t1
 
 
-def test_engine_zone_block_is_reported() -> None:
+def test_engine_takes_a_short_above_r1() -> None:
     short = make(direction=Direction.SHORT, entry=125, level=130, stop_level=130,
                  target_ref="S2", sign="short")
     res = engine().evaluate(bar(125), [short], 110, 95)
-    assert res.accepted == []
-    assert [(r.stage, r.reason) for r in res.rejected] == [("zone", "above R1: no shorts")]
+    assert res.zone is Zone.BULLISH and res.rejected == []
+    assert res.accepted[0].signal.direction is Direction.SHORT
+
+
+def test_engine_takes_a_long_below_s1() -> None:
+    long = make(entry=70, stop_level=55, level=55, target_ref="R2", sign="long")
+    res = engine().evaluate(bar(70), [long], 110, 95)
+    assert res.zone is Zone.BEARISH and res.rejected == []
+    assert res.accepted[0].signal.direction is Direction.LONG
 
 
 def test_blocked_aggressive_signal_does_not_use_up_its_sign() -> None:
@@ -413,12 +430,12 @@ def test_plan_failure_is_reported() -> None:
     assert res.rejected[0].stage == "plan"
 
 
-def test_engine_skips_orb_when_the_level_is_too_far() -> None:
+def test_engine_still_takes_orb_when_the_level_is_far() -> None:
     far = make(entry=160, stop_level=110, level=110, sign="far")
     res = engine().evaluate(bar(160), [far], 110, 95)
-    assert res.accepted == []
-    assert res.rejected[0].stage == "plan"
-    assert "above the 35-point cap" in res.rejected[0].reason
+    assert len(res.accepted) == 1
+    assert res.accepted[0].stop.price_stop == 125
+    assert res.accepted[0].stop.close_exit_level == 110
 
 
 def test_priority_resolves_a_same_candle_conflict() -> None:

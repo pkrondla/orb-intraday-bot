@@ -6,7 +6,59 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-29
+
 ### Changed
+- Telegram OPENED / BLOCKED labels now show pivot zone and trending-day status
+  (`NEUTRAL · no trend`, `BULLISH · UPTREND`, …).
+
+## [0.19.0] - 2026-10-29
+
+### Changed
+- Pivots stay reference. Longs below S1 and shorts above R1 are no longer
+  blocked. OR setups (ORB, trap, 2LL/2HH, fake, extra whipsaw, R2/S2-as-OR)
+  can fire in any zone. The only remaining zone block is aggressive entries
+  (Case 1/2 and consolidation) inside R1–S1.
+- Golden replay: 196 → 222 trades, fill-points 1693.7 → 2003.3.
+
+## [0.18.0] - 2026-10-28
+
+### Changed
+- T2 is back as a **one-lot runner**: T1 ± OR-range (ORH − ORL), or the nearer pivot
+  beyond T1, capped at R4/S4 (R5/S5 when T1 is already R4/S4). Neutral-zone T2
+  stops at R1/S1. If there is no room, T2 = T1 and the whole position closes at T1.
+- Booking: 1 lot closes all at T1. 2 or more lots book all but one at T1; the
+  leftover lot runs to T2. After T1 the futures stop on the runner moves to entry.
+  The Groww crash net stays put.
+- T1 remains the notes Target. Both levels still fire 3 points in front.
+- Golden replay: 198 → 196 trades, fill-points 345.05 → 1693.7. The runner restores a
+  second fill on trades that reach T2; 1-lot trades still close all at T1.
+
+## [0.17.0] - 2026-10-28
+
+### Changed
+- T1 is the notes' single Target. Hitting it closes the whole position. The halfway
+  scalp, 50% book, move-SL-to-cost and T2 are gone. Neutral-zone T1 is the nearest
+  in-zone pivot. Trap / Case 1/2 T1 is the opposite OR, capped at R2/S2.
+- ORB and R2/S2-as-OR stops match the notes: candle close back through the level, or
+  35 points, whichever first. The trade is no longer skipped when the level is farther
+  than 35 or closer than 10. Lots are sized on the 35-point hard stop.
+- Broker CE/PE SL stays the crash net (same 35 × delta calculation). All strategy
+  exits fire on futures.
+- Golden replay: 182 → 198 trades, fill-points 2195.48 → 345.05. More trades because
+  ORB is no longer skipped when the level is outside 10–35. Fewer points because T1
+  closes the whole position at the notes Target instead of scalping then running to T2.
+
+## [0.16.0]
+
+### Changed
+- Trap / Case 1/2 targets: ORL sitting on S2 (or ORH on R2, within 10 points) is one
+  magnet. No halfway T1 into a 36-point window. T1 is a distinct pivot in front, else
+  T2 itself. The 28 Oct Case 2 short (22671 → ORL 22635 ≈ S2) no longer scalps 18 points
+  then moves the stop to cost.
+- After T1 the Groww crash net stays put. Only the futures stop moves to entry. Raising
+  the PE/CE trigger to the entry premium was filling immediately (28 Oct BROKER_STOP at
+  233.55 while futures were still at T1).
 - Live SL / T1 / T2 stay on the **futures** chart levels. A worse CE/PE fill no longer
   shifts the broker option stop closer to the market (that was stopping trades before
   ORH / the 35-pt stop). Groww holds a crash net at the unshifted plan SL or a 35-point
