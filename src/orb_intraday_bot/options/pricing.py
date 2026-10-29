@@ -5,8 +5,8 @@ rises when the trade works, for both directions:
 
     option_SL = entry_LTP - futures_stop_points * |delta|   (sizing / display; the live stop
                                                              is the futures level. The broker
-                                                             CE/PE order is a crash net, see
-                                                             safety_net_option_stop)
+                                                             CE/PE order is a wider crash net,
+                                                             see safety_net_option_stop)
     option_T1 = entry_LTP + futures_T1_points   * |delta|   (display; T1 fires on futures)
     lots      = floor(risk amount / (sizing option points * lot size))
 
@@ -83,15 +83,20 @@ def safety_net_option_stop(
     delta_used: float,
     hard_stop_points: float,
     tick: float,
+    min_delta: float = 1.0,
+    extra_points: float = 10.0,
 ) -> float:
-    """Broker CE/PE trigger: a crash net, never tighter than the plan after a worse fill.
+    """Broker CE/PE trigger: a crash net, never the strategy SL.
 
-    The live strategy stop is the futures level. Groww only holds this option price so a
-    dead bot is not naked. It is the lower of the unshifted plan SL and a 35-point
-    conversion from the fill. A worse fill therefore adds rupee risk; it does not pull
-    the stop closer to the market.
+    Strategy exits on the futures level. This price only fires if the bot is dead or the
+    premium collapses. Conversion uses max(|delta|, min_delta) so a 0.47-delta CE is placed
+    as if delta were 1.0 (one option point per futures stop point), then extra_points more.
+    A worse fill never pulls the trigger closer to the market.
     """
-    from_fill = round_to_tick(fill - hard_stop_points * abs(delta_used), tick)
+    effective_delta = max(abs(delta_used), min_delta)
+    from_fill = round_to_tick(
+        fill - hard_stop_points * effective_delta - extra_points, tick
+    )
     return max(tick, round_to_tick(min(planned_sl, from_fill), tick))
 
 

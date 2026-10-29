@@ -6,6 +6,15 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-29
+
+### Changed
+- Strategy SL is the futures level only. The Groww CE/PE order is a true crash net:
+  35 futures points converted at least 1:1 (not × delta), plus 10 option points of
+  room. A premium wick no longer stops the trade while futures is still above SL
+  (29 Oct 2LL long: BROKER_STOP at 127.40 / −19.5 pts; futures SL was 35 pts).
+- R:R and lot sizing stay on 35 × delta. `OPTION_STOP` uses the same wide net.
+
 ## [0.19.1] - 2026-10-29
 
 ### Changed

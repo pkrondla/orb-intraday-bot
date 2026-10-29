@@ -206,7 +206,8 @@ option_T1 = entry_LTP + (futures_T1_points × |delta|)
 **Worked example:**
 - Nifty futures 22,600, a 22,600 CE at ₹150, delta 0.55.
 - The futures stop is 35 points, T1 is 100 points.
-- Option stop = 150 − 35 × 0.55 = **₹130.75** (broker crash net).
+- Option stop = 150 − 35 × 0.55 = **₹130.75** (sizing / R:R display).
+- Broker crash net = 150 − 35 − 10 = **₹105** (Groww trigger; 1:1 plus 10 option points).
 - Option T1 = 150 + 100 × 0.55 = **₹205** (display; the exit is the futures T1).
 
 ### 6.3 Booking and sizing
@@ -224,7 +225,8 @@ option_T1 = entry_LTP + (futures_T1_points × |delta|)
 An open paper trade is closed by the first of these:
 
 1. The hard stop on futures, or a candle close beyond the stop level (Section 5).
-2. The option crash net from Section 6.2 (only if the broker order is missing).
+2. The option crash net from Section 6.2 (Groww order, or live option LTP at that
+   same wide price if the order is missing). Not the 35 × delta sizing stop.
 3. T1 (the notes Target). 1 lot closes everything; 2+ lots leave a one-lot runner.
 4. T2 (T1 ± OR-range or nearer pivot) on the runner, if the plan has room.
 5. The mandatory pivot exits: R2 or S2 touched (T1 for a trade entered below them), and R4 or S4 for trades on a broken R2 or S2.
@@ -285,7 +287,7 @@ These are intentional, because the notes win:
    - **Neutral-zone T1:** nearest pivot still inside R1–S1 (P, else R1 / S1), at least 10 points away. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22621 (P). Neutral T2 is capped at R1/S1.
    - **Consolidation T1:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
    - **Trap / Case 1/2 T1** is the opposite OR, capped at R2/S2. ORL ≈ S2 or ORH ≈ R2 (within 10 points) is one magnet. The 28 Oct 2026 Case 2 short at 22671 with ORL 22635 sitting on S2 is T1 ORL≈S2.
-   - **Broker crash net:** Groww's CE/PE trigger stays at the unshifted plan SL (or a 35-point conversion from a worse fill, whichever is lower). All strategy exits fire on futures.
+   - **Broker crash net:** Groww's CE/PE trigger is `fill − 35 × max(|delta|, 1.0) − 10` option points, never tighter than the plan SL. 29 Oct 2026: a 2LL long's 35 × 0.47 net filled at −19.5 futures points. All strategy exits fire on futures.
    - **Zone filter:** pivots are reference. Longs below S1 and shorts above R1 are taken. The only hard block is aggressive entries (Case 1/2, consolidation) in the neutral zone. The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
    - **One trade per sign.** A signal blocked by the zone filter does not use up its sign, so the standard trigger of the same sign can still be taken.
    - **Priority on the same candle** (assumption, `arbiter.priority`): ORB, R2/S2 breakout, trap confirmation, Case 1, Case 2, consolidation, additional whipsaw, fake break, 2LL/3LL/2HH/3HH. A lower-priority signal in the opposite direction on the same candle is dropped.
@@ -301,8 +303,8 @@ These are intentional, because the notes win:
    - **T1 books all but one lot** when T2 is distinct. 1 lot (or T2 = T1) closes everything.
    - **Expiry:** the nearest weekly expiry strictly after today, from the API (today it is Monday 19 Oct 2026, two sessions away, so theta is heavy).
 11. Phase 7 decisions (paper engine, exits, charges, storage):
-   - **What triggers an exit:** futures prices drive SL and T1. The option price supplies the fill. A worse CE/PE fill must not move those futures levels (extra rupee risk is accepted). The broker CE/PE stop-loss is a **crash net only**: the lower of the unshifted plan option SL and a 35-point conversion from the fill, never raised after a worse fill. If that net is missing, live option LTP at the same price is the fallback (`OPTION_STOP`). The option-price T1 from section 6.2 is recorded but does not trigger exits.
-   - **Option stop for close-based setups (ORB, R2/S2 breakout):** the exit is a candle close back inside the level or the 35-point stop, whichever comes first. The option crash net and the lot count both use 35 (`entry - 35 x delta`).
+   - **What triggers an exit:** futures prices drive SL and T1. The option price supplies the fill. A worse CE/PE fill must not move those futures levels (extra rupee risk is accepted). The broker CE/PE stop-loss is a **crash net only**: `fill − 35 × max(|delta|, 1.0) − 10`, never raised after a worse fill. If that net is missing, live option LTP at the same price is the fallback (`OPTION_STOP`). The 35 × delta option SL is sizing / R:R only. The option-price T1 from section 6.2 is recorded but does not trigger exits.
+   - **Option stop for close-based setups (ORB, R2/S2 breakout):** the exit is a candle close back inside the level or the 35-point stop, whichever comes first. Lot count uses 35 (`entry - 35 x delta`). The Groww crash net is wider (1:1 plus 10 option points).
    - **Order inside one candle** is unknown, so replay is conservative: the stop is checked before targets (a candle that reaches both is a loss). T1 closes the whole position, so the break-even-after-T1 path is only for a restored trade that still has a distinct T2. A gap through a stop fills at the open (worse). A gap through a target fills at the open (better).
    - **Candle-close exit:** a close strictly beyond the level exits at that close. A close exactly on the level does not. Live polls never trigger it.
    - **Entry timing:** a position opens at the close of the signal candle and is first checked on the next candle. Anything the signal candle did after the entry price traded is not checked (an unavoidable blind spot at candle granularity).

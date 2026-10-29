@@ -83,7 +83,7 @@ class Position:
     t1: float                          # notes Target (futures)
     t2: float                          # runner: T1 ± OR-range or nearer pivot; equals t1 if no room
     # option-price equivalents
-    sl_exit: float
+    sl_exit: float               # 35 × delta (sizing / R:R). Not the Groww trigger.
     t1_option: float
     t2_option: float
     # sizing
@@ -91,6 +91,7 @@ class Position:
     t1_book_lots: int
     # state
     remaining_lots: int
+    crash_net: float = 0.0       # Groww / OPTION_STOP trigger. 0 = use sl_exit (legacy).
     t2_trigger: float | None = None  # T2 fires here (proximity band); None = exact t2
     t1_trigger: float | None = None  # T1 fires here (proximity band); None = exact t1
     t1_done: bool = False
@@ -159,7 +160,7 @@ class Position:
     @property
     def active_option_stop(self) -> float:
         """Broker CE/PE crash net. T1 moves only the futures stop; this trigger never rises."""
-        return self.sl_exit
+        return self.crash_net if self.crash_net > 0 else self.sl_exit
 
     @property
     def gross_option_pnl(self) -> float:
@@ -214,7 +215,8 @@ class Position:
         if data.get("last_candle"):
             data["last_candle"] = datetime.fromisoformat(data["last_candle"])
         data["fills"] = [_fill_from_dict(f) for f in data.get("fills", [])]
-        return cls(**data)
+        known = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 def _fill_to_dict(fill: Fill) -> dict[str, Any]:

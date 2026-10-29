@@ -104,7 +104,9 @@ def test_open_copies_the_plan_and_books_entry_charges() -> None:
     assert (p.entry_ltp, p.hard_stop, p.close_exit_level) == (150.0, 22765.0, 22780.0)
     assert (p.t1, p.t2, p.futures_entry) == (22900.0, 22900.0, 22800.0)
     assert p.t2_trigger == pytest.approx(22897.0)            # 3 pts in front of T1
-    assert p.sl_exit == 130.75                      # 35 points x 0.55 below entry, not 20 x 0.55
+    assert p.sl_exit == 130.75                      # 35 points x 0.55 below entry (R:R / sizing)
+    assert p.crash_net == pytest.approx(105.0)      # 150 - 35 - 10; Groww / OPTION_STOP
+    assert p.active_option_stop == pytest.approx(105.0)
     assert p.entry_charges == order_charges("BUY", 150.0, 3 * LOT, CFG.paper.charges).total
     assert p.is_open and p.opened_at == OPENED
 
@@ -172,13 +174,20 @@ def test_a_live_poll_below_the_level_does_not_trigger_the_close_stop() -> None:
     assert evaluate_bar(p, Bar.tick(at(9, 37), 22775.0), None, CFG.paper) == []
 
 
+def test_option_wick_does_not_stop_before_futures_sl() -> None:
+    # 29 Oct 2LL: premium 127.40 at futures 22822 while the 35-pt SL was 22806.5.
+    p = opened()
+    events = evaluate_bar(p, Bar.tick(at(9, 37), 22790.0), 127.40, CFG.paper)
+    assert events == [] and p.is_open
+
+
 def test_option_stop_uses_the_live_premium() -> None:
     p = opened()
-    # Futures still above the stop, but the premium fell through the option stop.
-    events = evaluate_bar(p, Bar.tick(at(9, 37), 22790.0), 130.0, CFG.paper)
+    # Futures still above the stop; premium fell through the crash net (not 35 × delta).
+    events = evaluate_bar(p, Bar.tick(at(9, 37), 22790.0), 104.0, CFG.paper)
     fill = events[0].fill
     assert fill is not None and fill.reason is ExitReason.OPTION_STOP
-    assert (fill.option_price, fill.price_source) == (130.0, "live")
+    assert (fill.option_price, fill.price_source) == (104.0, "live")
 
 
 def test_live_poll_fills_at_the_live_premium() -> None:

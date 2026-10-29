@@ -209,16 +209,17 @@ def test_open_places_a_protective_stop_below_the_entry(tmp_path: Path) -> None:
     position = _enter(rig)
     assert position.order_mode == "dry_run" and position.lots == 1
     assert position.entry_ltp == 150.2 and position.planned_entry == 150.0
-    assert position.sl_exit == pytest.approx(130.75)       # unshifted plan; fill must not tighten
+    assert position.sl_exit == pytest.approx(130.75)       # 35 × delta, R:R / sizing
+    assert position.crash_net == pytest.approx(105.20)     # fill 150.2 - 35 - 10
     assert position.t1_option == pytest.approx(205.0) and position.t2_option == pytest.approx(205.0)
     assert position.stop_order_id.startswith("DRY-ORB-")
-    assert position.stop_trigger == pytest.approx(130.75)
+    assert position.stop_trigger == pytest.approx(105.20)
     assert position.stop_quantity == LOT
     stop = rig.store.load_order(position.stop_order_key)
     assert stop is not None
     assert stop.intent.order_type == "SL" and stop.intent.side == "SELL"
-    assert stop.intent.trigger_price == pytest.approx(130.75)
-    assert 0 < (stop.intent.price or 0) < 130.75            # the limit sits under the trigger
+    assert stop.intent.trigger_price == pytest.approx(105.20)
+    assert 0 < (stop.intent.price or 0) < 105.20            # the limit sits under the trigger
 
 
 def test_protect_is_a_no_op_when_the_stop_already_matches(tmp_path: Path) -> None:
@@ -301,10 +302,10 @@ def test_a_stop_that_fires_is_reported_once_with_its_fill(tmp_path: Path) -> Non
     rig = make_rig(tmp_path)
     position = _enter(rig)
     assert rig.executor.poll_stops([position], NOW) == []
-    rig.quotes.set(129.9, 130.1, ltp=130.0)                # last price falls through the trigger
+    rig.quotes.set(104.9, 105.1, ltp=105.0)                # last price falls through the crash net
     fills = rig.executor.poll_stops([position], NOW)
     assert len(fills) == 1
-    assert fills[0].price == 129.9 and fills[0].quantity == LOT
+    assert fills[0].price == 104.9 and fills[0].quantity == LOT
     assert fills[0].position_id == position.position_id
 
 
@@ -340,10 +341,10 @@ def test_sell_cancels_the_stop_first_then_sells_at_the_bid(tmp_path: Path) -> No
 def test_sell_reports_the_broker_stop_if_it_already_executed(tmp_path: Path) -> None:
     rig = make_rig(tmp_path)
     position = _enter(rig)
-    rig.quotes.set(129.9, 130.1, ltp=130.0)
+    rig.quotes.set(104.9, 105.1, ltp=105.0)
     done = rig.executor.sell(position, 1, "HARD_STOP", NOW)
     assert done.reason == ExitReason.BROKER_STOP.value
-    assert done.price == 129.9
+    assert done.price == 104.9
     venue = rig.venue
     assert isinstance(venue, DryRunVenue)
     assert venue.net_quantities() == {}                    # sold once, by the stop only

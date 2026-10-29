@@ -3,7 +3,8 @@
 A position is closed by the first of:
 
 1. the futures price stop (35-point hard stop, or the touch level). The option price is a
-   crash net only (broker SL and, if that order is missing, live option LTP).
+   wide crash net only (broker SL and, if that order is missing, live option LTP at that
+   net — not the 35 × delta sizing stop).
 2. T1 — the notes Target, on futures. One lot closes here; two or more leave a
    one-lot runner for T2 (T1 ± OR-range or the nearer pivot). Both fire when the
    extreme comes within `t2_proximity_points` of the level (a near-miss at S2/R2).

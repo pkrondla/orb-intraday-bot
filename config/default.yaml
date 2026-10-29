@@ -19,6 +19,8 @@ stops:
   hard_stop_points: 35         # notes: max SL on Nifty futures; ORB also exits on close through OR
   min_stop_points: 10          # [assumption] touch-stop floor and minimum target room
   option_fallback_points: 20   # notes: option SL when delta is missing
+  crash_net_min_delta: 1.0     # [assumption] Groww trigger uses at least 1:1, not 35 × delta
+  crash_net_extra_points: 10   # [assumption] extra option pts of room so a wick is not the SL
 
 targets:
   t1_rule: nearest_pivot_else_half   # retired: T1 is the notes Target

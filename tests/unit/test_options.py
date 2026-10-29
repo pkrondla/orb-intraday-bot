@@ -340,21 +340,29 @@ def test_book_lots_at_t1() -> None:
 
 
 def test_safety_net_does_not_tighten_after_a_worse_fill() -> None:
-    # This morning's PE: 35-pt plan, fill 3.55 above the quote. Net stays at the plan.
+    # Worse fill used to be compared at 35 × delta. The net is now 1:1 plus 10 pts,
+    # so it only moves further from the market.
     assert safety_net_option_stop(
         planned_sl=219.75, fill=241.50, delta_used=0.52, hard_stop_points=35, tick=0.05,
-    ) == pytest.approx(219.75)
-    # This afternoon's ORB: 28.9-pt plan 215.10, 35-pt from fill is 216.60. Keep 215.10.
+    ) == pytest.approx(196.50)  # 241.50 - 35 - 10
     assert safety_net_option_stop(
         planned_sl=215.10, fill=235.50, delta_used=0.54, hard_stop_points=35, tick=0.05,
-    ) == pytest.approx(215.10)
+    ) == pytest.approx(190.50)  # 235.50 - 35 - 10
+
+
+def test_safety_net_sits_beyond_a_one_to_one_futures_move() -> None:
+    # 29 Oct 2LL long: CE 147.35, delta 0.47. 35 × 0.47 would put Groww at 130.90, and
+    # the premium hit 127.40 at only -19.5 futures pts. 1:1 + 10 pts keeps it open.
+    assert safety_net_option_stop(
+        planned_sl=130.90, fill=147.35, delta_used=0.47, hard_stop_points=35, tick=0.05,
+    ) == pytest.approx(102.35)  # 147.35 - 35 - 10
 
 
 def test_safety_net_uses_the_35_point_floor_when_that_is_looser() -> None:
-    # 20-pt structure stop from the quote is 139.00; 35 pts from a 150.20 fill is 130.95.
+    # 20-pt structure stop from the quote is 139.00; 1:1 35 pts + 10 from a 150.20 fill.
     assert safety_net_option_stop(
         planned_sl=139.00, fill=150.20, delta_used=0.55, hard_stop_points=35, tick=0.05,
-    ) == pytest.approx(130.95)
+    ) == pytest.approx(105.20)
 
 
 # ---- planner and Groww adapter with fakes --------------------------------------------------

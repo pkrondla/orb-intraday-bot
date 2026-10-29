@@ -127,9 +127,9 @@ Per trade:
    and the trade is skipped (never chased, no market fallback). A partial fill is sold straight
    back.
 2. **Broker crash net.** Straight after the fill a stop-loss sell is placed at the broker, at
-   the unshifted plan option SL or a 35-point conversion from the fill, whichever is *lower*
-   (a worse fill never pulls it closer). The real SL is the futures level; this order is only
-   there if the bot is late. It is never raised after a worse fill.
+   `fill − 35 × max(|delta|, 1.0) − 10` option points (never tighter than the plan SL). A
+   worse fill never pulls it closer. The real SL is the futures level; this order is only
+   there if the bot is late or the premium collapses. It is never raised after a worse fill.
 3. **Exits.** The bot decides when, on futures (hard stop, close stop, T1). To exit it
    cancels the net, sells with a limit just under the bid, waits 6 s, then sells at market. It
    never sells while it cannot confirm the net is gone. If the net itself was executed, that is

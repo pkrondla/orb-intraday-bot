@@ -91,25 +91,25 @@ def test_a_broker_side_stop_that_fires_is_booked_as_one(tmp_path: Path) -> None:
     trade, plan = make_trade()
     position = engine.open(trade, plan, OPENED)
     assert position is not None
-    rig.quotes.set(129.9, 130.1, ltp=130.0)                          # the option fell through it
-    events = engine.on_tick(at(9, 45), 22790.0, {SYMBOL: 130.0})     # futures still above stop
+    rig.quotes.set(104.9, 105.1, ltp=105.0)                          # through the crash net
+    events = engine.on_tick(at(9, 45), 22790.0, {SYMBOL: 105.0})     # futures still above stop
     fill = events[0].fill
     assert fill is not None and fill.reason is ExitReason.BROKER_STOP
-    assert fill.option_price == 129.9 and fill.quantity == LOT
+    assert fill.option_price == 104.9 and fill.quantity == LOT
     assert not position.is_open and hooks.closed == [position]
     assert engine.open_positions == []
 
 
 def test_a_worse_fill_does_not_pull_the_broker_net_closer(tmp_path: Path) -> None:
-    """Fill 150.2 used to shift the trigger to 130.95. The net stays at the plan 130.75."""
+    """Fill 150.2 used to shift the trigger to 130.95. A 127-style wick must not fill it."""
     rig, hooks = make_rig(tmp_path), Hooks()
     engine = _engine(rig, hooks)
     trade, plan = make_trade()
     position = engine.open(trade, plan, OPENED)
     assert position is not None
-    assert position.stop_trigger == pytest.approx(130.75)
-    rig.quotes.set(130.80, 131.00, ltp=130.90)                       # below the old shifted stop
-    events = engine.on_tick(at(9, 45), 22790.0, {SYMBOL: 130.90})    # futures still above SL
+    assert position.stop_trigger == pytest.approx(105.20)
+    rig.quotes.set(127.40, 127.60, ltp=127.50)                       # 29 Oct wick; net is 105.20
+    events = engine.on_tick(at(9, 45), 22790.0, {SYMBOL: 127.50})    # futures still above SL
     assert events == [] and position.is_open and hooks.closed == []
 
 
@@ -125,7 +125,7 @@ def test_t1_closes_on_futures_and_does_not_use_the_broker_net(tmp_path: Path) ->
     fill = events[0].fill
     assert fill is not None and fill.reason is ExitReason.T1
     assert not position.is_open
-    assert old_trigger == pytest.approx(position.sl_exit)            # net was never raised
+    assert old_trigger == pytest.approx(position.crash_net)          # net was never raised
 
 
 def test_a_failed_sale_leaves_the_position_open_and_is_retried(tmp_path: Path) -> None:

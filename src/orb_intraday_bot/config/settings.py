@@ -120,6 +120,10 @@ class StopsConfig(BaseModel):
     hard_stop_points: float = Field(default=35, gt=0)
     min_stop_points: float = Field(default=10, gt=0)
     option_fallback_points: float = Field(default=20, gt=0)
+    # Groww CE/PE trigger: convert the 35-pt futures stop at least as 1:1 (not × delta),
+    # then this many extra option points. Premium wicks must not fire it before futures SL.
+    crash_net_min_delta: float = Field(default=1.0, gt=0, le=2)
+    crash_net_extra_points: float = Field(default=10.0, ge=0)
 
 
 class TargetsConfig(BaseModel):

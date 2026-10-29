@@ -66,6 +66,7 @@ class PaperEngine:
         self._close_time = time(h, m)
         if store is not None:
             for position in store.open_positions():
+                self._ensure_crash_net(position)
                 self._open[position.position_id] = position
 
     # -- state ---------------------------------------------------------------------------
@@ -128,21 +129,16 @@ class PaperEngine:
             done = executor.enter(trade, plan, opened_at)
             entry = round(round(done.price / tick) * tick, 4)
             lots, order_id, order_mode = done.lots, done.order_id, executor.mode
-            # Futures SL / T1 stay on the chart levels. A worse option fill must not
-            # pull the broker CE/PE stop closer: that order is only a crash net.
-            sl_exit = safety_net_option_stop(
-                planned_sl=plan.sl,
-                fill=entry,
-                delta_used=plan.delta_used,
-                hard_stop_points=self._cfg.stops.hard_stop_points,
-                tick=tick,
-            )
+            # R:R / sizing stay on the 35 × delta plan SL. A worse fill must not
+            # pull that number or the Groww crash net closer to the market.
+            sl_exit = plan.sl
             t1_option, t2_option = plan.t1, plan.t2
             single_target = abs(trade.targets.t1 - trade.targets.t2) < 1e-9
             t1_book_lots = (
                 lots if single_target
                 else (plan.t1_book_lots if lots == plan.lots else book_lots_at_t1(lots))
             )
+        crash_net = self._crash_net(plan.sl, entry, plan.delta_used, tick)
         quantity = lots * plan.contract.lot_size
         position = Position(
             position_id=position_id,
@@ -181,6 +177,7 @@ class PaperEngine:
                 min_stop_points=self._cfg.stops.min_stop_points,
             ),
             sl_exit=sl_exit,
+            crash_net=crash_net,
             t1_option=t1_option,
             t2_option=t2_option,
             lots=lots,
@@ -345,6 +342,25 @@ class PaperEngine:
             if executor is not None:
                 executor.protect(position, now)     # keeps the broker crash net on what's left
         self._save(position, now)
+
+    def _crash_net(self, planned_sl: float, fill: float, delta_used: float, tick: float) -> float:
+        return safety_net_option_stop(
+            planned_sl=planned_sl,
+            fill=fill,
+            delta_used=delta_used,
+            hard_stop_points=self._cfg.stops.hard_stop_points,
+            tick=tick,
+            min_delta=self._cfg.stops.crash_net_min_delta,
+            extra_points=self._cfg.stops.crash_net_extra_points,
+        )
+
+    def _ensure_crash_net(self, position: Position) -> None:
+        """Widen a legacy position whose Groww trigger was the 35 × delta option SL."""
+        if position.crash_net > 0:
+            return
+        position.crash_net = self._crash_net(
+            position.sl_exit, position.entry_ltp, position.delta_used, position.tick_size,
+        )
 
     def _save(self, position: Position, now: datetime) -> None:
         if self._store is not None:

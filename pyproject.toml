@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orb-intraday-bot"
-version = "0.19.1"
+version = "0.20.0"
 description = "ORB Intraday Bot - Nifty futures paper/shadow/live bot (live disarmed by default)"
 requires-python = ">=3.12"
 dependencies = [
