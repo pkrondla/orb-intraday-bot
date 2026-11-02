@@ -12,6 +12,12 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 - Inside the opening range, a 2HH/3HH short no longer aims at S2. T1 is the first
   pivot at least 10 pts past ORL. Mirror: 2LL/3LL long inside OR has T1 at the first
   pivot past ORH. Beyond-OR structure (T1 ORH/ORL) is unchanged.
+- Golden replay: 222 → 223 trades, fill-points 2003.3 → 2061.3, charges
+  24452.37 → 24635.01. Two days move. 11 Sep: the 0.21.0 rule (2HH above ORH
+  targets ORH, not S2) was never frozen; S2 was 9.4 pts away so the short was
+  rejected, and it is now taken and hard-stopped (−15.8). 31 Aug: a 2LL long
+  inside the range books T1 at S1 past ORH (+73.8 on 4 lots); the runner is
+  still open at the close (+57.6).
 
 ## [0.21.3] - 2026-11-02
 
