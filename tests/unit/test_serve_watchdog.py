@@ -8,7 +8,15 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from orb_intraday_bot.app.context import AppContext
-from orb_intraday_bot.app.serve import ServeState, serve_loop, should_stop, stop_file_path
+from orb_intraday_bot.app.serve import (
+    SERVICE_OFF_EXIT,
+    ServeState,
+    serve_loop,
+    service_off_path,
+    should_stop,
+    stop_file_path,
+    write_service_off,
+)
 from orb_intraday_bot.app.watchdog import check_once, in_market_hours
 from orb_intraday_bot.config.settings import Settings, StrategyConfig
 from orb_intraday_bot.core.clock import IST, FixedClock
@@ -39,6 +47,14 @@ def test_stop_file_halts_serve(tmp_path: Path) -> None:
     assert not should_stop(ctx.data_dir, state)
     stop_file_path(ctx.data_dir).write_text("x", encoding="utf-8")
     assert should_stop(ctx.data_dir, state)
+
+
+def test_service_off_file_halts_serve(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    state = ServeState(bus=CommandBus(), risk=RiskEngine())
+    write_service_off(ctx.data_dir, True)
+    assert should_stop(ctx.data_dir, state)
+    assert service_off_path(ctx.data_dir).exists()
 
 
 def test_serve_loop_runs_one_session_and_stops(tmp_path: Path) -> None:
@@ -72,6 +88,31 @@ def test_serve_loop_runs_one_session_and_stops(tmp_path: Path) -> None:
     assert calls == [date(2026, 10, 16)]
     assert any("STARTED" in m for m in notes.messages)
     assert any("STOPPED" in m for m in notes.messages)
+
+
+def test_serve_loop_exits_stay_down_when_service_off(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    notes = Recorder()
+    clock = FixedClock(datetime(2026, 10, 16, 9, 0, tzinfo=IST))
+
+    def session(c, n, s, cl, sl):  # noqa: ANN001
+        write_service_off(tmp_path, True)
+        s.stop_requested = True
+        return RunOutcome(130, "stopped on request")
+
+    code = serve_loop(
+        ctx,
+        clock=clock,
+        sleep=lambda _s: None,
+        notifier=notes,
+        session=session,
+        max_sessions=1,
+        idle_step_sec=1,
+        holidays=frozenset(),
+    )
+    assert code == SERVICE_OFF_EXIT
+    assert service_off_path(tmp_path).exists()
+    assert any("service left down" in m for m in notes.messages)
 
 
 def test_in_market_hours() -> None:
@@ -130,4 +171,16 @@ def test_watchdog_ping_when_healthy(tmp_path: Path) -> None:
     pings: list[str] = []
     check_once(ctx, alerts, now, holidays=frozenset(), ping=pings.append, last_alerted_at=None)
     assert pings == ["https://example.test/ping"]
+    assert notes.messages == []
+
+
+def test_watchdog_stays_quiet_when_service_is_off(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    write_service_off(tmp_path, True)
+    notes = Recorder()
+    now = datetime(2026, 10, 16, 11, 0, tzinfo=IST)
+    alerted = check_once(
+        ctx, Alerts(notes), now, holidays=frozenset(), ping=lambda _: None, last_alerted_at=None
+    )
+    assert alerted is None
     assert notes.messages == []

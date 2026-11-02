@@ -19,7 +19,7 @@ Telegram commands (authorized chat only). `/help` lists them.
 |---|---|
 | Status | `/status` (heartbeat, order mode, today's trading state, risk), `/mode`, `/version`, `/risk`, `/funds`, `/log [n]` |
 | Today | `/today`, `/pnl [day\|week\|month]`, `/positions`, `/progress` (stops, targets and broker stop per position), `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`, `/report` |
-| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/dryrun [on\|off]`, `/limits`, `/capital <amount>`, `/riskpct <percent>`, `/dailyloss <percent>`, `/maxlots <n>` |
+| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/shutdown`, `/dryrun [on\|off]`, `/limits`, `/capital <amount>`, `/riskpct <percent>`, `/dailyloss <percent>`, `/maxlots <n>` |
 
 - `/stop`: no new entries for the rest of today (open positions are still managed). It ends by
   itself at midnight and survives a restart. `/start` allows entries again the same day.
@@ -33,8 +33,12 @@ Telegram commands (authorized chat only). `/help` lists them.
   it books the close and does not place T1 or SL sells. `/exit`, `/rearm` and `/reconcile`
   work while a session is running; between sessions they say so.
 - `/clearhalt` clears the kill switch or a reconciliation entry block. Check the broker first.
-- `/restart` ends the session and the service; NSSM starts it again. Open positions and their
-  broker stops are restored on startup.
+- `/restart` ends the session and the OrbBot Windows service; NSSM starts it again. Open
+  positions and their broker stops are restored on startup.
+- `/shutdown` (or `/stop service`) ends the session and leaves OrbBot down. NSSM does not
+  start it again. Open positions and broker stops stay as they are. Bring it back on the
+  host with `nssm start OrbBot` (a deploy also starts it). Telegram commands do not work
+  while it is down. The watchdog stays quiet for an intentional shutdown.
 - `/dryrun` shows DRY_RUN and where it comes from. `/dryrun off` switches to REAL orders and
   `/dryrun on` back to a dry run. No code is asked. It saves the choice in `data/DRY_RUN_OVERRIDE`,
   restarts the bot, and refuses while a position is open (close it first) or when real orders are not
@@ -64,7 +68,17 @@ C:\orb-bot\.venv\Scripts\python.exe -m orb_intraday_bot status
 ```
 
 Open positions are restored from SQLite. A mid-day restart catches up on candles and marks
-stale signals as MISSED (never entered late).
+stale signals as MISSED (never entered late). Telegram `/restart` does the same for OrbBot.
+
+## Shutdown
+
+Telegram `/shutdown` (or `/stop service`) stops OrbBot and leaves it down. To start it again:
+
+```powershell
+nssm start OrbBot
+```
+
+A deploy also starts it. Telegram commands do not work while it is down.
 
 ## Flatten
 

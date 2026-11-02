@@ -22,6 +22,10 @@ def test_parse_commands() -> None:
     assert parse_command("/flatten ab12").kind is CommandKind.FLATTEN   # no code is needed
     assert parse_command("/stop").kind is CommandKind.STOP_TODAY
     assert parse_command("/pause").kind is CommandKind.STOP_TODAY
+    assert parse_command("/shutdown").kind is CommandKind.SHUTDOWN
+    assert parse_command("/stop service").kind is CommandKind.SHUTDOWN
+    assert parse_command("/stop bot").kind is CommandKind.SHUTDOWN
+    assert parse_command("/restart").kind is CommandKind.RESTART
     assert parse_command("/start").kind is CommandKind.START_TODAY
     assert parse_command("/resume").kind is CommandKind.START_TODAY
     assert parse_command("/arm dead").kind is CommandKind.UNKNOWN      # no daily arm any more

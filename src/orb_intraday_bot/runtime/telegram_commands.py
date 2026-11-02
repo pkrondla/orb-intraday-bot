@@ -65,7 +65,9 @@ _HELP = (
     "/rearm - put the broker-side stop back on open positions\n"
     "/reconcile - check the books now; a hand-close at Groww is booked, not sold\n"
     "/clearhalt - clear the kill switch / entry block so new entries are allowed\n"
-    "/restart - restart the service (open positions and broker stops are kept)\n"
+    "/restart - restart the OrbBot Windows service (open positions and broker stops are kept)\n"
+    "/shutdown - stop the OrbBot Windows service and leave it down "
+    "(nssm start OrbBot on the host to bring it back)\n"
     "/limits - capital, risk per trade, daily loss limit and lot cap now in force\n"
     "/capital <amount> - capital the bot sizes against (e.g. 750000 or 7.5L)\n"
     "/riskpct <percent> - risk per trade as % of capital (e.g. 1.5)\n"
@@ -99,6 +101,7 @@ class CommandKind(StrEnum):
     RECONCILE = "reconcile"
     CLEARHALT = "clearhalt"
     RESTART = "restart"
+    SHUTDOWN = "shutdown"
     DRYRUN = "dryrun"
     LIMITS = "limits"
     CAPITAL = "capital"
@@ -152,6 +155,7 @@ def parse_command(text: str) -> Command:
         "reconcile": CommandKind.RECONCILE,
         "clearhalt": CommandKind.CLEARHALT,
         "restart": CommandKind.RESTART,
+        "shutdown": CommandKind.SHUTDOWN,
         "dryrun": CommandKind.DRYRUN,
         "limits": CommandKind.LIMITS,
         "capital": CommandKind.CAPITAL,
@@ -166,6 +170,8 @@ def parse_command(text: str) -> Command:
         "help": CommandKind.HELP,
     }
     kind = mapping.get(verb, CommandKind.UNKNOWN)
+    if kind is CommandKind.STOP_TODAY and arg.lower() in {"service", "bot"}:
+        return Command(kind=CommandKind.SHUTDOWN, arg="")
     return Command(kind=kind, arg=arg)
 
 

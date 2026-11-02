@@ -61,6 +61,8 @@ from orb_intraday_bot.storage.store import TradeStore
 
 log = logging.getLogger("orb.serve")
 STOP_FILE_NAME = "bot.stop"
+SERVICE_OFF_FILE_NAME = "SERVICE_OFF"
+SERVICE_OFF_EXIT = 64          # NSSM AppExit 64 Exit: do not restart
 TRADING_OFF_FILE_NAME = "TRADING_OFF"
 SESSION_START = "09:00"
 _IDLE_STEP_SEC = 15
@@ -92,6 +94,23 @@ def stop_file_path(data_dir: Path) -> Path:
     return data_dir / STOP_FILE_NAME
 
 
+def service_off_path(data_dir: Path) -> Path:
+    """Marker: the operator stopped the Windows service and it should stay down."""
+    return data_dir / SERVICE_OFF_FILE_NAME
+
+
+def write_service_off(data_dir: Path, off: bool) -> None:
+    path = service_off_path(data_dir)
+    try:
+        if off:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("shutdown\n", encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("could not update %s: %s", path.name, type(exc).__name__)
+
+
 def trading_off_path(data_dir: Path) -> Path:
     """Marker holding the day (ISO date) the operator sent /stop, so a restart keeps it."""
     return data_dir / TRADING_OFF_FILE_NAME
@@ -119,7 +138,7 @@ def write_stopped_day(data_dir: Path, day: date | None) -> None:
 def should_stop(data_dir: Path, state: ServeState) -> bool:
     if state.stop_requested:
         return True
-    return stop_file_path(data_dir).exists()
+    return stop_file_path(data_dir).exists() or service_off_path(data_dir).exists()
 
 
 _CONTROL_KINDS = frozenset(
@@ -132,6 +151,7 @@ _CONTROL_KINDS = frozenset(
         CommandKind.RECONCILE,
         CommandKind.CLEARHALT,
         CommandKind.RESTART,
+        CommandKind.SHUTDOWN,
         CommandKind.DRYRUN,
         CommandKind.LIMITS,
         CommandKind.CAPITAL,
@@ -432,7 +452,7 @@ def _handle_action_command(
     state: ServeState,
     reply: Callable[[str], None],
 ) -> bool:
-    """/exit, /rearm, /reconcile, /clearhalt and /restart. True if `command` was one of them."""
+    """/exit, /rearm, /reconcile, /clearhalt, /restart and /shutdown."""
     kind = command.kind
     runner = state.runner
     if kind is CommandKind.EXIT:
@@ -487,8 +507,21 @@ def _handle_action_command(
             alerts.order_event(f"ORB bot: {what} cleared by the operator.")
             reply(f"Cleared {what}. New entries are allowed again (the limits still apply).")
     elif kind is CommandKind.RESTART:
+        write_service_off(ctx.data_dir, False)
         alerts.order_event("ORB bot: restart requested by the operator.")
-        reply("Restarting. Open positions and their broker stops are kept and restored.")
+        reply("Restarting the OrbBot service. Open positions and their broker stops are kept.")
+        state.stop_requested = True
+        if runner is not None:
+            runner.request_stop()
+    elif kind is CommandKind.SHUTDOWN:
+        write_service_off(ctx.data_dir, True)
+        alerts.order_event(
+            "ORB bot: shutdown requested by the operator. The service will stay down."
+        )
+        reply(
+            "Stopping the OrbBot service. It stays down until you start it on the host "
+            "(nssm start OrbBot). Open positions and their broker stops are kept."
+        )
         state.stop_requested = True
         if runner is not None:
             runner.request_stop()
@@ -859,6 +892,7 @@ def serve_loop(
     limit_notes = state.limits.apply_configured(ctx.settings)     # the GitHub variables
     limit_notes += state.limits.load_saved()                      # then what /capital etc. set
     state.bus.stopped_day = read_stopped_day(ctx.data_dir)    # a /stop survives a restart
+    write_service_off(ctx.data_dir, False)                    # nssm start after /shutdown
     holidays = load_holidays() if holidays is None else holidays
     mode = configured_mode_label(ctx.settings)
     if ctx.settings.live_mode != "paper":
@@ -926,7 +960,13 @@ def serve_loop(
         if stop.exists():
             with suppress(OSError):
                 stop.unlink()
-        alerts.shutdown("graceful" if exit_code in (0, 130) else f"exit {exit_code}")
+        if service_off_path(ctx.data_dir).exists():
+            exit_code = SERVICE_OFF_EXIT
+        alerts.shutdown(
+            "service left down"
+            if exit_code == SERVICE_OFF_EXIT
+            else ("graceful" if exit_code in (0, 130) else f"exit {exit_code}")
+        )
     return exit_code
 
 

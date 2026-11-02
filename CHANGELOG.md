@@ -6,6 +6,13 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-11-02
+
+### Added
+- `/shutdown` (also `/stop service`) stops the OrbBot Windows service and leaves it
+  down. NSSM does not restart it. Bring it back with `nssm start OrbBot` on the host.
+  `/restart` still recycles the service. Open positions and broker stops are kept.
+
 ## [0.21.2] - 2026-11-02
 
 ### Fixed

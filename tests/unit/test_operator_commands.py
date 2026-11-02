@@ -1,5 +1,5 @@
 """The operator commands: /risk /orders /signals /pnl /progress /levels /funds /mode /version /log
-and the acting ones /exit /rearm /reconcile /clearhalt /restart."""
+and the acting ones /exit /rearm /reconcile /clearhalt /restart /shutdown."""
 
 from __future__ import annotations
 
@@ -102,6 +102,8 @@ def _database(ctx: AppContext) -> TradeStore:
         ("/reconcile", CommandKind.RECONCILE, ""),
         ("/clearhalt", CommandKind.CLEARHALT, ""),
         ("/restart ab12", CommandKind.RESTART, "ab12"),
+        ("/shutdown", CommandKind.SHUTDOWN, ""),
+        ("/stop service", CommandKind.SHUTDOWN, ""),
         ("/risk@my_bot", CommandKind.RISK, ""),
     ],
 )
@@ -120,6 +122,7 @@ def test_the_help_asks_for_no_codes_and_explains_each_command() -> None:
         "/status", "/mode", "/version", "/risk", "/funds", "/log", "/today", "/pnl",
         "/positions", "/progress", "/signals", "/orders", "/levels", "/report", "/stop",
         "/start", "/exit", "/flatten", "/rearm", "/reconcile", "/clearhalt", "/restart",
+        "/shutdown",
         "/help", "/dryrun", "/limits", "/capital", "/riskpct", "/dailyloss", "/maxlots",
     ):
         assert " - " in lines[word]                       # every command has its purpose
@@ -482,7 +485,7 @@ def test_restart_stops_the_session_and_the_service(tmp_path: Path) -> None:
     ctx, state = _ctx(tmp_path), _state(runner, s.risk)
     notes = Recorder()
     reply = _send(CommandKind.RESTART, "", ctx=ctx, state=state, notes=notes)[0]
-    assert reply.startswith("Restarting")
+    assert reply.startswith("Restarting the OrbBot service")
     assert state.stop_requested and "restart requested" in notes.joined()
     outcome = runner.run()                                     # the session ends at once
     assert outcome == RunOutcome(130, "stopped on request")
@@ -491,8 +494,31 @@ def test_restart_stops_the_session_and_the_service(tmp_path: Path) -> None:
 
 def test_restart_between_sessions_just_stops_the_service(tmp_path: Path) -> None:
     ctx, state = _ctx(tmp_path), _state()
-    _send(CommandKind.RESTART, "", ctx=ctx, state=state)
+    reply = _send(CommandKind.RESTART, "", ctx=ctx, state=state)[0]
+    assert reply.startswith("Restarting the OrbBot service")
     assert state.stop_requested and serve.should_stop(tmp_path, state)
+    assert not serve.service_off_path(tmp_path).exists()
+
+
+def test_shutdown_leaves_the_service_down(tmp_path: Path) -> None:
+    ctx, state = _ctx(tmp_path), _state()
+    notes = Recorder()
+    reply = _send(CommandKind.SHUTDOWN, "", ctx=ctx, state=state, notes=notes)[0]
+    assert "stays down" in reply and "nssm start OrbBot" in reply
+    assert state.stop_requested and serve.should_stop(tmp_path, state)
+    assert serve.service_off_path(tmp_path).exists()
+    assert "stay down" in notes.joined()
+
+
+def test_shutdown_during_a_session_stops_the_runner(tmp_path: Path) -> None:
+    s = Session(tmp_path, at(9, 10))
+    runner = s.runner()
+    ctx, state = _ctx(tmp_path), _state(runner, s.risk)
+    reply = _send(CommandKind.SHUTDOWN, "", ctx=ctx, state=state)[0]
+    assert "stays down" in reply
+    outcome = runner.run()
+    assert outcome == RunOutcome(130, "stopped on request")
+    assert serve.service_off_path(tmp_path).exists()
 
 
 def test_control_commands_leave_an_audit_line(

@@ -154,6 +154,8 @@ function Install-NssmService {
     Invoke-NssmTimed "nssm set AppRotateFiles $Name" @("set", $Name, "AppRotateFiles", "1")
     Invoke-NssmTimed "nssm set AppRotateOnline $Name" @("set", $Name, "AppRotateOnline", "1")
     Invoke-NssmTimed "nssm set AppExit $Name" @("set", $Name, "AppExit", "Default", "Restart")
+    # Telegram /shutdown exits 64; without this NSSM would start the bot again.
+    Invoke-NssmTimed "nssm set AppExit $Name 64" @("set", $Name, "AppExit", "64", "Exit")
     Invoke-NssmTimed "nssm set AppThrottle $Name" @("set", $Name, "AppThrottle", "15000")
     Invoke-NssmTimed "nssm set Start $Name" @("set", $Name, "Start", "SERVICE_DEMAND_START")
     Start-NssmService -Name $Name

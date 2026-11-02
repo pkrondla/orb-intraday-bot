@@ -15,6 +15,7 @@ from datetime import date, datetime
 from datetime import time as dt_time
 
 from orb_intraday_bot.app.context import AppContext, load_context
+from orb_intraday_bot.app.serve import service_off_path
 from orb_intraday_bot.core.clock import IST, Clock, SystemClock
 from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.calendar import is_trading_day, load_holidays
@@ -59,6 +60,9 @@ def check_once(
     closed = holidays if holidays is not None else load_holidays()
     if not is_trading_day(day, closed) or not in_market_hours(now):
         return last_alerted_at
+
+    if service_off_path(ctx.data_dir).exists():
+        return last_alerted_at              # /shutdown: the service is down on purpose
 
     info = read_heartbeat(ctx.data_dir / ctx.cfg.runtime.heartbeat_file)
     silent = False
