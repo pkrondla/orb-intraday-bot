@@ -46,8 +46,13 @@ def _rr_line(entry: float, sl: float, t1: float, t2: float | None = None) -> str
 
 
 def _stop_risk_inr(pos: Position) -> float:
-    """Rupees at the broker net from the real fill (may exceed the sizing budget)."""
+    """Rupees at the 35 × delta option SL from the real fill (may exceed the sizing budget)."""
     return round((pos.entry_ltp - pos.sl_exit) * pos.lots * pos.lot_size, 2)
+
+
+def _target_reward_inr(pos: Position, option_price: float, lots: int) -> float:
+    """Gross option rupees if `lots` are booked at this premium."""
+    return round((option_price - pos.entry_ltp) * lots * pos.lot_size, 2)
 
 
 def _named_level(text: str) -> str | None:
@@ -128,12 +133,14 @@ def format_opened(outcome: SignalOutcome, *, trend: str = "none") -> str:
     sl_name = sl_level_name(outcome.trade)
     t1_name = target_level_name(outcome.trade.targets.t1_basis)
     t2_name = target_level_name(outcome.trade.targets.t2_basis)
+    t1_reward = _target_reward_inr(pos, pos.t1_option, pos.t1_book_lots)
     t2_line = ""
     if abs(pos.t1 - pos.t2) > pos.tick_size:
         t2_trig = _target_trigger_note(pos.t2, pos.t2_hit_level, plain=True)
+        t2_reward = _target_reward_inr(pos, pos.t2_option, 1)
         t2_line = (
             f"      T2 {t2_name} futures {pos.t2:.1f} / option {pos.t2_option:.2f}"
-            f"{t2_trig} (1 lot runner)\n"
+            f"{t2_trig} (1 lot runner)  reward Rs {t2_reward:,.0f}\n"
         )
     return (
         f"OPENED {_opened_stamp(pos)} {sig.setup.value} {sig.level_name} {sig.direction.value} "
@@ -146,7 +153,7 @@ def format_opened(outcome: SignalOutcome, *, trend: str = "none") -> str:
         f"{pos.active_option_stop:.2f} (sized for Rs {plan.sized_risk_inr:,.0f}, loss at "
         f"SL Rs {_stop_risk_inr(pos):,.0f})\n"
         f"      T1 {t1_name} futures {pos.t1:.1f} / option {pos.t1_option:.2f}"
-        f"{_t1_trigger_note(pos, plain=True)}\n"
+        f"{_t1_trigger_note(pos, plain=True)}  reward Rs {t1_reward:,.0f}\n"
         f"{t2_line}"
         f"      {_rr_line(pos.entry_ltp, pos.sl_exit, pos.t1_option, pos.t2_option)}"
         f"{flags}"
@@ -177,13 +184,16 @@ def format_opened_alert(outcome: SignalOutcome, *, trend: str = "none") -> str:
     sl_name = escape(sl_level_name(outcome.trade))
     t1_name = escape(target_level_name(outcome.trade.targets.t1_basis))
     t2_name = escape(target_level_name(outcome.trade.targets.t2_basis))
+    t1_reward = _target_reward_inr(pos, pos.t1_option, pos.t1_book_lots)
     t2_block = ""
     if abs(pos.t1 - pos.t2) > pos.tick_size:
+        t2_reward = _target_reward_inr(pos, pos.t2_option, 1)
         t2_block = (
             f"\n<b>T2</b>   {t2_name}  (1 lot runner)\n"
             f"      option <code>{pos.t2_option:.2f}</code>   "
             f"fut <code>{pos.t2:.1f}</code>"
             f"{_target_trigger_note(pos.t2, pos.t2_hit_level)}\n"
+            f"      reward Rs {t2_reward:,.0f}\n"
         )
     return (
         f"🟢 <b>OPENED</b>  <code>{_opened_stamp(pos)}</code>\n"
@@ -202,6 +212,7 @@ def format_opened_alert(outcome: SignalOutcome, *, trend: str = "none") -> str:
         f"      option <code>{pos.t1_option:.2f}</code>   "
         f"fut <code>{pos.t1:.1f}</code>"
         f"{_t1_trigger_note(pos)}\n"
+        f"      reward Rs {t1_reward:,.0f}\n"
         f"{t2_block}"
         f"\n<b>{escape(_rr_line(pos.entry_ltp, pos.sl_exit, pos.t1_option, pos.t2_option))}</b>"
         f"{flags}"

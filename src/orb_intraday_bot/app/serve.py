@@ -454,15 +454,21 @@ def _handle_action_command(
                     else f"{p.trading_symbol}: the broker stop could not be placed (see warning)"
                 )
         else:
+            before = len(runner.open_positions())
             problems = runner.reconcile_now()
+            booked = before - len(runner.open_positions())
             if problems:
                 reply(
                     "MISMATCH (new entries are blocked, nothing was sold):\n"
                     + "\n".join(problems)
                 )
             else:
+                extra = (
+                    f" Booked {booked} hand-close(s) without selling." if booked else ""
+                )
                 reply(
-                    f"The books match ({len(runner.open_positions())} open position(s) checked)."
+                    f"The books match ({len(runner.open_positions())} open position(s) "
+                    f"checked).{extra}"
                 )
     elif kind is CommandKind.CLEARHALT:
         s = state.risk.state

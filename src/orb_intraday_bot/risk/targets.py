@@ -14,6 +14,10 @@ T2 is T1 ± OR-range (ORH − ORL), or the nearer pivot still beyond T1, capped 
 room (OR unset, or closer than `min_stop_points`), T2 = T1 and the whole position
 closes at T1.
 
+A 2HH/3HH short whose entry is still above ORH (the 2 Nov 2026 case between R3 and
+ORH) does not aim at S2. T1 is ORH, T2 is ORL. The long mirror: 2LL/3LL below ORL
+aims at ORL then ORH. Neutral-zone structure still scalps to the nearest in-zone pivot.
+
 T1 is capped by the mandatory exits: a trade entered below R2 never has T1 beyond it;
 trades on a broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond R2) have T1 at
 R4 (S4). An entry beyond R4 (S4) has no room and is rejected. The runner may go past
@@ -67,6 +71,10 @@ def plan_targets(
             long=signal.direction is Direction.LONG, floor=stops.min_stop_points,
             orh=orh, orl=orl, pivots=pivots, setup=signal.setup, zone=zone,
         )
+
+    or_plan = _structure_beyond_or(signal, orh, orl, stops.min_stop_points)
+    if or_plan is not None:
+        return or_plan
 
     long = signal.direction is Direction.LONG
     d = 1.0 if long else -1.0
@@ -140,6 +148,27 @@ def plan_targets(
         long=long, floor=stops.min_stop_points, orh=orh, orl=orl, pivots=pivots,
         setup=signal.setup, zone=zone,
     )
+
+
+def _structure_beyond_or(
+    signal: SetupSignal,
+    orh: float | None,
+    orl: float | None,
+    floor: float,
+) -> TargetPlan | None:
+    """2HH short above ORH / 2LL long below ORL: T1 = near OR, T2 = far OR."""
+    if signal.setup is not Setup.STRUCTURE_WHIPSAW:
+        return None
+    entry = signal.entry_price
+    if signal.direction is Direction.SHORT:
+        if orh is None or entry - orh < floor:
+            return None
+        t2, t2_label = (orl, "ORL") if orl is not None and orh - orl >= floor else (orh, "ORH")
+        return _plan(entry, orh, t2, "ORH", t2_label, floor)
+    if orl is None or orl - entry < floor:
+        return None
+    t2, t2_label = (orh, "ORH") if orh is not None and orh - orl >= floor else (orl, "ORL")
+    return _plan(entry, orl, t2, "ORL", t2_label, floor)
 
 
 def _neutral_t1(

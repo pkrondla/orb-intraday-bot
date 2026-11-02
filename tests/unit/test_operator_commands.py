@@ -438,6 +438,20 @@ def test_rearm_puts_the_broker_stop_back(tmp_path: Path) -> None:
     ]
 
 
+def test_reconcile_books_a_hand_close_without_selling(tmp_path: Path) -> None:
+    s, runner, _, position = _primed(tmp_path, at_time=at(10, 0))
+    s.venue._net[position.trading_symbol] = 0
+    s.risk.block_entries("reconciliation mismatch")
+    ctx, state = _ctx(tmp_path), _state(runner, s.risk)
+    replies = _send(CommandKind.RECONCILE, "", ctx=ctx, state=state)
+    assert not position.is_open
+    assert [f.reason for f in position.fills] == [ExitReason.MANUAL]
+    assert "hand-close" in replies[-1] and "without selling" in replies[-1]
+    assert not s.risk.state.entries_blocked
+    rows = s.h.store.orders_for_signal(position.position_id)
+    assert not any(r["leg"] == "EXIT" for r in rows)
+
+
 def test_reconcile_reports_a_match_and_a_mismatch(tmp_path: Path) -> None:
     s, runner, _, position = _primed(tmp_path, at_time=at(10, 0))
     ctx, state = _ctx(tmp_path), _state(runner, s.risk)

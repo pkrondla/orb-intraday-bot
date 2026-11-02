@@ -67,7 +67,7 @@ class AutoQuotes:
 class FakeAccount:
     def __init__(self) -> None:
         self.margin: float | None = 1_000_000.0
-        self.positions: dict[str, int] | None = {}
+        self.positions: dict[str, int] | None = None  # None = unread; {} = broker is empty
 
     def available_option_margin(self) -> float | None:
         return self.margin

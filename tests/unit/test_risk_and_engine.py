@@ -321,6 +321,38 @@ def test_bullish_and_bearish_zones_keep_the_setup_targets() -> None:
     assert short.t1 == 60 and short.t2 == 45               # 60 − 15; S3 40 is farther
 
 
+def test_structure_short_above_orh_targets_orh_then_orl() -> None:
+    # 2 Nov 2026 2HH short between R3 and ORH: S2 was 524 pts away.
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT,
+        entry=23382.0, stop_level=23407.5, stop_on="touch",
+        target_ref="S2", level_name="2HH", level=23407.5,
+    )
+    t = plan_targets(sig, WIDE, 23344.4, 23241.0, STOPS, zone=Zone.BULLISH)
+    assert t.t1 == pytest.approx(23344.4) and t.t1_basis == "ORH"
+    assert t.t2 == pytest.approx(23241.0) and t.t2_basis == "ORL"
+
+
+def test_structure_short_inside_or_still_aims_at_s2() -> None:
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT,
+        entry=100.0, stop_level=110.0, stop_on="touch",
+        target_ref="S2", level_name="2HH", level=110.0,
+    )
+    t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BULLISH)
+    assert t.t1 == 60 and t.t1_basis == "S2"
+
+
+def test_structure_long_below_orl_targets_orl_then_orh() -> None:
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, entry=80.0, stop_level=70.0, stop_on="touch",
+        target_ref="R2", level_name="2LL", level=70.0,
+    )
+    t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BEARISH)
+    assert t.t1 == pytest.approx(95.0) and t.t1_basis == "ORL"
+    assert t.t2 == pytest.approx(110.0) and t.t2_basis == "ORH"
+
+
 # ---- sizing --------------------------------------------------------------------------------
 def test_risk_budget_and_lots() -> None:
     assert risk_budget_inr(SizingConfig()) == 5000

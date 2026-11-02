@@ -63,7 +63,7 @@ _HELP = (
     "/exit <symbol> - close one open position now (a part of the symbol is enough)\n"
     "/flatten - close every open position now\n"
     "/rearm - put the broker-side stop back on open positions\n"
-    "/reconcile - check the bot's books against the broker now\n"
+    "/reconcile - check the books now; a hand-close at Groww is booked, not sold\n"
     "/clearhalt - clear the kill switch / entry block so new entries are allowed\n"
     "/restart - restart the service (open positions and broker stops are kept)\n"
     "/limits - capital, risk per trade, daily loss limit and lot cap now in force\n"

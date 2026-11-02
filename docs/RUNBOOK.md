@@ -25,9 +25,12 @@ Telegram commands (authorized chat only). `/help` lists them.
   itself at midnight and survives a restart. `/start` allows entries again the same day.
   `/pause` and `/resume` are the same commands.
 - `/exit <symbol>` closes one open position (the full symbol, or a unique part such as `24500CE`).
-  It runs at once. No command asks for a confirmation code, so only the authorized chat can send them.
+  It runs at once. If you already closed it at Groww, the next poll / `/reconcile` books the
+  close at the live premium and does not sell. Do not `/rearm`.
+  No command asks for a confirmation code, so only the authorized chat can send them.
 - `/rearm` puts the broker-side stop back on open positions that lost it. `/reconcile` checks the
-  bot's books against the broker (or the dry-run ledger) now. `/exit`, `/rearm` and `/reconcile`
+  bot's books against the broker (or the dry-run ledger) now. If the broker already shows 0,
+  it books the close and does not place T1 or SL sells. `/exit`, `/rearm` and `/reconcile`
   work while a session is running; between sessions they say so.
 - `/clearhalt` clears the kill switch or a reconciliation entry block. Check the broker first.
 - `/restart` ends the session and the service; NSSM starts it again. Open positions and their

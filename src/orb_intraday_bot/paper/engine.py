@@ -217,7 +217,8 @@ class PaperEngine:
             candle.start, candle.open, candle.high, candle.low, candle.close, is_candle=True
         )
         close_at = candle.start + timedelta(minutes=self._cfg.session.candle_minutes)
-        events = self._apply_broker_stops(close_at, candle.close)
+        events = self.sync_away_closes(close_at, candle.close, option_ltps)
+        events += self._apply_broker_stops(close_at, candle.close)
         end_of_day = close_at >= datetime.combine(
             candle.start.date(), self._close_time, tzinfo=IST
         )
@@ -241,7 +242,8 @@ class PaperEngine:
     ) -> list[ExitEvent]:
         """Apply a live price poll (futures LTP and option LTPs) to every open position."""
         bar = Bar.tick(time_, futures_price)
-        events = self._apply_broker_stops(time_, futures_price)
+        events = self.sync_away_closes(time_, futures_price, option_ltps)
+        events += self._apply_broker_stops(time_, futures_price)
         for position in list(self._open.values()):
             ltp = (option_ltps or {}).get(position.trading_symbol)
             events += evaluate_bar(
@@ -279,6 +281,30 @@ class PaperEngine:
             )
             self._after(position, time_)
         return events
+
+    def sync_away_closes(
+        self,
+        now: datetime,
+        futures_price: float,
+        option_ltps: Mapping[str, float] | None = None,
+    ) -> list[ExitEvent]:
+        """Book positions the operator already closed at the broker. No sell order is sent."""
+        executor = self._executor
+        if executor is None or not self._executor_enabled():
+            return []
+        actual = executor.held_quantities()
+        if actual is None:
+            return []
+        ids = {
+            p.position_id
+            for p in self._open.values()
+            if p.order_mode == executor.mode
+            and p.remaining_quantity - p.unbooked_qty > 0
+            and actual.get(p.trading_symbol, 0) <= 0
+        }
+        if not ids:
+            return []
+        return self.close_all(now, futures_price, option_ltps, ExitReason.MANUAL, position_ids=ids)
 
     def protect_all(self, now: datetime) -> list[Position]:
         """Put the broker-side stop back on every executed position that has none (or a wrong

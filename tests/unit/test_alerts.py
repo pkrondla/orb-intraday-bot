@@ -14,6 +14,7 @@ from orb_intraday_bot.runtime.alerts import Alerts
 from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
 from orb_intraday_bot.runtime.report import (
     _rr,
+    _stop_risk_inr,
     format_opened_alert,
     sl_level_name,
     target_level_name,
@@ -142,6 +143,9 @@ def test_opened_telegram_card_has_time_buy_sl_target_and_rr() -> None:
     assert "broker net option" in card
     assert f"<code>{pos.active_option_stop:.2f}</code>" in card
     assert f"fut <code>{pos.t1:.1f}</code>" in card
+    t1_reward = round((pos.t1_option - pos.entry_ltp) * pos.t1_book_lots * pos.lot_size, 2)
+    assert f"reward Rs {t1_reward:,.0f}" in card
+    assert f"risk Rs {_stop_risk_inr(pos):,.0f}" in card
     if abs(pos.t2_hit_level - pos.t1) >= 1e-6:
         assert f"trigger <code>{pos.t2_hit_level:.1f}</code>" in card
     trade = opened.trade

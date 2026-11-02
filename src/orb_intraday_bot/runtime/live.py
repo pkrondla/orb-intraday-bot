@@ -174,6 +174,7 @@ class LiveRunner:
         trading, executor = self._day, self._executor
         if trading is None or executor is None:
             return None
+        self._book_broker_flats(trading)
         return executor.reconcile(trading.paper.open_positions, self._clock.now())
 
     # -- entry point ---------------------------------------------------------------------
@@ -436,11 +437,38 @@ class LiveRunner:
         if executor is None:
             return
         try:
+            self._book_broker_flats(trading)
             executor.startup(trading.paper.open_positions, self._clock.now())
         except Exception as exc:
             if must_halt(exc):
                 raise
             log.warning("executor startup failed: %s", exc, exc_info=True)
+
+    def _book_broker_flats(self, trading: TradingDay) -> None:
+        """If Groww already shows 0, book the close. No sell order is sent."""
+        open_positions = trading.paper.open_positions
+        if not open_positions:
+            return
+        price = trading.last_candle.close if trading.last_candle else None
+        options: dict[str, float] = {}
+        contract = self._contract
+        if contract is not None:
+            try:
+                symbols = [contract.trading_symbol] + sorted(
+                    {p.trading_symbol for p in open_positions}
+                )
+                live = self._source.ltp(symbols)
+                price = live.get(contract.trading_symbol, price)
+                options = {s: v for s, v in live.items() if s != contract.trading_symbol}
+            except Exception as exc:
+                if must_halt(exc):
+                    raise
+                log.warning("broker-flat price fetch failed: %s", exc)
+        if price is None:
+            price = open_positions[0].futures_entry
+        for event in trading.paper.sync_away_closes(self._clock.now(), price, options):
+            self._out("  " + format_exit(event))
+            self._alerts.exit(event)
 
     def _reconcile(self, trading: TradingDay) -> None:
         executor = self._executor
@@ -450,7 +478,9 @@ class LiveRunner:
         if not (self._executor_enabled() or any(p.order_mode == executor.mode for p in positions)):
             return
         try:
-            executor.maybe_reconcile(positions, self._clock.now())
+            if any(p.order_mode == executor.mode for p in trading.paper.open_positions):
+                self._book_broker_flats(trading)
+            executor.maybe_reconcile(trading.paper.open_positions, self._clock.now())
         except Exception as exc:
             if must_halt(exc):
                 raise

@@ -6,6 +6,34 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-11-02
+
+### Fixed
+- If a position is closed by hand at Groww, reconcile / the next poll books it in the
+  bot as MANUAL at the live premium. No SL or T1 sell is sent. A clean reconcile
+  lifts the mismatch entry block.
+
+## [0.21.1] - 2026-11-02
+
+### Fixed
+- Closing a position by hand at Groww no longer leaves the bot trying to replace the
+  crash net. `/exit` books the close at the live premium when the broker already
+  holds 0, then `/clearhalt` unblocks entries.
+
+## [0.21.0] - 2026-11-02
+
+### Changed
+- A 2HH/3HH short still above ORH no longer aims at S2. T1 is ORH, T2 is ORL
+  (2 Nov 2026 2HH at 23382, ORH 23344 / ORL 23241; S2 was 524 pts away).
+- Mirror: 2LL/3LL long still below ORL has T1 at ORL, T2 at ORH.
+  Neutral-zone structure is unchanged (nearest in-zone pivot).
+
+## [0.20.1] - 2026-10-30
+
+### Changed
+- Telegram OPENED card shows reward rupees on T1 (and T2 when there is a runner),
+  next to the existing risk figure.
+
 ## [0.20.0] - 2026-10-29
 
 ### Changed

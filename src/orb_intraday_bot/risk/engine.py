@@ -111,6 +111,13 @@ class RiskEngine:
         self.state.entries_blocked = True
         self.state.block_reason = reason
 
+    def clear_entry_block(self, reason: str | None = None) -> None:
+        """Lift an entries-only block. `reason` None clears any; else it must match."""
+        if reason is not None and self.state.block_reason != reason:
+            return
+        self.state.entries_blocked = False
+        self.state.block_reason = ""
+
     def check_entry(
         self,
         *,

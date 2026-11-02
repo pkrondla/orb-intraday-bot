@@ -226,6 +226,9 @@ class LiveExecutor:
         """
         if position.order_mode != self.mode or not position.is_open:
             return
+        held = self._held_qty(position.trading_symbol)
+        if held is not None and held <= 0:
+            return                      # already closed at the broker; reconcile/poll books it
         quantity = position.remaining_quantity - position.unbooked_qty
         tick = position.tick_size
         trigger = round_up_to_tick(position.active_option_stop, tick)
@@ -324,6 +327,14 @@ class LiveExecutor:
             elif record.status in {OrderStatus.CANCELLED, OrderStatus.REJECTED}:
                 self._persist(record, "stop_gone")
                 self._clear_stop_fields(position)
+                held = self._held_qty(position.trading_symbol)
+                if held is not None and held <= 0:
+                    self._alert(
+                        f"stop-gone-{position.position_id}",
+                        f"WARNING: the protective stop for {position.trading_symbol} is gone "
+                        f"and the broker holds 0. The close will be booked without a sell.",
+                    )
+                    continue
                 self._alert(
                     f"stop-gone-{position.position_id}",
                     f"WARNING: the protective stop for {position.trading_symbol} is no longer "
@@ -345,6 +356,15 @@ class LiveExecutor:
                 return ExitExecution(
                     price, quantity, self.mode, reason=ExitReason.BROKER_STOP.value
                 )
+        held = self._held_qty(position.trading_symbol)
+        if held is not None and held <= 0:
+            price = self._mark_price(position)
+            log_event(
+                log, "exit_already_flat",
+                f"broker already flat {position.trading_symbol}; booking without a sell",
+                mode=self.mode, position_id=position.position_id, reason=reason, price=price,
+            )
+            return ExitExecution(price, requested, self.mode)
         need = requested - position.unbooked_qty
         sold_qty, value = self._sell_remaining(
             signal_id=position.position_id, leg=OrderLeg.EXIT, symbol=position.trading_symbol,
@@ -494,6 +514,8 @@ class LiveExecutor:
             )
             if self._risk is not None:
                 self._risk.block_entries("reconciliation mismatch")
+        elif self._risk is not None:
+            self._risk.clear_entry_block("reconciliation mismatch")
         return problems
 
     def available_margin(self) -> float | None:
@@ -523,6 +545,25 @@ class LiveExecutor:
     # ==================================================================================
     # plumbing
     # ==================================================================================
+    def _held_qty(self, symbol: str) -> int | None:
+        """Net quantity at the broker, or None if the account cannot be read."""
+        try:
+            actual = self._account.net_quantities()
+        except Exception:  # noqa: BLE001 - unknown is safer than assuming flat
+            log.warning("could not read broker quantity for %s", symbol, exc_info=True)
+            return None
+        if actual is None:
+            return None
+        return int(actual.get(symbol, 0))
+
+    def _mark_price(self, position: Position) -> float:
+        quote = self._get_quote(position.trading_symbol)
+        if quote is not None:
+            for value in (quote.ltp, quote.bid, quote.ask):
+                if value is not None and value > 0:
+                    return float(value)
+        return position.entry_ltp
+
     def _get_quote(self, symbol: str) -> Quote | None:
         try:
             return self._quotes.quote(symbol)

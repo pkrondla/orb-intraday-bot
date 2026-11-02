@@ -371,6 +371,30 @@ def test_sell_never_goes_ahead_if_the_stop_is_not_on_record(tmp_path: Path) -> N
         rig.executor.sell(position, 1, "OPTION_STOP", NOW)
 
 
+def test_sell_books_without_an_order_when_the_broker_is_already_flat(tmp_path: Path) -> None:
+    # Operator closed at Groww; bot still has the position. /exit must not sell.
+    rig = make_rig(tmp_path, kind="live")
+    venue = rig.venue
+    assert isinstance(venue, ScriptedVenue)
+    position = _enter(rig)
+    rig.account.positions = {SYMBOL: 0}                    # type: ignore[union-attr]
+    rig.quotes.set(118.0, 118.4, ltp=118.2)
+    done = rig.executor.sell(position, 1, ExitReason.MANUAL.value, NOW)
+    assert done.quantity == LOT and done.price == pytest.approx(118.2)
+    assert done.reason is None
+    assert venue.of_leg("EXIT") == []
+
+
+def test_protect_does_not_replace_a_stop_when_the_broker_is_flat(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path, kind="live")
+    position = _enter(rig)
+    position.stop_order_id = position.stop_order_key = ""
+    position.stop_trigger, position.stop_quantity = 0.0, 0
+    rig.account.positions = {SYMBOL: 0}                    # type: ignore[union-attr]
+    rig.executor.protect(position, NOW)
+    assert position.stop_order_id == ""
+
+
 def test_sell_without_a_quote_uses_a_market_order(tmp_path: Path) -> None:
     rig = make_rig(tmp_path, kind="live")
     venue = rig.venue
@@ -465,6 +489,41 @@ def test_reconcile_flags_a_symbol_the_dry_run_ledger_holds_unexpectedly(
     rig.venue._net["OTHER"] = 75
     problems = rig.executor.reconcile([position], NOW)
     assert any("OTHER" in p for p in problems)
+
+
+def test_on_tick_books_a_manual_broker_close_without_selling(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path, kind="live")
+    venue = rig.venue
+    assert isinstance(venue, ScriptedVenue)
+    trade, plan = make_trade()
+    engine = PaperEngine(CFG, rig.store, rig.executor)
+    position = engine.open(trade, plan, OPENED)
+    assert position is not None
+    rig.account.positions = {SYMBOL: 0}                    # type: ignore[union-attr]
+    rig.quotes.set(118.0, 118.4, ltp=118.2)
+    rig.risk.block_entries("reconciliation mismatch")
+    before_protect = len(venue.of_leg("PROTECT"))
+    events = engine.on_tick(NOW, 22950.0, {SYMBOL: 118.2})  # through T1; must not sell
+    fill = events[0].fill
+    assert fill is not None and fill.reason is ExitReason.MANUAL
+    assert fill.option_price == pytest.approx(118.2)
+    assert not position.is_open
+    assert venue.of_leg("EXIT") == []
+    assert len(venue.of_leg("PROTECT")) == before_protect
+    assert rig.executor.reconcile(engine.open_positions, NOW) == []
+    assert not rig.risk.state.entries_blocked
+
+
+def test_a_clean_reconcile_lifts_only_a_mismatch_block(tmp_path: Path) -> None:
+    rig = make_rig(tmp_path, kind="live")
+    position = _enter(rig)
+    rig.account.positions = {SYMBOL: LOT}                  # type: ignore[union-attr]
+    rig.risk.block_entries("partial entry on X not flattened")
+    assert rig.executor.reconcile([position], NOW) == []
+    assert rig.risk.state.entries_blocked                  # a different block stays
+    rig.risk.block_entries("reconciliation mismatch")
+    assert rig.executor.reconcile([position], NOW) == []
+    assert not rig.risk.state.entries_blocked
 
 
 def test_live_reconcile_flags_a_shortfall_but_not_extra_shares(tmp_path: Path) -> None:

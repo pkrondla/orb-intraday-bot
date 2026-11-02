@@ -44,6 +44,19 @@ def test_loss_streak_trips() -> None:
     assert "loss streak" in eng.state.halt_reason
 
 
+def test_clear_entry_block_is_selective() -> None:
+    eng = RiskEngine(limits=RiskLimits())
+    eng.reset_day(date(2026, 10, 16))
+    eng.block_entries("partial entry")
+    eng.clear_entry_block("reconciliation mismatch")
+    assert eng.state.entries_blocked and eng.state.block_reason == "partial entry"
+    eng.clear_entry_block("partial entry")
+    assert not eng.state.entries_blocked
+    eng.block_entries("reconciliation mismatch")
+    eng.clear_entry_block()
+    assert not eng.state.entries_blocked
+
+
 def test_arming_requires_all_gates() -> None:
     base = Settings.model_construct(
         live_mode="live",

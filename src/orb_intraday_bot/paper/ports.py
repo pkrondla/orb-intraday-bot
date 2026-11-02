@@ -86,3 +86,7 @@ class PositionExecutor(Protocol):
     def poll_stops(self, positions: Sequence[Position], now: datetime) -> list[StopFill]:
         """Protective stops that were executed at the broker since the last look."""
         ...
+
+    def held_quantities(self) -> dict[str, int] | None:
+        """Net quantity per symbol at the broker, or None if it cannot be read."""
+        ...

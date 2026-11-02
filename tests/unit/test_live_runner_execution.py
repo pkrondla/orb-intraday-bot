@@ -202,13 +202,28 @@ def test_the_session_end_alerts_loudly_about_a_position_still_open(tmp_path: Pat
 
 
 def test_the_runner_reconciles_open_positions_against_the_ledger(tmp_path: Path) -> None:
-    s, runner, trading, _ = _primed(tmp_path)
+    s, runner, trading, position = _primed(tmp_path)
     assert isinstance(s.venue, _SellsRest)
     runner._reconcile(trading)
     assert not s.risk.state.entries_blocked                    # the books agree
     s.h.clock.advance(seconds=120)
-    s.venue._net.clear()                                       # the ledger loses the position
+    s.venue._net.clear()                                       # operator closed at the broker
     runner._reconcile(trading)
+    assert not position.is_open
+    assert [f.reason for f in position.fills] == [ExitReason.MANUAL]
+    assert not s.risk.state.entries_blocked
+    assert not any("CRITICAL" in a for a in s.alerts)
+    rows = s.h.store.orders_for_signal(position.position_id)
+    assert not any(r["leg"] == "EXIT" for r in rows)
+
+
+def test_the_runner_blocks_entries_on_a_true_shortfall(tmp_path: Path) -> None:
+    s, runner, trading, position = _primed(tmp_path)
+    runner._reconcile(trading)
+    s.h.clock.advance(seconds=120)
+    position.remaining_lots += 1                               # the bot thinks it holds more
+    runner._reconcile(trading)
+    assert position.is_open
     assert s.risk.state.entries_blocked
     assert any("CRITICAL" in a for a in s.alerts)
 
