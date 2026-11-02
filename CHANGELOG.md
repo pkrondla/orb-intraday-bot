@@ -6,6 +6,13 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-02
+
+### Changed
+- Inside the opening range, a 2HH/3HH short no longer aims at S2. T1 is the first
+  pivot at least 10 pts past ORL. Mirror: 2LL/3LL long inside OR has T1 at the first
+  pivot past ORH. Beyond-OR structure (T1 ORH/ORL) is unchanged.
+
 ## [0.21.3] - 2026-11-02
 
 ### Added

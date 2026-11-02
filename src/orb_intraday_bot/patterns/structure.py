@@ -20,9 +20,10 @@ State (rise view):
 
 [Assumption] "Rise" and "pullback" are defined as above, with `min_rise_points` (20) to ignore
 noise. Stop is the pullback extreme or 35 points, whichever is closer. Target is R2 (long) or S2
-(short), except a short still above ORH (T1 ORH, T2 ORL) and a long still below ORL
-(T1 ORL, T2 ORH). Neutral zone still scalps to the nearest in-zone pivot. The notes
-show the pattern on charts only.
+(short), except: a short still above ORH (T1 ORH, T2 ORL); a long still below ORL
+(T1 ORL, T2 ORH); inside the range, T1 is the first pivot past ORL (short) or ORH
+(long). Neutral zone still scalps to the nearest in-zone pivot. The notes show the
+pattern on charts only.
 """
 
 from __future__ import annotations

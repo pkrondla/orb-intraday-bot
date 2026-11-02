@@ -281,7 +281,7 @@ def test_neutral_zone_3ll_t1_is_p() -> None:
     assert t.t1 == pytest.approx(22621.0333, abs=0.05) and t.t1_basis.startswith("P")
     assert t.t2 == pytest.approx(t.t1 + (22575.0 - 22444.6), abs=0.05)
     setup = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS)
-    assert setup.t1 == pytest.approx(23037.5, abs=0.05)
+    assert setup.t1 == pytest.approx(22621.0333, abs=0.05) and "after ORH" in setup.t1_basis
     assert setup.t2 != setup.t1
 
 
@@ -333,14 +333,25 @@ def test_structure_short_above_orh_targets_orh_then_orl() -> None:
     assert t.t2 == pytest.approx(23241.0) and t.t2_basis == "ORL"
 
 
-def test_structure_short_inside_or_still_aims_at_s2() -> None:
+def test_structure_short_inside_or_targets_pivot_after_orl() -> None:
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT,
-        entry=100.0, stop_level=110.0, stop_on="touch",
-        target_ref="S2", level_name="2HH", level=110.0,
+        entry=108.0, stop_level=118.0, stop_on="touch",
+        target_ref="S2", level_name="2HH", level=118.0,
     )
     t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BULLISH)
-    assert t.t1 == 60 and t.t1_basis == "S2"
+    assert t.t1 == 80 and t.t1_basis.startswith("S1")
+    assert "after ORL" in t.t1_basis
+
+
+def test_structure_long_inside_or_targets_pivot_after_orh() -> None:
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, entry=100.0, stop_level=90.0, stop_on="touch",
+        target_ref="R2", level_name="2LL", level=90.0,
+    )
+    t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BEARISH)
+    assert t.t1 == 120 and t.t1_basis.startswith("R1")
+    assert "after ORH" in t.t1_basis
 
 
 def test_structure_long_below_orl_targets_orl_then_orh() -> None:
