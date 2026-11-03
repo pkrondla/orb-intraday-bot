@@ -81,7 +81,45 @@ class SignalEngine:
         zone = self.zone_for(candle.close)
         result = EngineResult(zone=zone, accepted=[], rejected=[])
         survivors: list[PlannedTrade] = []
+        self._plan(signals, orh, orl, result, survivors)
+        self._arbitrate(self._ranked(survivors), open_directions, result, commit=True)
+        return result
 
+    def would_accept(
+        self,
+        candle: Candle,
+        signals: Sequence[SetupSignal],
+        orh: float | None,
+        orl: float | None,
+        open_directions: Sequence[Direction] = (),
+    ) -> list[SetupSignal]:
+        """Signals `evaluate` would accept. Does not use up signs or daily counters."""
+        zone = self.zone_for(candle.close)
+        result = EngineResult(zone=zone, accepted=[], rejected=[])
+        survivors: list[PlannedTrade] = []
+        self._plan(signals, orh, orl, result, survivors)
+        self._arbitrate(self._ranked(survivors), open_directions, result, commit=False)
+        return [trade.signal for trade in result.accepted]
+
+    def release(self, trade: PlannedTrade) -> None:
+        """Undo the bookkeeping for an accepted trade that could not be opened (for example the
+        option plan failed), so its sign and the daily counters are not used up."""
+        if trade.signal.sign_id in self.taken_signs:
+            self.taken_signs.discard(trade.signal.sign_id)
+            self.trades_today = max(0, self.trades_today - 1)
+            if trade.signal.setup is Setup.STRUCTURE_WHIPSAW:
+                self.structure_trades_today = max(0, self.structure_trades_today - 1)
+
+    # -- helpers -------------------------------------------------------------------------
+    def _plan(
+        self,
+        signals: Sequence[SetupSignal],
+        orh: float | None,
+        orl: float | None,
+        result: EngineResult,
+        survivors: list[PlannedTrade],
+    ) -> None:
+        zone = result.zone
         for sig in signals:
             if sig.sign_id in self.taken_signs:
                 result.rejected.append(Rejection(sig, "duplicate", "sign already traded"))
@@ -104,30 +142,35 @@ class SignalEngine:
                 PlannedTrade(sig, zone, stop, targets, risk_budget_inr(self._cfg.sizing))
             )
 
-        survivors.sort(key=self._priority)
+    def _ranked(self, survivors: list[PlannedTrade]) -> list[PlannedTrade]:
+        return sorted(survivors, key=self._priority)
+
+    def _arbitrate(
+        self,
+        survivors: list[PlannedTrade],
+        open_directions: Sequence[Direction],
+        result: EngineResult,
+        *,
+        commit: bool,
+    ) -> None:
         open_dirs = list(open_directions)
+        trades = self.trades_today
+        structure = self.structure_trades_today
         for trade in survivors:
-            reason = self._arbiter_block(trade, result.accepted, open_dirs)
+            reason = self._arbiter_block(trade, result.accepted, open_dirs, trades, structure)
             if reason is not None:
                 result.rejected.append(Rejection(trade.signal, "arbiter", reason))
                 continue
             result.accepted.append(trade)
+            trades += 1
+            if trade.signal.setup is Setup.STRUCTURE_WHIPSAW:
+                structure += 1
+            if not commit:
+                continue
             self.taken_signs.add(trade.signal.sign_id)
-            self.trades_today += 1
-            if trade.signal.setup is Setup.STRUCTURE_WHIPSAW:
-                self.structure_trades_today += 1
-        return result
+            self.trades_today = trades
+            self.structure_trades_today = structure
 
-    def release(self, trade: PlannedTrade) -> None:
-        """Undo the bookkeeping for an accepted trade that could not be opened (for example the
-        option plan failed), so its sign and the daily counters are not used up."""
-        if trade.signal.sign_id in self.taken_signs:
-            self.taken_signs.discard(trade.signal.sign_id)
-            self.trades_today = max(0, self.trades_today - 1)
-            if trade.signal.setup is Setup.STRUCTURE_WHIPSAW:
-                self.structure_trades_today = max(0, self.structure_trades_today - 1)
-
-    # -- helpers -------------------------------------------------------------------------
     def _priority(self, trade: PlannedTrade) -> int:
         order = self._cfg.arbiter.priority
         name = trade.signal.setup.value
@@ -138,6 +181,8 @@ class SignalEngine:
         trade: PlannedTrade,
         accepted: list[PlannedTrade],
         open_dirs: list[Direction],
+        trades_today: int,
+        structure_trades_today: int,
     ) -> str | None:
         arb = self._cfg.arbiter
         sig = trade.signal
@@ -149,11 +194,11 @@ class SignalEngine:
             return f"a {opposite.value} position is open"
         if len(open_dirs) + len(accepted) >= self._cfg.sizing.max_open_positions:
             return f"maximum {self._cfg.sizing.max_open_positions} open positions"
-        if self.trades_today >= arb.max_trades_per_day:
+        if trades_today >= arb.max_trades_per_day:
             return f"daily limit of {arb.max_trades_per_day} trades reached"
         if (
             sig.setup is Setup.STRUCTURE_WHIPSAW
-            and self.structure_trades_today >= arb.max_structure_trades_per_day
+            and structure_trades_today >= arb.max_structure_trades_per_day
         ):
             return f"daily limit of {arb.max_structure_trades_per_day} 2LL/3LL/2HH/3HH trades"
         return None

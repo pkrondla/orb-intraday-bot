@@ -259,6 +259,8 @@ def _exit_heading(reason: ExitReason | None, message: str) -> tuple[str, str]:
         return "🟡", "T1"
     if reason is ExitReason.T2:
         return "🟢", "T2"
+    if reason is ExitReason.ORB_REVERSE:
+        return "⚪", "REVERSED"
     if reason in _SL_REASONS:
         return "🔴", "SL"
     if reason is not None:

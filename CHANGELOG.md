@@ -6,6 +6,19 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-03
+
+### Changed
+- An open Case 1 or Case 2 is closed when an ORB confirms on the same level in the
+  opposite direction, and that ORB is opened on the confirmation candle. The fade
+  is not closed on the earlier sign. It stays open when the ORB cannot be taken
+  for another reason, or when the sale does not complete.
+- Golden replay: 223 → 224 trades, fill-points 2061.3 → 2486.41, charges
+  24635.01 → 24736.56. Seven sessions move (7 Aug, 19 Aug, 27 Aug, 3 Sep, 9 Sep,
+  11 Sep, 28 Sep). Fades that had been held into the confirmed break are closed
+  at that close instead of the 35-point stop, and the ORB is taken. Later trades
+  that conflict with the new position move with it.
+
 ## [0.22.0] - 2026-11-02
 
 ### Changed

@@ -2,10 +2,14 @@
 
 For each closed candle, in this order:
 
-1. open positions see the candle (exits, end of day), so a new signal can never act on it
+1. open positions see the candle (exits, end of day), so a stop still beats a new signal
 2. the opening-range tracker and the setup detectors process it
-3. the signal engine plans and arbitrates the candidate signals
-4. each accepted trade gets an option plan and opens a paper position
+3. a confirmed ORB closes an opposite Case 1 or Case 2 on that same level, when the ORB
+   would be taken once that position is out. The close is at this candle's close. A failed
+   sale leaves the fade open, and the ORB is then blocked. A fresh signal (the bot was
+   running) is required; a catch-up candle does not reverse a position it will not trade
+4. the signal engine plans and arbitrates the candidate signals
+5. each accepted trade gets an option plan and opens a paper position
 
 Everything is idempotent against the store: a signal that was already handled (accepted,
 rejected or released) is never opened again, and a signal that already has a position is not
@@ -17,15 +21,15 @@ was not running is recorded as rejected ("stale") and never opened at an old pri
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.errors import EntryNotFilledError
 from orb_intraday_bot.core.events import LevelSet
-from orb_intraday_bot.core.models import Candle, Zone
-from orb_intraday_bot.core.signals import PatternEvent, SetupSignal
+from orb_intraday_bot.core.models import Candle, Direction, Zone
+from orb_intraday_bot.core.signals import PatternEvent, Setup, SetupSignal
 from orb_intraday_bot.engine.signal_engine import PlannedTrade, SignalEngine
 from orb_intraday_bot.indicators.opening_range import OpeningRangeTracker
 from orb_intraday_bot.indicators.pivots import Pivots
@@ -34,7 +38,7 @@ from orb_intraday_bot.options.pricing import OptionPlan, OptionPlanError
 from orb_intraday_bot.options.selector import OptionSelectionError
 from orb_intraday_bot.paper.engine import PaperEngine, PositionHook
 from orb_intraday_bot.paper.exits import ExitEvent
-from orb_intraday_bot.paper.models import Position
+from orb_intraday_bot.paper.models import ExitReason, Position
 from orb_intraday_bot.paper.ports import PositionExecutor
 from orb_intraday_bot.paper.report import DaySummary, summarize
 from orb_intraday_bot.patterns.detector import SetupDetector
@@ -120,18 +124,16 @@ class TradingDay:
         report.events = step.events
         report.trend = self.detector.trending.state
 
+        signals = list(step.signals)
+        if allow_open:
+            report.exits += self._reverse_followups(candle, signals, report.orh, report.orl)
+
         decision = self.signals.evaluate(
-            candle, step.signals, report.orh, report.orl, self.paper.open_directions()
+            candle, signals, report.orh, report.orl, self.paper.open_directions()
         )
         report.zone = decision.zone
         for rejection in decision.rejected:
-            if self._store is not None:
-                self._store.record_signal(
-                    rejection.signal, "rejected", rejection.stage, rejection.reason
-                )
-            report.outcomes.append(
-                SignalOutcome(rejection.signal, "rejected", rejection.reason, rejection.stage)
-            )
+            self._reject(report, rejection.signal, rejection.stage, rejection.reason)
         for trade in decision.accepted:
             report.outcomes.append(self._open(trade, candle, allow_open))
 
@@ -139,6 +141,29 @@ class TradingDay:
         report.summary = summarize(self.day, self.positions_today())
         self.last_candle = candle
         return report
+
+    def _reverse_followups(
+        self, candle: Candle, signals: Sequence[SetupSignal], orh: float | None, orl: float | None
+    ) -> list[ExitEvent]:
+        """Close Case 1/2 fades that a same-level opposite ORB is about to replace."""
+        fading = followups_to_reverse(
+            self.signals, candle, signals, orh, orl, self.paper.open_positions
+        )
+        if not fading:
+            return []
+        close_at = candle.start + timedelta(minutes=self._cfg.session.candle_minutes)
+        return self.paper.close_all(
+            close_at,
+            candle.close,
+            None,
+            ExitReason.ORB_REVERSE,
+            position_ids={p.position_id for p in fading},
+        )
+
+    def _reject(self, report: CandleReport, signal: SetupSignal, stage: str, reason: str) -> None:
+        if self._store is not None:
+            self._store.record_signal(signal, "rejected", stage, reason)
+        report.outcomes.append(SignalOutcome(signal, "rejected", reason, stage))
 
     def _open(self, trade: PlannedTrade, candle: Candle, allow_open: bool) -> SignalOutcome:
         sig = trade.signal
@@ -188,3 +213,53 @@ class TradingDay:
 
     def summary(self) -> DaySummary:
         return summarize(self.day, self.positions_today())
+
+
+_FOLLOW_UPS = frozenset({Setup.FOLLOWUP_CASE_1, Setup.FOLLOWUP_CASE_2})
+
+
+def _opposite(direction: Direction) -> Direction:
+    return Direction.SHORT if direction is Direction.LONG else Direction.LONG
+
+
+def followups_to_reverse(
+    engine: SignalEngine,
+    candle: Candle,
+    signals: Sequence[SetupSignal],
+    orh: float | None,
+    orl: float | None,
+    positions: Sequence[Position],
+) -> list[Position]:
+    """Case 1/2 positions a same-level opposite ORB would replace.
+
+    The ORB has to be acceptable once those positions are out of the book. A pivot
+    breakout, the other side of the range, or an ORB blocked for any other reason
+    leaves the fade open. The engine's signs and counters are not changed.
+    """
+    fades = [
+        p for p in positions
+        if p.is_open and p.setup in {s.value for s in _FOLLOW_UPS}
+    ]
+    matched = [
+        fade for fade in fades
+        if any(
+            sig.setup is Setup.ORB_BREAKOUT
+            and sig.level_name == fade.level_name
+            and sig.direction is _opposite(fade.direction)
+            for sig in signals
+        )
+    ]
+    if not matched:
+        return []
+    matched_ids = {p.position_id for p in matched}
+    remaining = [p.direction for p in positions if p.is_open and p.position_id not in matched_ids]
+    accepted = engine.would_accept(candle, signals, orh, orl, remaining)
+    return [
+        fade for fade in matched
+        if any(
+            sig.setup is Setup.ORB_BREAKOUT
+            and sig.level_name == fade.level_name
+            and sig.direction is _opposite(fade.direction)
+            for sig in accepted
+        )
+    ]

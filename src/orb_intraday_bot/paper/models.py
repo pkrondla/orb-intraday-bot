@@ -22,6 +22,7 @@ class ExitReason(StrEnum):
     HARD_STOP = "HARD_STOP"            # futures price hit the stop
     BREAKEVEN_STOP = "BREAKEVEN_STOP"  # stop had moved to entry after T1
     CLOSE_STOP = "CLOSE_STOP"          # candle closed back beyond the level
+    ORB_REVERSE = "ORB_REVERSE"        # Case 1/2 closed because the opposite ORB confirmed
     OPTION_STOP = "OPTION_STOP"        # option price hit its stop (live prices only)
     T1 = "T1"                          # notes Target (all lots, or all but one runner)
     T2 = "T2"                          # one-lot runner (T1 ± OR-range or nearer pivot)

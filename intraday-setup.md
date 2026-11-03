@@ -295,7 +295,7 @@ These are intentional, because the notes win:
    - **Zone filter:** pivots are reference. Longs below S1 and shorts above R1 are taken. The only hard block is aggressive entries (Case 1/2, consolidation) in the neutral zone. The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
    - **One trade per sign.** A signal blocked by the zone filter does not use up its sign, so the standard trigger of the same sign can still be taken.
    - **Priority on the same candle** (assumption, `arbiter.priority`): ORB, R2/S2 breakout, trap confirmation, Case 1, Case 2, consolidation, additional whipsaw, fake break, 2LL/3LL/2HH/3HH. A lower-priority signal in the opposite direction on the same candle is dropped.
-   - **Opposite open position** blocks a new trade (assumption, `arbiter.allow_opposite_positions`).
+   - **Opposite open position** blocks a new trade (assumption, `arbiter.allow_opposite_positions`). A confirmed ORB is the exception: it closes an open Case 1 or Case 2 on that same level in the opposite direction, at the confirmation candle's close, and is then taken. The earlier sign does not close the fade. The fade stays open when the ORB would be rejected for any other reason, or when the sale fails.
    - **Caps** (assumptions): 6 trades per day, 2 of them from 2LL/3LL/2HH/3HH, 5 open positions.
 10. Phase 6 decisions (option layer):
    - **Chain data:** Groww reports a delta of 0 when it has no value. Zero, a wrong-signed delta (a negative CE or positive PE) and anything above 1 are treated as missing. A quote with no price is never selected.
