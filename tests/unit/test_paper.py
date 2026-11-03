@@ -230,6 +230,33 @@ def test_t1_fires_a_few_points_in_front_of_the_level() -> None:
     assert not p.is_open
 
 
+def test_target_and_stop_hit_on_the_tenth_the_card_shows() -> None:
+    # 23784.83 prints as 23784.8. A high of 23784.8 has reached that quote.
+    long = opened()
+    long.t1 = 23787.83
+    long.t2 = 23787.83
+    long.t1_trigger = 23784.83
+    long.t2_trigger = 23784.83
+    hit = evaluate_bar(long, bar(13, 18, 23770, 23784.8, 23760, 23780), None, CFG.paper)
+    assert hit[0].fill is not None and hit[0].fill.reason is ExitReason.T1
+    assert hit[0].fill.futures_price == pytest.approx(23784.8)
+
+    # 23784.86 prints as 23784.9. A high of 23784.8 is still short of it.
+    short_of = opened()
+    short_of.t1 = short_of.t2 = 23787.86
+    short_of.t1_trigger = short_of.t2_trigger = 23784.86
+    assert evaluate_bar(
+        short_of, bar(13, 18, 23770, 23784.8, 23760, 23780), None, CFG.paper
+    ) == []
+
+    # A long stop stored as 22764.04 prints as 22764.0, so a low of 22764.0 stops it.
+    stopped = opened()
+    stopped.hard_stop = 22764.04
+    stopped_at = evaluate_bar(stopped, bar(9, 39, 22780, 22790, 22764.0, 22770), None, CFG.paper)
+    assert stopped_at[0].fill is not None and stopped_at[0].fill.reason is ExitReason.HARD_STOP
+    assert stopped_at[0].fill.futures_price == pytest.approx(22764.0)
+
+
 def test_t1_still_misses_outside_the_proximity_band() -> None:
     p = opened()
     evaluate_bar(p, bar(9, 36, 22850, 22896, 22840, 22890), None, CFG.paper)

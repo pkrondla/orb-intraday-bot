@@ -6,6 +6,19 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-03
+
+### Changed
+- Futures prices that are compared with the tape sit on the 0.1 quote: pivots,
+  stops, targets, triggers, entries, and candle OHLC. A formula leftover such as
+  24315.85 is the level 24315.8, which is the tenth the card already shows. The
+  3-point target band and the 35-point stop are unchanged. Option premiums stay
+  on the 0.05 tick.
+- Golden replay: 224 trades and 545 signals unchanged. Fill-points 2486.41 →
+  2486.2, charges 24736.56 → 24736.34. Fills that sat a few hundredths off a
+  pivot or a midpoint now book on the tenth. Two rejection notes (20 Aug R2,
+  27 Aug S2) name that tenth. No trade was added or removed.
+
 ## [0.23.0] - 2026-11-03
 
 ### Changed

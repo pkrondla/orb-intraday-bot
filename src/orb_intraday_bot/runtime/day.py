@@ -30,6 +30,7 @@ from orb_intraday_bot.core.errors import EntryNotFilledError
 from orb_intraday_bot.core.events import LevelSet
 from orb_intraday_bot.core.models import Candle, Direction, Zone
 from orb_intraday_bot.core.signals import PatternEvent, Setup, SetupSignal
+from orb_intraday_bot.core.ticks import snap_candle
 from orb_intraday_bot.engine.signal_engine import PlannedTrade, SignalEngine
 from orb_intraday_bot.indicators.opening_range import OpeningRangeTracker
 from orb_intraday_bot.indicators.pivots import Pivots
@@ -111,6 +112,7 @@ class TradingDay:
     def on_candle(
         self, candle: Candle, *, allow_open: bool = True, catch_up: bool = False
     ) -> CandleReport:
+        candle = snap_candle(candle)
         option_ltps = None       # live premiums are supplied by tick polls; candles are modelled
         report = CandleReport(
             candle=candle, symbol=self.symbol, orh=None, orl=None, zone=Zone.NEUTRAL,

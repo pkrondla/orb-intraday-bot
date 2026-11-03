@@ -122,6 +122,13 @@ def test_touch_stop_on_the_wrong_side_is_rejected() -> None:
                         stop_on="touch"), STOPS)
 
 
+def test_stop_price_lands_on_the_futures_tenth() -> None:
+    plan = plan_stop(make(entry=100.04, stop_level=None, stop_on="none"), STOPS)
+    assert plan.stop_points == 35 and plan.price_stop == 65.0
+    close = plan_stop(make(entry=100, stop_level=90.06, level=90.06), STOPS)
+    assert close.close_exit_level == 90.1 and close.price_stop == 65.0
+
+
 def test_no_structural_stop_means_hard_stop() -> None:
     plan = plan_stop(make(stop_level=None, stop_on="none"), STOPS)
     assert plan.stop_points == 35 and plan.price_stop == 112 - 35

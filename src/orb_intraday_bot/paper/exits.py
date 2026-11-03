@@ -34,6 +34,7 @@ from datetime import datetime
 
 from orb_intraday_bot.config.settings import PaperConfig
 from orb_intraday_bot.core.errors import ExitFailedError
+from orb_intraday_bot.core.ticks import futures_quote
 from orb_intraday_bot.paper.charges import order_charges
 from orb_intraday_bot.paper.models import ExitReason, Fill, Position, PositionStatus
 from orb_intraday_bot.paper.ports import PositionExecutor
@@ -216,6 +217,14 @@ def _evaluate(
 ) -> None:
     d = position.sign
     live = not bar.is_candle       # a poll's option LTP is current; a candle's touch is not
+    bar = Bar(
+        bar.time,
+        futures_quote(bar.open),
+        futures_quote(bar.high),
+        futures_quote(bar.low),
+        futures_quote(bar.close),
+        bar.is_candle,
+    )
 
     def close_all(reason: ExitReason, fut_price: float, use_live: bool) -> None:
         fill = _book(
@@ -225,7 +234,7 @@ def _evaluate(
         events.append(ExitEvent(position.position_id, bar.time, _describe(position, fill), fill))
 
     # 1. Strategy stop on futures, then the option crash net (if the broker order is missing).
-    stop = position.active_stop
+    stop = futures_quote(position.active_stop)
     stop_touched = bar.low <= stop if d > 0 else bar.high >= stop
     if stop_touched:
         gap_fill = min(bar.open, stop) if d > 0 else max(bar.open, stop)
@@ -271,17 +280,20 @@ def _evaluate(
 
     # 3. A candle close back beyond the level (close-based stops only).
     if bar.is_candle and position.close_exit_level is not None and position.is_open:
-        level = position.close_exit_level
+        level = futures_quote(position.close_exit_level)
         if (d > 0 and bar.close < level) or (d < 0 and bar.close > level):
             close_all(ExitReason.CLOSE_STOP, bar.close, True)
 
 
 def _reached(bar: Bar, level: float, d: float) -> bool:
-    return bar.high >= level if d > 0 else bar.low <= level
+    level = futures_quote(level)
+    high, low = futures_quote(bar.high), futures_quote(bar.low)
+    return high >= level if d > 0 else low <= level
 
 
 def _target_fill_price(bar: Bar, level: float, trigger: float, d: float) -> float:
     """Fill at the chart level if tagged, else at the proximity band. A gap fills at the open."""
+    level, trigger = futures_quote(level), futures_quote(trigger)
     fill = level if _reached(bar, level, d) else trigger
     return max(bar.open, fill) if d > 0 else min(bar.open, fill)
 

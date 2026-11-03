@@ -108,7 +108,7 @@ def levels_for(md: GrowwMarketData) -> SessionLevels:
 def test_levels_pivots_are_the_traditional_formula() -> None:
     lv = SessionLevels(PREV, 23095.0, 22671.0, 22984.8, CLOSE_EXCHANGE)
     assert lv.pivots() == traditional_pivots(23095.0, 22671.0, 22984.8)
-    assert lv.pivots().p == pytest.approx(22916.93, abs=0.01)    # TradingView shows 22916.9
+    assert lv.pivots().p == 22916.9    # formula 22916.933…, the tenth TradingView shows
 
 
 def test_levels_from_candles_is_the_fallback_close() -> None:

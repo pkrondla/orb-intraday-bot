@@ -11,6 +11,9 @@ H, L and C are the previous session's daily-bar values (`SessionLevels`): the hi
 the pre-open trade and the close is the exchange's closing price. The same formulas applied to
 3-minute candles (`pivots_from_session`) give levels a few points off TradingView's; that path is
 only the fallback when no `SessionLevels` are available.
+
+Each stored level is that formula rounded to the futures quote (0.1). Dividing by 3 leaves
+hundredths the tape cannot print. The one-decimal line still matches TradingView.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from orb_intraday_bot.core.models import Candle
+from orb_intraday_bot.core.ticks import futures_quote
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,17 +67,17 @@ class Pivots:
 def traditional_pivots(high: float, low: float, close: float) -> Pivots:
     p = (high + low + close) / 3
     return Pivots(
-        p=p,
-        r1=2 * p - low,
-        s1=2 * p - high,
-        r2=p + (high - low),
-        s2=p - (high - low),
-        r3=2 * p + high - 2 * low,
-        s3=2 * p + low - 2 * high,
-        r4=3 * p + high - 3 * low,
-        s4=3 * p + low - 3 * high,
-        r5=4 * p + high - 4 * low,
-        s5=4 * p + low - 4 * high,
+        p=futures_quote(p),
+        r1=futures_quote(2 * p - low),
+        s1=futures_quote(2 * p - high),
+        r2=futures_quote(p + (high - low)),
+        s2=futures_quote(p - (high - low)),
+        r3=futures_quote(2 * p + high - 2 * low),
+        s3=futures_quote(2 * p + low - 2 * high),
+        r4=futures_quote(3 * p + high - 3 * low),
+        s4=futures_quote(3 * p + low - 3 * high),
+        r5=futures_quote(4 * p + high - 4 * low),
+        s5=futures_quote(4 * p + low - 4 * high),
     )
 
 

@@ -25,6 +25,7 @@ from orb_intraday_bot.config.fingerprint import fingerprint
 from orb_intraday_bot.config.settings import StrategyConfig
 from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.core.models import Candle, Direction
+from orb_intraday_bot.core.ticks import futures_quote
 from orb_intraday_bot.engine.signal_engine import PlannedTrade
 from orb_intraday_bot.options.pricing import OptionPlan, book_lots_at_t1, safety_net_option_stop
 from orb_intraday_bot.paper.charges import order_charges
@@ -157,11 +158,14 @@ class PaperEngine:
             delta_used=plan.delta_used,
             entry_ltp=entry,
             entry_charges=order_charges("BUY", entry, quantity, self._cfg.paper.charges).total,
-            futures_entry=signal.entry_price,
-            hard_stop=trade.stop.price_stop,
-            close_exit_level=trade.stop.close_exit_level,
-            t1=trade.targets.t1,
-            t2=trade.targets.t2,
+            futures_entry=futures_quote(signal.entry_price),
+            hard_stop=futures_quote(trade.stop.price_stop),
+            close_exit_level=(
+                None if trade.stop.close_exit_level is None
+                else futures_quote(trade.stop.close_exit_level)
+            ),
+            t1=futures_quote(trade.targets.t1),
+            t2=futures_quote(trade.targets.t2),
             t1_trigger=t2_trigger_price(
                 signal.entry_price,
                 trade.targets.t1,

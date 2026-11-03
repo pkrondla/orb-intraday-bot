@@ -16,6 +16,13 @@ from tests.helpers import series
 PIV = traditional_pivots(100, 80, 90)
 
 
+def test_formula_leftover_lands_on_the_futures_tenth() -> None:
+    # R4 = 2H + C - 2L = 24315.85. The tape prints 24315.8, which is what the card shows.
+    pivots = traditional_pivots(23820.4, 23490.1, 23655.25)
+    assert pivots.r4 == 24315.8
+    assert all(value == round(value, 1) for value in pivots.levels().values())
+
+
 def test_traditional_pivot_values() -> None:
     assert PIV.p == 90
     assert (PIV.r1, PIV.s1) == (100, 80)

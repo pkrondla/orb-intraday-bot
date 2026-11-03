@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from orb_intraday_bot.config.settings import StopsConfig
 from orb_intraday_bot.core.models import Direction, Zone
 from orb_intraday_bot.core.signals import Setup, SetupSignal
+from orb_intraday_bot.core.ticks import futures_quote
 from orb_intraday_bot.indicators.pivots import Pivots
 from orb_intraday_bot.risk.stops import PlanError
 
@@ -324,6 +325,7 @@ def _runner_ceiling(
 def _plan(
     entry: float, t1: float, t2: float, t1_label: str, t2_label: str, floor: float,
 ) -> TargetPlan:
+    entry, t1, t2 = futures_quote(entry), futures_quote(t1), futures_quote(t2)
     points = abs(t1 - entry)
     if points < floor:
         raise PlanError(f"target {t1_label} is only {points:.1f} pts away")
@@ -365,13 +367,14 @@ def t2_trigger_price(
     proximity_points: float,
     min_stop_points: float,
 ) -> float:
-    """Futures price at which a target fires.
+    """Futures price at which a target fires, on the 0.1 quote.
 
     Equal to the level when proximity is 0 or the target is too close.
     """
+    entry, t2 = futures_quote(entry), futures_quote(t2)
     if proximity_points <= 0:
         return t2
     t2_pts = abs(t2 - entry)
     buf = min(proximity_points, max(0.0, t2_pts - min_stop_points))
     d = 1.0 if long else -1.0
-    return t2 - d * buf
+    return futures_quote(t2 - d * buf)

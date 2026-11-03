@@ -19,6 +19,7 @@ from orb_intraday_bot.config.settings import StopsConfig
 from orb_intraday_bot.core.errors import TradePlanError
 from orb_intraday_bot.core.models import Direction
 from orb_intraday_bot.core.signals import Setup, SetupSignal
+from orb_intraday_bot.core.ticks import futures_quote
 
 _CLOSE_THROUGH_SETUPS = frozenset({Setup.ORB_BREAKOUT, Setup.PIVOT_BREAKOUT})
 
@@ -41,7 +42,7 @@ def plan_stop(signal: SetupSignal, cfg: StopsConfig) -> StopPlan:
     hard, floor = cfg.hard_stop_points, cfg.min_stop_points
 
     if signal.stop_on == "none" or signal.stop_level is None:
-        return StopPlan(hard, entry - d * hard, None, f"standard {hard:g}-point stop")
+        return StopPlan(hard, _price(entry - d * hard), None, f"standard {hard:g}-point stop")
 
     dist = (entry - signal.stop_level) * d          # positive: the level is behind the entry
 
@@ -51,7 +52,9 @@ def plan_stop(signal: SetupSignal, cfg: StopsConfig) -> StopPlan:
                 f"stop level {signal.stop_level} is not behind the entry {entry}"
             )
         points = max(floor, min(hard, dist))
-        return StopPlan(points, entry - d * points, None, _basis(dist, hard, floor, "level"))
+        return StopPlan(
+            points, _price(entry - d * points), None, _basis(dist, hard, floor, "level")
+        )
 
     # stop_on == "close": ORB, R2/S2 as OR, additional ORB whipsaw.
     # Notes: close back through the level, or max 35 points, whichever first.
@@ -62,7 +65,13 @@ def plan_stop(signal: SetupSignal, cfg: StopsConfig) -> StopPlan:
     basis = f"close through {signal.level_name} or {hard:g}-pt hard stop"
     if dist <= 0:
         basis += f"; entry is already beyond the level {signal.stop_level}"
-    return StopPlan(hard, entry - d * hard, signal.stop_level, basis)
+    level = None if signal.stop_level is None else _price(signal.stop_level)
+    return StopPlan(hard, _price(entry - d * hard), level, basis)
+
+
+def _price(value: float) -> float:
+    """Futures stop and close-through level on the quote the tape can print."""
+    return futures_quote(value)
 
 
 def _basis(dist: float, hard: float, floor: float, what: str) -> str:
