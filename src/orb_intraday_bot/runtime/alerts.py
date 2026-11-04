@@ -5,11 +5,15 @@ place and a second channel is a change here only.
 
 A quiet candle is not sent. Decision alerts (opening-range levels, a zone change, a new SIGN,
 a failed or cancelled pattern, a blocked signal) are. OPENED and SL / T1 exits are HTML
-cards; other exits use the same card with the reason as the heading.
-`notify_candle_reports` still adds the full per-candle report on top.
+cards; other exits use the same card with the reason as the heading. A reward step (every
+0.5R up to T1, then T2 when a runner remains) is a separate card and does not sell.
+`notify_candle_reports` still adds the full
+per-candle report on top.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from orb_intraday_bot.core.models import Zone
 from orb_intraday_bot.core.signals import PatternKind
@@ -21,7 +25,9 @@ from orb_intraday_bot.runtime.report import (
     format_exit_alert,
     format_opened_alert,
     format_outcome,
+    format_reward_alert,
 )
+from orb_intraday_bot.runtime.reward import RewardProgress
 
 # CONFIRMED is omitted: the OPENED or BLOCKED line for that candle already says the signal fired.
 _PATTERN_ALERTS = frozenset({
@@ -132,6 +138,11 @@ class Alerts:
 
     def exit(self, event: ExitEvent) -> None:
         self._notifier.send(as_telegram_html(format_exit_alert(event)))
+
+    def reward(self, progress: RewardProgress, when: datetime) -> bool:
+        """Queue the rung card. False means it was not queued, so the caller must not latch it."""
+        sent = self._notifier.send(as_telegram_html(format_reward_alert(progress, when)))
+        return sent is not False
 
     def day_end(self, text: str) -> None:
         self._notifier.send(text)

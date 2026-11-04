@@ -105,6 +105,8 @@ runtime:                       # live run timing and monitoring
   no_session_exit_time: "09:45"  # no candles by then: treat as a holiday and exit
   heartbeat_file: heartbeat.json
   notify_candle_reports: false # true = also send every candle report (decisions are always sent)
+  reward_alerts: true          # Telegram on the way to the target; the bot does not sell
+  reward_step: 0.5               # every 0.5R from entry through T1, then through T2 if a runner remains
 
 enabled_setups:
   orb: true

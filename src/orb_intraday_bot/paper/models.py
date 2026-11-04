@@ -96,6 +96,9 @@ class Position:
     t2_trigger: float | None = None  # T2 fires here (proximity band); None = exact t2
     t1_trigger: float | None = None  # T1 fires here (proximity band); None = exact t1
     t1_done: bool = False
+    # Highest reward step already sent (0.5, 1, 1.5, ... up to T1 or T2). 0 means
+    # none. Survives a restart so the same rung is not sent again. It does not change the exit.
+    reward_rung_sent: float = 0.0
     breakeven_after_t1: bool = True   # leftover runner: futures stop moves to entry after T1
     strategy_hash: str = ""           # the rules this trade was opened under (config.fingerprint)
     stop_at_entry: bool = False

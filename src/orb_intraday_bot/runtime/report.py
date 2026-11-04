@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from html import escape
 
 from orb_intraday_bot.core.clock import IST
@@ -17,6 +17,7 @@ from orb_intraday_bot.paper.report import (
     format_summary,
 )
 from orb_intraday_bot.runtime.day import CandleReport, SignalOutcome
+from orb_intraday_bot.runtime.reward import RewardProgress
 
 _NAMED_LEVEL = re.compile(r"\b(ORH|ORL|R[1-5]|S[1-5]|P)\b")
 _CAPPED_LEVEL = re.compile(r"capped at (ORH|ORL|R[1-5]|S[1-5]|P)\b")
@@ -236,6 +237,45 @@ def format_outcome(
 
 def format_exit(event: ExitEvent) -> str:
     return f"EXIT {event.time:%H:%M:%S} {event.message}"
+
+
+def _rung_label(rung: float) -> str:
+    text = f"{rung:.2f}".rstrip("0").rstrip(".")
+    return f"{text}R"
+
+
+def format_reward_line(progress: RewardProgress) -> str:
+    """One log line. The bot has not sold."""
+    pos = progress.position
+    labels = ", ".join(_rung_label(rung) for rung in progress.crossed)
+    return (
+        f"REWARD {labels} {pos.trading_symbol} profit Rs {progress.gross_inr:,.0f} "
+        f"({progress.multiple:.2f}R), bot has not sold"
+    )
+
+
+def format_reward_alert(progress: RewardProgress, when: datetime) -> str:
+    """Telegram card for a reward rung. HTML; the position stays open."""
+    pos = progress.position
+    labels = ", ".join(_rung_label(rung) for rung in progress.crossed)
+    stamp = when.astimezone(IST).strftime("%H:%M:%S IST")
+    symbol = escape(pos.trading_symbol)
+    booked = ""
+    if pos.fills:
+        booked = f"\nincludes Rs {pos.gross_option_pnl:,.0f} already booked"
+    return (
+        f"💰 <b>REWARD</b>  <code>{stamp}</code>\n"
+        f"<b>{escape(labels)}</b> reached\n"
+        f"<code>{symbol}</code>\n"
+        f"{escape(pos.setup)} · {escape(pos.level_name)} · {escape(pos.direction.value)}\n"
+        f"{pos.remaining_lots}/{pos.lots} lot(s) still open\n"
+        f"\nentry <code>{pos.entry_ltp:.2f}</code>   "
+        f"now <code>{progress.option_price:.2f}</code>\n"
+        f"profit Rs {progress.gross_inr:,.0f}{booked}\n"
+        f"1R is Rs {progress.risk_inr:,.0f}  (now {progress.multiple:.2f}R)\n"
+        f"\nBot has not sold. <code>/exit {symbol}</code>\n"
+        f"Stop and targets are unchanged."
+    )
 
 
 _SL_REASONS = frozenset({

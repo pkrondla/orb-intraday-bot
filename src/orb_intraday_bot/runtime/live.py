@@ -11,7 +11,9 @@ What it does, in plain terms:
   candles, restores open positions from the database, and applies the missed candles to them. A
   signal that fired while it was not running is shown as MISSED and never entered late.
 - While a position is open it polls the futures and option prices every few seconds, so stops and
-  targets are checked on live prices as well as at each candle close.
+  targets are checked on live prices as well as at each candle close. The same poll sends a
+  Telegram note every 0.5R of open profit on the way to T1, and on to T2 when a runner
+  remains. That note does not sell.
 - Errors fetching data are retried and alerted (watchdog). An error in the strategy code stops the
   run (positions are saved; restart to continue).
 - Paper mode never places an order. With an executor (the dry run, or live trading when armed
@@ -50,7 +52,13 @@ from orb_intraday_bot.runtime.monitor import (
     write_heartbeat,
 )
 from orb_intraday_bot.runtime.notify import Notifier
-from orb_intraday_bot.runtime.report import format_candle_report, format_day_end, format_exit
+from orb_intraday_bot.runtime.report import (
+    format_candle_report,
+    format_day_end,
+    format_exit,
+    format_reward_line,
+)
+from orb_intraday_bot.runtime.reward import pending_reward_alerts
 from orb_intraday_bot.storage.store import TradeStore
 
 EntriesAllowed = Callable[[], bool]
@@ -517,6 +525,21 @@ class LiveRunner:
         for event in trading.paper.on_tick(now, futures, options):
             self._out("  " + format_exit(event))
             self._alerts.exit(event)
+        self._reward_alerts(trading, options)
+
+    def _reward_alerts(self, trading: TradingDay, options: dict[str, float]) -> None:
+        """Tell the operator a rung was reached. Catch-up candles never call this."""
+        cfg = self._cfg.runtime
+        if not cfg.reward_alerts:
+            return
+        now = self._clock.now()
+        for progress in pending_reward_alerts(
+            trading.paper.open_positions, options, cfg.reward_step
+        ):
+            if not self._alerts.reward(progress, now):
+                continue
+            self._out("  " + format_reward_line(progress))
+            trading.paper.mark_reward_alerted(progress.position, progress.latch, now)
 
     def _wait_until(self, target: datetime) -> None:
         interval = self._cfg.runtime.poll_interval_sec

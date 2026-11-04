@@ -73,6 +73,7 @@ class FakeSource(SyntheticOptions):
         self.candles = candles
         self.fail_fetches = 0
         self.price_override: tuple[datetime, float] | None = None
+        self.option_ltp = 150.0
 
     def futures_contract(self, today: date | None = None) -> FuturesContract:
         return CONTRACT
@@ -101,7 +102,8 @@ class FakeSource(SyntheticOptions):
         if self.price_override and self.clock.now() >= self.price_override[0]:
             price = self.price_override[1]
         return {
-            s: (price if s == CONTRACT.trading_symbol else 150.0) for s in trading_symbols
+            s: (price if s == CONTRACT.trading_symbol else self.option_ltp)
+            for s in trading_symbols
         }
 
 

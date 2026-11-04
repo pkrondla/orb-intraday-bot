@@ -248,6 +248,11 @@ class RuntimeConfig(BaseModel):
     no_session_exit_time: str = "09:45"                     # no candles by then: holiday, exit
     heartbeat_file: str = "heartbeat.json"                  # inside DATA_DIR
     notify_candle_reports: bool = False                     # also send every candle report
+    # Telegram every `reward_step` R of open profit, from the entry through the
+    # planned profit at T1. When a runner is left for T2, the steps continue to T2.
+    # The bot does not sell.
+    reward_alerts: bool = True
+    reward_step: float = Field(default=0.5, gt=0, le=10)
 
 
 class EnabledSetups(BaseModel):

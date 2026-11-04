@@ -323,6 +323,13 @@ class PaperEngine:
             looked.append(position)
         return looked
 
+    def mark_reward_alerted(self, position: Position, rung: float, now: datetime) -> None:
+        """Remember a reward rung that was sent. Does not change stops, targets, or lots."""
+        if rung <= position.reward_rung_sent:
+            return
+        position.reward_rung_sent = rung
+        self._save(position, now)
+
     def mark_to_market(
         self, futures_price: float, option_ltps: Mapping[str, float] | None = None
     ) -> list[tuple[Position, float]]:
