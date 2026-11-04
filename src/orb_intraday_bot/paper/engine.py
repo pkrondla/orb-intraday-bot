@@ -188,6 +188,7 @@ class PaperEngine:
             t1_book_lots=t1_book_lots,
             remaining_lots=lots,
             breakeven_after_t1=self._cfg.targets.move_sl_to_entry_after_t1,
+            r_ladder=self._cfg.targets.r_ladder,
             strategy_hash=self._strategy_hash,
             flags=list(plan.flags),
             notes=[

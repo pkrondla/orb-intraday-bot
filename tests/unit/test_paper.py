@@ -25,6 +25,7 @@ from orb_intraday_bot.paper.report import (
 )
 from orb_intraday_bot.risk.stops import StopPlan
 from orb_intraday_bot.risk.targets import TargetPlan
+from orb_intraday_bot.runtime.report import format_exit_alert
 from orb_intraday_bot.storage.store import TradeStore
 from tests.helpers import DAY, at
 
@@ -242,12 +243,13 @@ def test_target_and_stop_hit_on_the_tenth_the_card_shows() -> None:
     assert hit[0].fill.futures_price == pytest.approx(23784.8)
 
     # 23784.86 prints as 23784.9. A high of 23784.8 is still short of it.
+    # The same high is many R above the 22800 fill, so the ladder locks for the next bar.
     short_of = opened()
     short_of.t1 = short_of.t2 = 23787.86
     short_of.t1_trigger = short_of.t2_trigger = 23784.86
-    assert evaluate_bar(
-        short_of, bar(13, 18, 23770, 23784.8, 23760, 23780), None, CFG.paper
-    ) == []
+    moved = evaluate_bar(short_of, bar(13, 18, 23770, 23784.8, 23760, 23780), None, CFG.paper)
+    assert short_of.is_open and short_of.fills == []
+    assert moved and moved[0].fill is None and "R reached" in moved[0].message
 
     # A long stop stored as 22764.04 prints as 22764.0, so a low of 22764.0 stops it.
     stopped = opened()
@@ -347,6 +349,85 @@ def test_short_trade_mirrors_stops_and_targets() -> None:
     evaluate_bar(p, bar(9, 36, 22750, 22760, 22695, 22710), None, CFG.paper)
     assert reasons(p) == [ExitReason.T1]
     assert not p.is_open
+
+
+def _far_target(direction: Direction = Direction.LONG, config: StrategyConfig = CFG) -> Position:
+    p = opened(direction, config)
+    p.t1 = p.t2 = p.futures_entry + p.sign * 400
+    p.t1_trigger = p.t2_trigger = p.t1
+    return p
+
+
+def test_two_r_moves_the_stop_to_entry_from_the_next_bar() -> None:
+    p = _far_target()
+    events = evaluate_bar(p, bar(9, 36, 22800, 22870, 22840, 22860), None, CFG.paper)
+    assert p.is_open and p.active_stop == pytest.approx(22800)
+    assert p.crash_net == pytest.approx(105.0)
+    assert events[0].fill is None and "2R reached: stop moved to entry" in events[0].message
+    card = format_exit_alert(events[0])
+    assert "<b>SL</b>" in card and "stop moved to entry" in card and "22800.0" in card
+    stopped = evaluate_bar(p, bar(9, 39, 22820, 22830, 22800, 22810), None, CFG.paper)
+    fill = stopped[0].fill
+    assert fill is not None and fill.reason is ExitReason.BREAKEVEN_STOP
+    assert fill.futures_price == pytest.approx(22800)
+
+
+def test_one_r_does_not_move_the_stop() -> None:
+    p = _far_target()
+    assert evaluate_bar(p, bar(9, 36, 22800, 22835, 22810, 22820), None, CFG.paper) == []
+    assert p.ladder_stop == 0 and p.active_stop == pytest.approx(22765)
+
+
+def test_three_r_locks_two_r_and_a_later_touch_exits_there() -> None:
+    p = _far_target()
+    evaluate_bar(p, bar(9, 36, 22800, 22870, 22840, 22860), None, CFG.paper)
+    events = evaluate_bar(p, bar(9, 39, 22860, 22905, 22850, 22890), None, CFG.paper)
+    assert p.is_open and p.active_stop == pytest.approx(22870)
+    assert "3R reached: stop moved to 2R" in events[0].message
+    stopped = evaluate_bar(p, bar(9, 42, 22890, 22890, 22870, 22875), None, CFG.paper)
+    fill = stopped[0].fill
+    assert fill is not None and fill.reason is ExitReason.R_LADDER
+    assert fill.futures_price == pytest.approx(22870)
+
+
+def test_a_same_candle_wick_through_the_new_rung_is_not_a_stop() -> None:
+    p = _far_target()
+    events = evaluate_bar(p, bar(9, 36, 22800, 22905, 22820, 22840), None, CFG.paper)
+    assert p.is_open and p.fills == []
+    assert p.active_stop == pytest.approx(22870)
+    assert all(e.fill is None for e in events)
+
+
+def test_four_r_in_one_bar_locks_three_r() -> None:
+    p = _far_target()
+    evaluate_bar(p, bar(9, 36, 22800, 22940, 22820, 22920), None, CFG.paper)
+    assert p.active_stop == pytest.approx(22905)
+
+
+def test_a_stop_on_the_same_candle_wins_over_the_new_rung() -> None:
+    p = _far_target()
+    evaluate_bar(p, bar(9, 36, 22800, 22870, 22760, 22770), None, CFG.paper)
+    assert reasons(p) == [ExitReason.HARD_STOP]
+    assert p.ladder_stop == 0
+
+
+def test_short_ladder_locks_entry_then_one_r_behind() -> None:
+    p = _far_target(Direction.SHORT)
+    evaluate_bar(p, bar(9, 36, 22800, 22790, 22730, 22750), None, CFG.paper)
+    assert p.active_stop == pytest.approx(22800)
+    evaluate_bar(p, bar(9, 39, 22750, 22760, 22695, 22710), None, CFG.paper)
+    assert p.active_stop == pytest.approx(22730)
+    stopped = evaluate_bar(p, bar(9, 42, 22720, 22730, 22710, 22715), None, CFG.paper)
+    fill = stopped[0].fill
+    assert fill is not None and fill.reason is ExitReason.R_LADDER
+    assert fill.futures_price == pytest.approx(22730)
+
+
+def test_r_ladder_can_be_turned_off() -> None:
+    cfg = StrategyConfig.model_validate({"targets": {"r_ladder": False}})
+    p = _far_target(config=cfg)
+    assert evaluate_bar(p, bar(9, 36, 22800, 22905, 22840, 22890), None, cfg.paper) == []
+    assert p.ladder_stop == 0 and p.active_stop == pytest.approx(22765)
 
 
 def test_short_close_stop_needs_a_close_above_the_level() -> None:

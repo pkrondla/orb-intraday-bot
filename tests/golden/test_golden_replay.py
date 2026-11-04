@@ -66,5 +66,5 @@ def test_golden_covers_a_real_range_of_behaviour() -> None:
         for fill in position["fills"]
     }
     # Stops, a target and the end-of-day exit all appear, so a refactor of any exit path is seen.
-    assert {"HARD_STOP", "T1"} <= reasons
+    assert {"HARD_STOP", "T1", "R_LADDER"} <= reasons
     assert any("EOD" in r or "END" in r for r in reasons)

@@ -26,6 +26,7 @@ targets:
   t1_rule: nearest_pivot_else_half   # retired: T1 is the notes Target
   t1_book_fraction: 0.5              # retired: 1 lot all at T1; 2+ leave one runner for T2
   move_sl_to_entry_after_t1: true    # leftover runner: futures stop to entry after T1
+  r_ladder: true                     # 2R locks entry; each later whole R locks one R behind
   t1_max_distance_points: null       # retired: T1 is not pulled in
   t2_proximity_points: 3             # T1 fires this many pts in front of the level (0 = exact, max 5)
 

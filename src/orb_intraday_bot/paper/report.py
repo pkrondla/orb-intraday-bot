@@ -43,6 +43,14 @@ def summarize(day: date, positions: Iterable[Position]) -> DaySummary:
     )
 
 
+def _stop_note(position: Position) -> str:
+    if position.ladder_stop > 0:
+        return " (R ladder)"
+    if position.stop_at_entry:
+        return " (at entry)"
+    return ""
+
+
 def format_open_position(position: Position, futures_price: float, option_price: float) -> str:
     move = position.sign * (futures_price - position.futures_entry)
     t2 = (
@@ -56,7 +64,7 @@ def format_open_position(position: Position, futures_price: float, option_price:
         f"now {option_price:.2f} | futures {futures_price:.1f} ({move:+.1f} pts) | "
         f"open P&L Rs {position.unrealized(option_price):+,.0f} | "
         f"stop {position.active_stop:.1f}"
-        f"{' (at entry)' if position.stop_at_entry else ''} T1 {position.t1:.1f}{t2}"
+        f"{_stop_note(position)} T1 {position.t1:.1f}{t2}"
     )
 
 

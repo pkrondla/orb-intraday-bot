@@ -6,6 +6,20 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-04
+
+### Changed
+- Futures R ladder. 1R is the distance from the fill to the hard stop. At 2R the
+  futures stop moves to the entry price. Each later whole R leaves the stop one
+  whole R behind. 1R does not move it. The new price is used from the next bar,
+  and a same-candle return through the old stop is still that old stop. The
+  Groww crash net is not raised. `targets.r_ladder` (default on).
+- Golden replay: 225 → 230 trades, fill-points 2452.5 → 2762.4, charges
+  24979.17 → 25969.58. Signals stay 545. Sixteen sessions move. A trade that
+  reaches 2R and comes back now scratches at entry, and a later rung stops one
+  whole R behind; some of those used to stay open until the close. Five extra
+  trades appear where that earlier exit freed the book.
+
 ## [0.25.0] - 2026-11-04
 
 ### Changed

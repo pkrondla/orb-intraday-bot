@@ -237,6 +237,8 @@ An open paper trade is closed by the first of these:
 5. The mandatory pivot exits: R2 or S2 touched (T1 for a trade entered below them), and R4 or S4 for trades on a broken R2 or S2.
 6. End of day at 15:30 IST.
 
+Once the trade has 2R of room in futures points (the distance from the fill to the hard stop), the futures stop moves to the entry price. Each later whole R moves it to one whole R behind the rung just reached. 1R does not move it. The new price is used from the next bar. The broker crash net is not raised. A candle that both prints a new rung and trades back through the stop already in force is a stop at that old price.
+
 Exit checks run on the live futures price where available, and always at candle close.
 
 ## 8. Paper-Trading Output
@@ -314,6 +316,7 @@ These are intentional, because the notes win:
    - **Candle-close exit:** a close strictly beyond the level exits at that close. A close exactly on the level does not. Live polls never trigger it.
    - **Entry timing:** a position opens at the close of the signal candle and is first checked on the next candle. Anything the signal candle did after the entry price traded is not checked (an unavoidable blind spot at candle granularity).
    - **T1 / T2:** T1 books all but one lot (or all, if one lot or no T2 room), including when the extreme comes within `t2_proximity_points` of T1. The runner exits at T2 the same way. After T1 the futures stop moves to entry; the crash net does not.
+   - **R ladder (`targets.r_ladder`):** 1R is the futures distance from the fill to the hard stop, not the option-rupee reward card. At 2R the futures stop moves to entry. At 3R it moves to 2R, at 4R to 3R, and so on. The new price applies from the next bar or poll and only tightens the stop. The crash net stays where it was placed.
    - **End of day:** open positions close at the close of the 15:27 candle (15:30), at the live LTP if given.
    - **Fill prices:** a live poll fills at the live option LTP. A replay, or a touch inside a closed candle, models the option price as `entry + sign x futures move x delta`. Slippage (`paper.slippage_option_points`, default 0) is paid on entry and on every exit.
    - **Charges** (`paper.charges`, all assumptions): brokerage the lower of Rs 20 and 0.1% per order, STT 0.15% on the sell side, exchange 0.03503%, SEBI 0.0001%, stamp 0.003% on the buy side, GST 18% on brokerage, exchange and SEBI. Check them against a Groww contract note.

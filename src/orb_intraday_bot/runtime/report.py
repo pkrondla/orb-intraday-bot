@@ -273,20 +273,23 @@ def format_reward_alert(progress: RewardProgress, when: datetime) -> str:
         f"now <code>{progress.option_price:.2f}</code>\n"
         f"profit Rs {progress.gross_inr:,.0f}{booked}\n"
         f"1R is Rs {progress.risk_inr:,.0f}  (now {progress.multiple:.2f}R)\n"
-        f"\nBot has not sold. <code>/exit {symbol}</code>\n"
-        f"Stop and targets are unchanged."
+        f"\nBot has not sold. <code>/exit {symbol}</code>"
     )
 
 
 _SL_REASONS = frozenset({
     ExitReason.HARD_STOP,
     ExitReason.BREAKEVEN_STOP,
+    ExitReason.R_LADDER,
     ExitReason.CLOSE_STOP,
     ExitReason.OPTION_STOP,
     ExitReason.BROKER_STOP,
 })
 _T1_MOVED = re.compile(
     r"T1 reached: stop moved to entry \(futures ([0-9.]+), option ([0-9.]+)\)"
+)
+_LADDER_MOVED = re.compile(
+    r"(\d+)R reached: stop moved to (.+?) \(futures ([0-9.]+)\)"
 )
 
 
@@ -297,6 +300,8 @@ def _exit_stamp(event: ExitEvent) -> str:
 def _exit_heading(reason: ExitReason | None, message: str) -> tuple[str, str]:
     if reason is ExitReason.T1 or (reason is None and "T1 reached" in message):
         return "🟡", "T1"
+    if reason is None and "R reached: stop moved" in message:
+        return "🔴", "SL"
     if reason is ExitReason.T2:
         return "🟢", "T2"
     if reason is ExitReason.ORB_REVERSE:
@@ -334,6 +339,11 @@ def format_exit_alert(event: ExitEvent) -> str:
             f"      option <code>{float(moved.group(2)):.2f}</code>   "
             f"fut <code>{float(moved.group(1)):.1f}</code>"
         )
+        return "\n".join(lines)
+    ladder = _LADDER_MOVED.search(event.message)
+    if ladder:
+        lines.append(f"      {ladder.group(1)}R: stop moved to {escape(ladder.group(2))}")
+        lines.append(f"      fut <code>{float(ladder.group(3)):.1f}</code>")
         return "\n".join(lines)
     rest = event.message.split(" ", 1)[1] if " " in event.message else event.message
     lines.append(escape(rest))

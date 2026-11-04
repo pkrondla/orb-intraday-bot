@@ -238,8 +238,7 @@ def _evaluate(
     stop_touched = bar.low <= stop if d > 0 else bar.high >= stop
     if stop_touched:
         gap_fill = min(bar.open, stop) if d > 0 else max(bar.open, stop)
-        reason = ExitReason.BREAKEVEN_STOP if position.stop_at_entry else ExitReason.HARD_STOP
-        close_all(reason, gap_fill, live)
+        close_all(_stop_reason(position), gap_fill, live)
         return
     if option_ltp is not None and option_ltp <= position.active_option_stop:
         close_all(ExitReason.OPTION_STOP, bar.close, True)
@@ -283,6 +282,54 @@ def _evaluate(
         level = futures_quote(position.close_exit_level)
         if (d > 0 and bar.close < level) or (d < 0 and bar.close > level):
             close_all(ExitReason.CLOSE_STOP, bar.close, True)
+            return
+
+    # 4. R ladder. The new stop is not used on this bar: a wick that both prints the
+    # rung and trades back through the old stop is a stop at the old price.
+    _advance_r_ladder(position, bar, events)
+
+
+def _stop_reason(position: Position) -> ExitReason:
+    stop = futures_quote(position.active_stop)
+    ladder = futures_quote(position.ladder_stop) if position.ladder_stop > 0 else 0.0
+    if ladder and abs(ladder - stop) <= position.tick_size / 2:
+        entry = futures_quote(position.futures_entry)
+        if abs(stop - entry) <= position.tick_size / 2:
+            return ExitReason.BREAKEVEN_STOP
+        return ExitReason.R_LADDER
+    if position.stop_at_entry:
+        return ExitReason.BREAKEVEN_STOP
+    return ExitReason.HARD_STOP
+
+
+def _advance_r_ladder(position: Position, bar: Bar, events: list[ExitEvent]) -> None:
+    """Lock entry at 2R, then one whole futures R behind each later rung. Never loosens."""
+    if not position.r_ladder or not position.is_open:
+        return
+    entry = futures_quote(position.futures_entry)
+    one_r = abs(entry - futures_quote(position.hard_stop))
+    if one_r < position.tick_size:
+        return
+    extreme = bar.high if position.sign > 0 else bar.low
+    reached = int((position.sign * (extreme - entry) + 1e-6) / one_r)
+    if reached < 2:
+        return
+    locked = 0 if reached == 2 else reached - 1
+    new_stop = futures_quote(entry + position.sign * locked * one_r)
+    current = futures_quote(position.active_stop)
+    tighter = new_stop > current + 1e-9 if position.sign > 0 else new_stop < current - 1e-9
+    if not tighter:
+        return
+    position.ladder_stop = new_stop
+    where = "entry" if locked == 0 else f"{locked}R"
+    events.append(
+        ExitEvent(
+            position.position_id,
+            bar.time,
+            f"{position.trading_symbol} {reached}R reached: stop moved to {where} "
+            f"(futures {new_stop:.1f})",
+        )
+    )
 
 
 def _reached(bar: Bar, level: float, d: float) -> bool:
