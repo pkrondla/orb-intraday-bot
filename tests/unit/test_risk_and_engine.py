@@ -279,17 +279,17 @@ def test_range_target_without_pivots_uses_the_signal_price() -> None:
 OCT26 = traditional_pivots(22851.5, 22435.0, 22576.6)
 
 
-def test_neutral_zone_3ll_t1_is_p() -> None:
+def test_neutral_zone_3ll_uses_the_35_point_structure_target() -> None:
+    # Inside the range. ORH is 29 pts ahead, under the 35-pt hard stop, so T1 is P.
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, entry=22546.4, stop_level=22500.0, stop_on="touch",
         target_ref="R2", level_name="3LL", level=22500.0,
     )
-    t = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
-    assert t.t1 == pytest.approx(22621.0333, abs=0.05) and t.t1_basis.startswith("P")
-    assert t.t2 == pytest.approx(t.t1 + (22575.0 - 22444.6), abs=0.05)
-    setup = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS)
-    assert setup.t1 == pytest.approx(22621.0333, abs=0.05) and "after ORH" in setup.t1_basis
-    assert setup.t2 != setup.t1
+    neutral = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
+    plain = plan_targets(sig, OCT26, 22575.0, 22444.6, STOPS)
+    assert neutral == plain
+    assert neutral.t1 == pytest.approx(22621.0, abs=0.05) and neutral.t1_basis == "P"
+    assert neutral.t2 == pytest.approx(22807.1, abs=0.05) and neutral.t2_basis == "R1"
 
 
 def test_neutral_zone_short_t1_is_p() -> None:
@@ -328,47 +328,65 @@ def test_bullish_and_bearish_zones_keep_the_setup_targets() -> None:
     assert short.t1 == 60 and short.t2 == 45               # 60 − 15; S3 40 is farther
 
 
-def test_structure_short_above_orh_targets_orh_then_orl() -> None:
-    # 2 Nov 2026 2HH short between R3 and ORH: S2 was 524 pts away.
+def test_structure_short_above_orh_targets_the_nearest_pivot_past_35() -> None:
+    # ORH is 10 pts below and is not a candidate once the fill is above the range.
+    # R1 is 30 pts away, P is the first pivot with 35 pts of room.
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT,
-        entry=23382.0, stop_level=23407.5, stop_on="touch",
-        target_ref="S2", level_name="2HH", level=23407.5,
+        entry=150.0, stop_level=185.0, stop_on="touch",
+        target_ref="S2", level_name="2HH", level=185.0,
     )
-    t = plan_targets(sig, WIDE, 23344.4, 23241.0, STOPS, zone=Zone.BULLISH)
-    assert t.t1 == pytest.approx(23344.4) and t.t1_basis == "ORH"
-    assert t.t2 == pytest.approx(23241.0) and t.t2_basis == "ORL"
+    t = plan_targets(sig, WIDE, 140.0, 90.0, STOPS, zone=Zone.BULLISH)
+    assert t.t1 == 100 and t.t1_basis == "P"
+    assert t.t2 == 80 and t.t2_basis == "S1"
 
 
-def test_structure_short_inside_or_targets_pivot_after_orl() -> None:
+def test_structure_short_inside_or_skips_a_close_orl_and_close_pivots() -> None:
+    # ORL 13 pts, P 8, S1 28. S2 at 48 is the first line with 35 pts of room.
+    # S2 also closes the short, so there is no runner beyond it.
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT,
         entry=108.0, stop_level=118.0, stop_on="touch",
         target_ref="S2", level_name="2HH", level=118.0,
     )
     t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BULLISH)
-    assert t.t1 == 80 and t.t1_basis.startswith("S1")
-    assert "after ORL" in t.t1_basis
+    assert t.t1 == 60 and t.t1_basis == "S2"
+    assert t.t2 == 60
 
 
-def test_structure_long_inside_or_targets_pivot_after_orh() -> None:
+def test_structure_short_inside_or_takes_orl_when_it_has_35_points() -> None:
+    # R1 is 30 pts away. ORL and P both sit 50 pts away; the edge keeps the label.
+    sig = make(
+        setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT,
+        entry=150.0, stop_level=185.0, stop_on="touch",
+        target_ref="S2", level_name="3HH", level=185.0,
+    )
+    t = plan_targets(sig, WIDE, 160.0, 100.0, STOPS, zone=Zone.BULLISH)
+    assert t.t1 == 100 and t.t1_basis == "ORL"
+    assert t.t2 == 80 and t.t2_basis == "S1"
+
+
+def test_structure_long_inside_or_skips_orh_inside_the_hard_stop() -> None:
+    # ORH is 10 pts ahead, R1 is 20. R2 at 40 is the first line with 35 pts of room,
+    # and it is also the mandatory long exit, so T2 does not go on to R3.
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, entry=100.0, stop_level=90.0, stop_on="touch",
         target_ref="R2", level_name="2LL", level=90.0,
     )
     t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BEARISH)
-    assert t.t1 == 120 and t.t1_basis.startswith("R1")
-    assert "after ORH" in t.t1_basis
+    assert t.t1 == 140 and t.t1_basis == "R2"
+    assert t.t2 == 140
 
 
-def test_structure_long_below_orl_targets_orl_then_orh() -> None:
+def test_structure_long_below_orl_targets_the_nearest_pivot_past_35() -> None:
+    # ORL is behind a long that has already left the range. P is only 20 pts ahead.
     sig = make(
         setup=Setup.STRUCTURE_WHIPSAW, entry=80.0, stop_level=70.0, stop_on="touch",
         target_ref="R2", level_name="2LL", level=70.0,
     )
     t = plan_targets(sig, WIDE, 110.0, 95.0, STOPS, zone=Zone.BEARISH)
-    assert t.t1 == pytest.approx(95.0) and t.t1_basis == "ORL"
-    assert t.t2 == pytest.approx(110.0) and t.t2_basis == "ORH"
+    assert t.t1 == 120 and t.t1_basis == "R1"
+    assert t.t2 == 140 and t.t2_basis == "R2"
 
 
 # ---- sizing --------------------------------------------------------------------------------
@@ -430,7 +448,8 @@ def test_engine_applies_neutral_zone_targets() -> None:
     res = engine().evaluate(bar(100), [sig], 110, 95)
     assert res.zone is Zone.NEUTRAL
     t = res.accepted[0].targets
-    assert t.t1 == pytest.approx(120) and t.t1_basis.startswith("R1")
+    # R1 is 20 pts away, inside the 35-pt hard stop. R2 is the first line with room.
+    assert t.t1 == pytest.approx(140) and t.t1_basis == "R2"
     assert t.t2 == t.t1
 
 

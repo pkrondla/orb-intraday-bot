@@ -6,6 +6,20 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-04
+
+### Changed
+- 2HH/3HH and 2LL/3LL no longer use the neutral-zone scalp, ORH/ORL as a pair, or
+  the first pivot 10 points past the far edge of the opening range. The notes name
+  no target for these patterns. Above ORH or below ORL, T1 is the nearest pivot at
+  least 35 points in front. Inside the range, ORL (short) or ORH (long) is included,
+  and any nearer line inside 35 points is skipped. T2 is the next pivot beyond T1.
+  S2 still closes a short and R2 still closes a long.
+- Golden replay: 224 → 225 trades, fill-points 2486.2 → 2452.5, charges
+  24736.34 → 24979.17. Thirty sessions move. Structure trades book the 35-point
+  line instead of the old opening-range pair or the pivot 10 points past it, and
+  a later trade on those days moves with the open position.
+
 ## [0.24.0] - 2026-11-03
 
 ### Changed

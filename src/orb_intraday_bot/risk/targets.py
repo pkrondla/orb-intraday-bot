@@ -14,11 +14,11 @@ T2 is T1 ± OR-range (ORH − ORL), or the nearer pivot still beyond T1, capped 
 room (OR unset, or closer than `min_stop_points`), T2 = T1 and the whole position
 closes at T1.
 
-A 2HH/3HH short whose entry is still above ORH (the 2 Nov 2026 case between R3 and
-ORH) does not aim at S2. T1 is ORH, T2 is ORL. The long mirror: 2LL/3LL below ORL
-aims at ORL then ORH. Inside the range, T1 is the first pivot at least 10 pts past
-ORL (short) or ORH (long), not S2/R2. Neutral-zone structure still scalps to the
-nearest in-zone pivot.
+A 2HH/3HH short or 2LL/3LL long does not use the neutral-zone scalp. Above ORH or
+below ORL, T1 is the nearest pivot at least `hard_stop_points` (35) in front.
+Inside the range, ORL (short) or ORH (long) joins that list. A nearer line inside
+35 points is skipped. T2 is the next pivot beyond T1. S2/R2 still close the
+position, so a target beyond them is pulled back to that level.
 
 T1 is capped by the mandatory exits: a trade entered below R2 never has T1 beyond it;
 trades on a broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond R2) have T1 at
@@ -67,6 +67,8 @@ def plan_targets(
     zone: Zone | None = None,
 ) -> TargetPlan:
     _ = t1_max_points  # retired: T1 is the notes target, not a pulled-in scalp
+    if signal.setup is Setup.STRUCTURE_WHIPSAW:
+        return _structure_targets(signal, pivots, orh, orl, stops)
     if zone is Zone.NEUTRAL:
         t1_plan = _neutral_t1(signal, pivots, stops)
         return _attach_runner(
@@ -74,15 +76,6 @@ def plan_targets(
             long=signal.direction is Direction.LONG, floor=stops.min_stop_points,
             orh=orh, orl=orl, pivots=pivots, setup=signal.setup, zone=zone,
         )
-
-    or_plan = _structure_beyond_or(signal, orh, orl, stops.min_stop_points)
-    if or_plan is not None:
-        return or_plan
-    inside = _structure_inside_or(
-        signal, orh, orl, pivots, stops.min_stop_points, zone,
-    )
-    if inside is not None:
-        return inside
 
     long = signal.direction is Direction.LONG
     d = 1.0 if long else -1.0
@@ -158,72 +151,80 @@ def plan_targets(
     )
 
 
-def _structure_beyond_or(
+def _structure_targets(
     signal: SetupSignal,
-    orh: float | None,
-    orl: float | None,
-    floor: float,
-) -> TargetPlan | None:
-    """2HH short above ORH / 2LL long below ORL: T1 = near OR, T2 = far OR."""
-    if signal.setup is not Setup.STRUCTURE_WHIPSAW:
-        return None
-    entry = signal.entry_price
-    if signal.direction is Direction.SHORT:
-        if orh is None or entry - orh < floor:
-            return None
-        t2, t2_label = (orl, "ORL") if orl is not None and orh - orl >= floor else (orh, "ORH")
-        return _plan(entry, orh, t2, "ORH", t2_label, floor)
-    if orl is None or orl - entry < floor:
-        return None
-    t2, t2_label = (orh, "ORH") if orh is not None and orh - orl >= floor else (orl, "ORL")
-    return _plan(entry, orl, t2, "ORL", t2_label, floor)
-
-
-def _structure_inside_or(
-    signal: SetupSignal,
-    orh: float | None,
-    orl: float | None,
     pivots: Pivots | None,
-    floor: float,
-    zone: Zone | None,
-) -> TargetPlan | None:
-    """2HH/2LL still inside OR: T1 is the first pivot past ORL (short) or ORH (long)."""
-    if signal.setup is not Setup.STRUCTURE_WHIPSAW or orh is None or orl is None:
-        return None
+    orh: float | None,
+    orl: float | None,
+    stops: StopsConfig,
+) -> TargetPlan:
+    """2HH/3HH and 2LL/3LL targets from where the fill sits relative to the opening range.
+
+    Outside the range, T1 is the nearest pivot at least the hard stop (35) in front.
+    Inside, the opening-range edge in the trade direction is a candidate too. T2 is
+    the next pivot beyond T1. A line closer than the hard stop is skipped.
+    """
     if pivots is None:
-        return None
+        raise PlanError("structure targets need previous-session pivots")
     long = signal.direction is Direction.LONG
     d = 1.0 if long else -1.0
-    entry = signal.entry_price
-    near, far = (orl, orh) if long else (orh, orl)
-    far_name = "ORH" if long else "ORL"
-    if (entry - near) * d < 0:
-        return None                      # still beyond the near OR edge (the other rule)
-    if (far - entry) * d < floor:
-        return None                      # the far OR edge is not in front with room
-    after = [
-        (n, v) for n, v in pivots.ordered()
-        if (v - far) * d >= floor and (v - entry) * d >= floor
+    entry = futures_quote(signal.entry_price)
+    room = stops.hard_stop_points
+    levels = pivots.levels()
+    # Quote first, then keep one label per price. The OR edge wins a tie with a pivot.
+    chosen: dict[float, str] = {}
+    for name, value in pivots.ordered():
+        price = futures_quote(value)
+        if (price - entry) * d >= room:
+            chosen.setdefault(price, name)
+    if _opening_range_side(entry, orh, orl) == "inside":
+        edge_name, edge = ("ORH", orh) if long else ("ORL", orl)
+        if edge is not None:
+            price = futures_quote(edge)
+            if (price - entry) * d >= room:
+                chosen[price] = edge_name
+    if not chosen:
+        raise PlanError(
+            f"no pivot at least {room:g} pts in front of the entry {entry:.1f}"
+        )
+    t1 = min(chosen, key=lambda price: (price - entry) * d)
+    t1_label = chosen[t1]
+
+    first = "R2" if long else "S2"
+    ceiling_name = first if (levels[first] - entry) * d > 0 else ("R4" if long else "S4")
+    ceiling = futures_quote(levels[ceiling_name])
+    if (ceiling - entry) * d <= 0:
+        raise PlanError(f"entry {entry:.1f} is beyond {ceiling_name}: no room")
+    if (t1 - ceiling) * d > 0:
+        t1, t1_label = ceiling, ceiling_name
+
+    beyond = [
+        (name, futures_quote(value))
+        for name, value in pivots.ordered()
+        if (futures_quote(value) - t1) * d > 0
     ]
-    if not after:
-        return None
-    name, value = min(after, key=lambda nv: abs(nv[1] - far))
-    mid_name = "R2" if long else "S2"
-    mid = pivots.levels().get(mid_name)
-    if (
-        mid is not None
-        and (mid - entry) * d > 0
-        and (far - mid) * d >= 0
-        and (value - mid) * d > 0
-    ):
-        name, value = mid_name, mid     # S2/R2 still sits before the far OR edge
-    label = f"{name} (after {far_name})"
-    t1_plan = _plan(entry, value, value, label, label, floor)
-    return _attach_runner(
-        entry=entry, t1=t1_plan.t1, t1_label=t1_plan.t1_basis,
-        long=long, floor=floor, orh=orh, orl=orl, pivots=pivots,
-        setup=signal.setup, zone=zone,
-    )
+    if not beyond:
+        return _plan(entry, t1, t1, t1_label, t1_label, stops.min_stop_points)
+    t2_label, t2 = min(beyond, key=lambda item: (item[1] - t1) * d)
+    if (t2 - ceiling) * d > 0:
+        if (ceiling - t1) * d > 0:
+            t2, t2_label = ceiling, ceiling_name
+        else:
+            t2, t2_label = t1, t1_label
+    return _plan(entry, t1, t2, t1_label, t2_label, stops.min_stop_points)
+
+
+def _opening_range_side(
+    entry: float, orh: float | None, orl: float | None,
+) -> str:
+    """'above' past ORH, 'below' past ORL, 'inside' when both edges bracket the fill."""
+    if orh is not None and entry > futures_quote(orh):
+        return "above"
+    if orl is not None and entry < futures_quote(orl):
+        return "below"
+    if orh is not None and orl is not None:
+        return "inside"
+    return "unknown"
 
 
 def _neutral_t1(

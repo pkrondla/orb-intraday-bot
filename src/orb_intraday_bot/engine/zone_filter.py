@@ -5,9 +5,10 @@ Pivots are reference. OR setups are taken in every zone. The only hard block is
 consolidation breakout. Those wait for the standard trigger of the same sign
 (trap confirmation or ORB retest).
 
-When a standard entry is taken in the neutral zone, `plan_targets` switches it to
-scalp-and-run (T1 = nearest in-zone pivot; T2 is T1 ± OR-range or the next in-zone
-pivot, capped at R1/S1).
+When a standard entry other than a 2HH/3HH or 2LL/3LL is taken in the neutral zone,
+`plan_targets` switches it to scalp-and-run (T1 = nearest in-zone pivot; T2 is T1 ±
+OR-range or the next in-zone pivot, capped at R1/S1). Structure trades keep the
+35-point pivot target in every zone.
 
 The zone is read from the close of the signal candle. Rejections or bounces from
 R2, R4, S2, S4 are not a separate setup: they still need an OR pattern, and a
