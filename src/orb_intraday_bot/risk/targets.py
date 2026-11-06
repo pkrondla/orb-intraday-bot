@@ -4,7 +4,8 @@ T1 comes from the signal's `target_ref`:
 
 | target_ref               | T1                                                                  |
 |--------------------------|---------------------------------------------------------------------|
-| R2 / S2 / R4 / S4        | that pivot. R2/S2 with the entry already beyond it become R4/S4      |
+| R2 / S2                  | that pivot. A fill already beyond it uses the next pivot (see below) |
+| R4 / S4                  | the next pivot in front; the one after it when the next is inside 1R |
 | ORH / ORL                | that opening-range level (trap / Case 1/2)                           |
 | OR_PROJECTION_OR_PIVOT   | the nearer of the signal's OR-range projection and the next pivot    |
 | RANGE_OPPOSITE_END       | the signal's own price (opposite end of the consolidation)           |
@@ -20,10 +21,12 @@ Inside the range, ORL (short) or ORH (long) joins that list. A nearer line insid
 35 points is skipped. T2 is the next pivot beyond T1. S2/R2 still close the
 position, so a target beyond them is pulled back to that level.
 
-T1 is capped by the mandatory exits: a trade entered below R2 never has T1 beyond it;
-trades on a broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond R2) have T1 at
-R4 (S4). An entry beyond R4 (S4) has no room and is rejected. The runner may go past
-R2/S2 because T1 already booked the notes Target.
+T1 is capped by the mandatory exits: a trade entered below R2 never has T1 beyond it.
+A broken R2 (a `PIVOT_BREAKOUT`, or an entry already beyond R2) takes the next pivot
+in front of the fill. When that pivot is closer than 1R (the hard stop, 35 points),
+T1 is the pivot after it. R4 (S4) still closes the trade, so T1 is never beyond it.
+An entry beyond R4 (S4) has no room and is rejected. The runner may go past R2/S2
+because T1 already booked the target.
 
 Neutral zone (R1 to S1): T1 is the nearest pivot still inside the zone (P, else R1 / S1).
 R2 / S2 are not aims.
@@ -88,12 +91,16 @@ def plan_targets(
         return levels[name]
 
     ref = signal.target_ref
+    next_pivot = signal.setup is Setup.PIVOT_BREAKOUT
     if ref in ("R2", "S2", "R4", "S4"):
         assert ref is not None
         raw, label = need(ref), ref
         if ref in ("R2", "S2") and (raw - entry) * d <= 0:
-            alt = "R4" if long else "S4"
-            raw, label = need(alt), f"{alt} (entry already beyond {ref})"
+            next_pivot = True
+        if next_pivot:
+            if pivots is None:
+                raise PlanError("next-pivot target needs previous-session pivots")
+            raw, label = _t1_next_pivot(entry, d, pivots, stops.hard_stop_points)
     elif ref in ("ORH", "ORL"):
         value = orh if ref == "ORH" else orl
         if value is None:
@@ -212,6 +219,26 @@ def _structure_targets(
         else:
             t2, t2_label = t1, t1_label
     return _plan(entry, t1, t2, t1_label, t2_label, stops.min_stop_points)
+
+
+def _t1_next_pivot(
+    entry: float, d: float, pivots: Pivots, one_r: float,
+) -> tuple[float, str]:
+    """Nearest pivot in front of the fill. Inside 1R, take the pivot after that one."""
+    entry = futures_quote(entry)
+    ahead = [
+        (name, futures_quote(value))
+        for name, value in pivots.ordered()
+        if (futures_quote(value) - entry) * d > 0
+    ]
+    if not ahead:
+        raise PlanError(f"no pivot in front of the entry {entry:.1f}")
+    name, value = min(ahead, key=lambda item: (item[1] - entry) * d)
+    if (value - entry) * d + 1e-9 < one_r:
+        rest = [item for item in ahead if (item[1] - value) * d > 0]
+        if rest:
+            name, value = min(rest, key=lambda item: (item[1] - entry) * d)
+    return value, name
 
 
 def _opening_range_side(

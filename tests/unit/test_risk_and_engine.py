@@ -24,6 +24,8 @@ from tests.helpers import at, candle
 NARROW = traditional_pivots(110, 90, 100)
 # Wide pivots: S2 60 S1 80 P 100 R1 120 R2 140 R3 160 R4 180
 WIDE = traditional_pivots(120, 80, 100)
+# R2 250, R3 300, R4 350, R5 400. The step is 50, so R3 can sit beyond 1R.
+FAR = traditional_pivots(200, 100, 150)
 STOPS = StopsConfig()    # 35 hard, 10 floor
 
 
@@ -186,17 +188,60 @@ def test_orb_short_t1_is_s2() -> None:
     assert t.t2 == 70 and "S3" in t.t2_basis           # 80 − 15 = 65; S3 70 is nearer
 
 
-def test_entry_already_beyond_r2_targets_r4() -> None:
+def test_entry_already_beyond_r2_skips_a_pivot_inside_1r() -> None:
+    # R3 is 5 pts ahead of 125, inside the 35-pt 1R, so T1 is the pivot after it.
     t = targets(make(entry=125))
     assert t.t1 == 140 and "R4" in t.t1_basis
     assert t.t2 == 150 and "R5" in t.t2_basis          # 140 + 15 = 155; R5 150 is nearer
 
 
-def test_pivot_breakout_targets_r4() -> None:
+def test_pivot_breakout_skips_a_next_pivot_inside_1r() -> None:
     t = targets(make(setup=Setup.PIVOT_BREAKOUT, entry=121, target_ref="R4", level=120,
                      stop_level=120, level_name="R2"))
-    assert t.t1 == 140
+    assert t.t1 == 140                                 # R3 at 130 is 9 pts, inside 1R
     assert t.t2 == 150 and "R5" in t.t2_basis
+
+
+def test_pivot_breakout_t1_is_the_next_pivot_when_it_has_1r() -> None:
+    t = targets(
+        make(setup=Setup.PIVOT_BREAKOUT, entry=255, target_ref="R4", level=250,
+             stop_level=250, level_name="R2"),
+        pivots=FAR, orh=240, orl=200,
+    )
+    assert t.t1 == 300 and t.t1_basis == "R3"
+
+
+def test_next_pivot_at_exactly_1r_is_kept() -> None:
+    t = targets(
+        make(setup=Setup.PIVOT_BREAKOUT, entry=265, target_ref="R4", level=250,
+             stop_level=250, level_name="R2"),
+        pivots=FAR,
+    )
+    assert t.t1 == 300
+
+
+def test_entry_beyond_r2_uses_the_next_pivot_when_it_has_1r() -> None:
+    t = targets(make(entry=255, target_ref="R2"), pivots=FAR, orh=240, orl=200)
+    assert t.t1 == 300 and t.t1_basis == "R3"
+
+
+def test_r4_still_caps_a_broken_r2_target() -> None:
+    # R4 is 10 pts ahead, inside 1R. The pivot after it is R5, and R4 still closes the trade.
+    t = targets(
+        make(setup=Setup.PIVOT_BREAKOUT, entry=340, target_ref="R4", level=250,
+             stop_level=250, level_name="R2"),
+        pivots=FAR,
+    )
+    assert t.t1 == 350 and "R4" in t.t1_basis
+
+
+def test_short_pivot_breakout_t1_is_the_next_pivot() -> None:
+    t = targets(
+        make(setup=Setup.PIVOT_BREAKOUT, direction=Direction.SHORT, entry=45,
+             target_ref="S4", level=50, stop_level=50, level_name="S2"),
+        pivots=FAR, orh=80, orl=40,
+    )
+    assert t.t1 == 0 and t.t1_basis == "S3"
 
 
 def test_target_is_capped_at_r2_for_trap_setups() -> None:

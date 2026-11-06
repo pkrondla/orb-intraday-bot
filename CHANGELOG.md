@@ -6,6 +6,18 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-07
+
+### Changed
+- A broken R2 or S2 no longer takes T1 at R4 or S4. T1 is the next pivot in
+  front of the fill. When that pivot is closer than 1R (the 35-point hard stop),
+  T1 is the pivot after it. Exactly 1R keeps the first pivot. R4 still closes a
+  long and S4 a short, so the target is not set beyond them. The notes name R4
+  or S4; this is the bot rule.
+- Golden replay: 230 trades and 545 signals unchanged. Fill-points 2762.4 →
+  2798.9, charges 25969.58 → 25980.87. Two sessions move (7 Sep, 24 Sep): a
+  long that used to sit until the close now books T1 at the next pivot.
+
 ## [0.26.0] - 2026-11-04
 
 ### Changed

@@ -140,7 +140,7 @@ Two or more setups in the same direction mark a trending day.
 - They are strong resistance and support. Price rarely breaks them in one attempt, and there is a lot of consolidation and rejection there.
 - Touching R2 or S2 closes all positions in the matching direction. T1 also fires when the futures extreme comes within `targets.t2_proximity_points` (default 3) of that level, so a rejection a few points in front still books. The fill is at the band (or at R2/S2 / the open if price traded through).
 - If R2 is broken, price tends to go through R3 to R4. If S2 is broken, it goes through S3 to S4.
-- **R2 and S2 as OR levels:** a break of R2 is traded as an ORB long with R2 acting as ORH. A break of S2 is traded as an ORB short with S2 acting as ORL. The target is R4 or S4.
+- **R2 and S2 as OR levels:** a break of R2 is traded as an ORB long with R2 acting as ORH. A break of S2 is traded as an ORB short with S2 acting as ORL. The notes name R4 or S4 as the target. The bot's T1 is the next pivot in front of the fill. When that pivot is closer than 1R (the 35-point hard stop), T1 is the pivot after it. R4 or S4 still closes the position, so T1 is not set beyond them.
 - **R4 and S4:** close all positions.
 - **Do not trade** rejections or bounces from R2, R4, S2 and S4.
 
@@ -169,7 +169,7 @@ The notes give one Target per setup. That is T1. T2 is a one-lot runner: **T1 ±
 | Bull trap / Case 1 / Case 2 short | ORL | T1 − OR-range, or nearer pivot |
 | Bear trap / Case 1 / Case 2 long | ORH | T1 + OR-range, or nearer pivot |
 | Consolidation breakout | OR range projected from ORH or ORL, or the nearer pivot | T1 ± OR-range, or next nearer pivot |
-| ORB and the rest | R2 (long) or S2 (short). R4 or S4 for trades on a broken R2 or S2. | T1 ± OR-range, or nearer of R3/R4 (S3/S4) |
+| ORB and the rest | R2 (long) or S2 (short). A broken R2 or S2: the next pivot, or the one after it when the next is inside 1R, capped at R4 or S4. | T1 ± OR-range, or nearer of R3/R4 (S3/S4) |
 | 2HH/3HH short above ORH, or below ORL | Nearest pivot at least 35 points in front | Next pivot beyond T1 |
 | 2LL/3LL long below ORL, or above ORH | Nearest pivot at least 35 points in front | Next pivot beyond T1 |
 | 2HH/3HH short inside OR | Nearest of ORL and the pivots below, at least 35 points away | Next pivot beyond T1 |
@@ -289,7 +289,7 @@ These are intentional, because the notes win:
 9. Phase 5 decisions (stops, targets, zone filter, arbiter):
    - **ORB / R2-S2 breakout stop (notes):** candle close back through the level, or a 35-point hard stop, whichever first. Lots are sized on 35. The trade is not skipped when the level is farther than 35 or closer than 10.
    - **Touch stops (traps, structure, fake breaks)** still use the level when it is closer than 35 points, as in section 5, so their stop and lot sizing use the same distance.
-   - **T1:** from the setup's target reference (section 5 table), except in the neutral zone (below) and for 2HH/3HH/2LL/3LL (section 5: nearest line at least 35 points in front, T2 the next pivot). 1 lot closes the whole position; 2+ lots leave a one-lot runner for T2. A trade entered below R2 has T1 at R2. A trade on a broken R2, or entered beyond R2, has T1 at R4. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T1 also fires `t2_proximity_points` in front of the level (default 3).
+   - **T1:** from the setup's target reference (section 5 table), except in the neutral zone (below) and for 2HH/3HH/2LL/3LL (section 5: nearest line at least 35 points in front, T2 the next pivot). 1 lot closes the whole position; 2+ lots leave a one-lot runner for T2. A trade entered below R2 has T1 at R2. A trade on a broken R2, or entered beyond R2, has T1 at the next pivot in front. When that pivot is closer than 1R (the 35-point hard stop), T1 is the pivot after it. R4 still caps a long and S4 a short. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. T1 also fires `t2_proximity_points` in front of the level (default 3).
    - **T2:** T1 ± OR-range, or the nearer pivot beyond T1, capped at R4/S4 (R5/S5 when T1 is already R4/S4). No room → T2 = T1.
    - **Neutral-zone T1:** nearest pivot still inside R1–S1 (P, else R1 / S1), at least 10 points away. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22621 (P). Neutral T2 is capped at R1/S1.
    - **Consolidation T1:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
