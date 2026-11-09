@@ -12,6 +12,7 @@ from orb_intraday_bot.config.settings import InstrumentConfig
 from orb_intraday_bot.core.clock import IST, Clock, SystemClock
 from orb_intraday_bot.core.errors import DataUnavailableError
 from orb_intraday_bot.core.models import Candle
+from orb_intraday_bot.data.calendar import is_trading_day, load_holidays
 from orb_intraday_bot.data.candles import parse_candle_rows, parse_timestamp
 from orb_intraday_bot.data.contract import FuturesContract, select_futures_contract
 from orb_intraday_bot.data.expiries import choose_option_expiry, collect_expiries
@@ -28,7 +29,6 @@ from orb_intraday_bot.options.chain import (
     parse_option_chain,
     parse_option_contracts,
 )
-from orb_intraday_bot.runtime.calendar import is_trading_day, load_holidays
 
 _FMT = "%Y-%m-%d %H:%M:%S"
 _MAX_DAYS_PER_REQUEST = 28   # Groww allows 30 days of 3-minute candles per request
