@@ -289,7 +289,7 @@ _T1_MOVED = re.compile(
     r"T1 reached: stop moved to entry \(futures ([0-9.]+), option ([0-9.]+)\)"
 )
 _LADDER_MOVED = re.compile(
-    r"(\d+)R reached: stop moved to (.+?) \(futures ([0-9.]+)\)"
+    r"(\d+)R reached: stop moved to (.+?) \(option ([0-9.]+)\)"
 )
 
 
@@ -343,7 +343,7 @@ def format_exit_alert(event: ExitEvent) -> str:
     ladder = _LADDER_MOVED.search(event.message)
     if ladder:
         lines.append(f"      {ladder.group(1)}R: stop moved to {escape(ladder.group(2))}")
-        lines.append(f"      fut <code>{float(ladder.group(3)):.1f}</code>")
+        lines.append(f"      option <code>{float(ladder.group(3)):.2f}</code>")
         return "\n".join(lines)
     rest = event.message.split(" ", 1)[1] if " " in event.message else event.message
     lines.append(escape(rest))

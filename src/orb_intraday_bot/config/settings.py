@@ -130,9 +130,10 @@ class TargetsConfig(BaseModel):
     t1_rule: Literal["nearest_pivot_else_half"] = "nearest_pivot_else_half"
     t1_book_fraction: float = Field(default=0.5, gt=0, lt=1)  # retired: one runner, not a fraction
     move_sl_to_entry_after_t1: bool = True  # leftover runner: futures stop to entry after T1
-    # 1R is the futures distance from the fill to the hard stop. At 2R the stop moves to
-    # entry; each later whole R leaves it one whole R behind. The new price is used from
-    # the next bar. The broker crash net is not moved.
+    # 1R is the option-rupee risk on the open card, (entry premium − sl_exit) × lots ×
+    # lot size. At 2R the option stop moves to the entry premium; each later whole R
+    # leaves it one whole R behind. The new premium applies from the next poll, or from
+    # the next candle in replay. The futures hard stop and the broker crash net are not moved.
     r_ladder: bool = True
     # Retired: T1 is the notes Target and is not pulled in. Kept so existing YAML still loads.
     t1_max_distance_points: float | None = Field(default=None, gt=0)

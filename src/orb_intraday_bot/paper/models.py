@@ -21,7 +21,7 @@ from orb_intraday_bot.core.models import Direction
 class ExitReason(StrEnum):
     HARD_STOP = "HARD_STOP"            # futures price hit the stop
     BREAKEVEN_STOP = "BREAKEVEN_STOP"  # stop was the entry (after T1, or once 2R printed)
-    R_LADDER = "R_LADDER"              # stop was one whole futures R behind a later rung
+    R_LADDER = "R_LADDER"              # option stop was one whole rupee R behind a later rung
     CLOSE_STOP = "CLOSE_STOP"          # candle closed back beyond the level
     ORB_REVERSE = "ORB_REVERSE"        # Case 1/2 closed because the opposite ORB confirmed
     OPTION_STOP = "OPTION_STOP"        # option price hit its stop (live prices only)
@@ -103,8 +103,9 @@ class Position:
     breakeven_after_t1: bool = True   # leftover runner: futures stop moves to entry after T1
     strategy_hash: str = ""           # the rules this trade was opened under (config.fingerprint)
     stop_at_entry: bool = False
-    ladder_stop: float = 0.0          # 0 = unset. Futures price locked by the R ladder.
-    r_ladder: bool = True             # 2R locks entry; each later whole R locks one R behind.
+    ladder_stop: float = 0.0          # legacy futures lock from before 0.29. Ignored.
+    option_ladder_stop: float = 0.0   # 0 = unset. Option premium locked by the rupee R ladder.
+    r_ladder: bool = True             # 2R of option profit locks the entry premium.
     status: PositionStatus = PositionStatus.OPEN
     closed_at: datetime | None = None
     # Start of the last closed candle applied to this position. A restart that replays the day's
@@ -161,13 +162,9 @@ class Position:
 
     @property
     def active_stop(self) -> float:
-        """Futures price stop in force. The R ladder and the post-T1 entry stop only tighten it."""
-        stop = self.futures_entry if self.stop_at_entry else self.hard_stop
-        if self.ladder_stop <= 0:
-            return stop
-        if self.sign > 0:
-            return max(stop, self.ladder_stop)
-        return min(stop, self.ladder_stop)
+        """Futures price stop in force. After a partial T1 this is the entry. The rupee ladder
+        does not move it; that lock is `option_ladder_stop`."""
+        return self.futures_entry if self.stop_at_entry else self.hard_stop
 
     @property
     def active_option_stop(self) -> float:

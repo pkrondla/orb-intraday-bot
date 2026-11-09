@@ -273,8 +273,8 @@ def progress_text(positions: Sequence[Position]) -> str:
         slip = ""
         if p.planned_entry > 0:
             slip = f" (planned {p.planned_entry:.2f})"
-        if p.ladder_stop > 0:
-            stop_note = " (R ladder)"
+        if p.option_ladder_stop > 0:
+            stop_note = f" (option ladder {p.option_ladder_stop:.2f})"
         elif p.stop_at_entry:
             stop_note = " (moved to entry after T1)"
         else:

@@ -6,6 +6,20 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-09
+
+### Changed
+- The R ladder counts option rupees, the same 1R as the reward card:
+  `(entry premium − sl_exit) × lots × lot size`. At 2R the option stop moves to
+  the entry premium. At 3R it moves to 2R, at 4R to 3R, and so on. The new
+  premium applies from the next poll. A closed candle does not move it. Replay
+  models the premium from the futures range and uses the new stop on the next
+  candle. The futures hard stop and the crash net stay where they were.
+- Golden replay: 545 signals and 202 trades unchanged. Fill-points 2418.0 →
+  2103.7, charges 23998.25 → 23889.28. Eight sessions move. R-ladder exits
+  18 → 12, breakeven exits 8 → 12, end-of-day exits 34 → 36. Lot-weighted
+  futures points 2284.8 → 1973.6.
+
 ## [0.28.0] - 2026-11-09
 
 ### Changed

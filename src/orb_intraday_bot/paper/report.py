@@ -44,8 +44,8 @@ def summarize(day: date, positions: Iterable[Position]) -> DaySummary:
 
 
 def _stop_note(position: Position) -> str:
-    if position.ladder_stop > 0:
-        return " (R ladder)"
+    if position.option_ladder_stop > 0:
+        return f" (option ladder {position.option_ladder_stop:.2f})"
     if position.stop_at_entry:
         return " (at entry)"
     return ""

@@ -2,9 +2,11 @@
 
 A position is closed by the first of:
 
-1. the futures price stop (35-point hard stop, or the touch level). The option price is a
-   wide crash net only (broker SL and, if that order is missing, live option LTP at that
-   net — not the 35 × delta sizing stop).
+1. the futures price stop (35-point hard stop, or the touch level), then the rupee R ladder
+   on the option premium. 1R is the open card's option risk. At 2R the premium stop moves
+   to the entry premium; each later whole R leaves it one R behind. A live candle does not
+   move it (polls carry the live premium). The option crash net stays wide (broker SL and,
+   if that order is missing, live option LTP at that net).
 2. T1 — the notes Target, on futures. One lot closes here; two or more leave a
    one-lot runner for T2 (T1 ± OR-range or the nearer pivot). Both fire when the
    extreme comes within `t2_proximity_points` of the level (a near-miss at S2/R2).
@@ -19,6 +21,7 @@ the checks are deliberately conservative:
 
 - the stop is checked before the targets, so a candle that reaches both is a loss
 - after T1 the break-even stop only applies from the next bar
+- a new rupee-ladder premium applies from the next poll or, in replay, the next candle
 - a gap through a stop fills at the open (worse); a gap through a target also fills at the open
 
 Fill prices: with a live option LTP (polls) the exit fills at that LTP. Without it (replay, or a
@@ -233,13 +236,26 @@ def _evaluate(
         )
         events.append(ExitEvent(position.position_id, bar.time, _describe(position, fill), fill))
 
-    # 1. Strategy stop on futures, then the option crash net (if the broker order is missing).
+    # 1. Futures hard stop (or the post-T1 entry stop), then the rupee ladder, then the
+    # option crash net when the broker order is missing.
     stop = futures_quote(position.active_stop)
     stop_touched = bar.low <= stop if d > 0 else bar.high >= stop
     if stop_touched:
         gap_fill = min(bar.open, stop) if d > 0 else max(bar.open, stop)
-        close_all(_stop_reason(position), gap_fill, live)
+        reason = ExitReason.BREAKEVEN_STOP if position.stop_at_entry else ExitReason.HARD_STOP
+        close_all(reason, gap_fill, live)
         return
+    premiums = _ladder_premiums(position, bar, option_ltp, executor)
+    if premiums is not None and position.option_ladder_stop > 0:
+        open_premium, adverse, _favorable = premiums
+        locked = _tick(position.option_ladder_stop, position.tick_size)
+        if _tick(adverse, position.tick_size) <= locked:
+            gapped = _tick(open_premium, position.tick_size) <= locked
+            fut = bar.close if option_ltp is not None else (
+                bar.open if gapped else _futures_for_premium(position, locked)
+            )
+            close_all(_option_ladder_reason(position), fut, option_ltp is not None)
+            return
     if option_ltp is not None and option_ltp <= position.active_option_stop:
         close_all(ExitReason.OPTION_STOP, bar.close, True)
         return
@@ -284,50 +300,79 @@ def _evaluate(
             close_all(ExitReason.CLOSE_STOP, bar.close, True)
             return
 
-    # 4. R ladder. The new stop is not used on this bar: a wick that both prints the
-    # rung and trades back through the old stop is a stop at the old price.
-    _advance_r_ladder(position, bar, events)
+    # 4. Rupee ladder. The new premium is not used on this bar: a wick that both prints
+    # the rung and trades back through the old stop is a stop at the old premium.
+    if premiums is not None:
+        _advance_r_ladder(position, premiums[2], bar, events)
 
 
-def _stop_reason(position: Position) -> ExitReason:
-    stop = futures_quote(position.active_stop)
-    ladder = futures_quote(position.ladder_stop) if position.ladder_stop > 0 else 0.0
-    if ladder and abs(ladder - stop) <= position.tick_size / 2:
-        entry = futures_quote(position.futures_entry)
-        if abs(stop - entry) <= position.tick_size / 2:
-            return ExitReason.BREAKEVEN_STOP
-        return ExitReason.R_LADDER
-    if position.stop_at_entry:
+def _option_ladder_reason(position: Position) -> ExitReason:
+    entry = _tick(position.entry_ltp, position.tick_size)
+    stop = _tick(position.option_ladder_stop, position.tick_size)
+    if abs(stop - entry) <= position.tick_size / 2:
         return ExitReason.BREAKEVEN_STOP
-    return ExitReason.HARD_STOP
+    return ExitReason.R_LADDER
 
 
-def _advance_r_ladder(position: Position, bar: Bar, events: list[ExitEvent]) -> None:
-    """Lock entry at 2R, then one whole futures R behind each later rung. Never loosens."""
+def _ladder_premiums(
+    position: Position,
+    bar: Bar,
+    option_ltp: float | None,
+    executor: PositionExecutor | None,
+) -> tuple[float, float, float] | None:
+    """Open, adverse, and favourable premiums for the rupee ladder.
+
+    A poll uses the live premium for all three. A paper candle is modelled from the futures
+    range. A live candle has no premium of its own, so the ladder waits for the next poll.
+    """
+    if option_ltp is not None:
+        return option_ltp, option_ltp, option_ltp
+    if not bar.is_candle or executor is not None:
+        return None
+    favourable_fut = bar.high if position.sign > 0 else bar.low
+    adverse_fut = bar.low if position.sign > 0 else bar.high
+    return (
+        modeled_option_price(position, bar.open),
+        modeled_option_price(position, adverse_fut),
+        modeled_option_price(position, favourable_fut),
+    )
+
+
+def _futures_for_premium(position: Position, premium: float) -> float:
+    """Futures price whose modelled premium is `premium`."""
+    delta = position.delta_used
+    if delta <= 0:
+        return futures_quote(position.futures_entry)
+    move = (premium - position.entry_ltp) / delta
+    return futures_quote(position.futures_entry + position.sign * move)
+
+
+def _advance_r_ladder(
+    position: Position, favourable: float, bar: Bar, events: list[ExitEvent],
+) -> None:
+    """Lock the entry premium at 2R, then one whole rupee R behind each later rung."""
     if not position.r_ladder or not position.is_open:
         return
-    entry = futures_quote(position.futures_entry)
-    one_r = abs(entry - futures_quote(position.hard_stop))
-    if one_r < position.tick_size:
+    one_r = position.entry_ltp - position.sl_exit
+    risk = one_r * position.lots * position.lot_size
+    if one_r <= position.tick_size or risk <= 0:
         return
-    extreme = bar.high if position.sign > 0 else bar.low
-    reached = int((position.sign * (extreme - entry) + 1e-6) / one_r)
+    gross = position.gross_option_pnl + position.unrealized(favourable)
+    reached = int(gross / risk + 1e-6)
     if reached < 2:
         return
     locked = 0 if reached == 2 else reached - 1
-    new_stop = futures_quote(entry + position.sign * locked * one_r)
-    current = futures_quote(position.active_stop)
-    tighter = new_stop > current + 1e-9 if position.sign > 0 else new_stop < current - 1e-9
-    if not tighter:
+    new_stop = _tick(position.entry_ltp + locked * one_r, position.tick_size)
+    if position.option_ladder_stop > 0 and new_stop <= position.option_ladder_stop + 1e-9:
         return
-    position.ladder_stop = new_stop
+    position.option_ladder_stop = new_stop
     where = "entry" if locked == 0 else f"{locked}R"
     events.append(
         ExitEvent(
             position.position_id,
             bar.time,
             f"{position.trading_symbol} {reached}R reached: stop moved to {where} "
-            f"(futures {new_stop:.1f})",
+            f"(option {new_stop:.2f})",
         )
     )
 
