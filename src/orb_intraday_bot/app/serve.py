@@ -31,7 +31,7 @@ from orb_intraday_bot.runtime.arming import (
     configured_mode_label,
     resolve_mode,
 )
-from orb_intraday_bot.runtime.calendar import load_holidays, next_session_start
+from orb_intraday_bot.runtime.calendar import load_holiday_notes, load_holidays, next_session_start
 from orb_intraday_bot.runtime.dry_run_switch import (
     ignored_override_note,
     real_orders_blocker,
@@ -39,6 +39,12 @@ from orb_intraday_bot.runtime.dry_run_switch import (
     write_override,
 )
 from orb_intraday_bot.runtime.executor import LiveExecutor
+from orb_intraday_bot.runtime.holiday_overrides import (
+    active_holidays,
+    load_removed,
+    parse_holiday_date,
+    remove_holiday,
+)
 from orb_intraday_bot.runtime.limit_overrides import (
     KNOBS,
     LimitControls,
@@ -158,6 +164,7 @@ _CONTROL_KINDS = frozenset(
         CommandKind.RISKPCT,
         CommandKind.DAILYLOSS,
         CommandKind.MAXLOTS,
+        CommandKind.HOLIDAY,
     }
 )
 _NO_SESSION = (
@@ -628,6 +635,17 @@ def handle_command(
             else f"Trading was not stopped for {day.isoformat()}; new entries are already allowed."
         )
         return
+    if command.kind is CommandKind.HOLIDAYS:
+        in_force = active_holidays(ctx.data_dir)
+        reply(
+            ot.holidays_text(
+                in_force, frozenset(load_removed(ctx.data_dir)), load_holiday_notes(), now
+            )
+        )
+        return
+    if command.kind is CommandKind.HOLIDAY:
+        reply(_holiday_removal_reply(command.arg, ctx=ctx, state=state, now=now))
+        return
     if command.kind is CommandKind.FLATTEN:
         stop_file_path(ctx.data_dir).parent.mkdir(parents=True, exist_ok=True)
         (ctx.data_dir / "FLATTEN").write_text("flatten\n", encoding="utf-8")
@@ -635,6 +653,36 @@ def handle_command(
         reply("Flatten requested. The session will close open positions.")
         return
     reply(f"Unhandled command: {command.kind.value}")
+
+
+_HOLIDAY_USAGE = (
+    "Usage: /holiday remove YYYY-MM-DD\n"
+    "/holidays lists the dates in force."
+)
+
+
+def _holiday_removal_reply(
+    arg: str, *, ctx: AppContext, state: ServeState, now: datetime
+) -> str:
+    parts = arg.split()
+    if len(parts) != 2 or parts[0].lower() != "remove":
+        return _HOLIDAY_USAGE
+    day = parse_holiday_date(parts[1])
+    if day is None:
+        return "Date must be YYYY-MM-DD, for example /holiday remove 2026-11-09."
+    status = remove_holiday(ctx.data_dir, day)
+    if status == "weekend":
+        return f"{day.isoformat()} is a weekend. The market stays closed; nothing was removed."
+    if status == "absent":
+        return f"{day.isoformat()} is not in the holiday list. Nothing was removed."
+    if status == "already":
+        return f"{day.isoformat()} is already removed. /holidays shows the list."
+    return ot.holiday_removed_text(
+        day,
+        now,
+        active_holidays(ctx.data_dir),
+        session_running=state.runner is not None,
+    )
 
 
 def drain_commands(
@@ -893,7 +941,11 @@ def serve_loop(
     limit_notes += state.limits.load_saved()                      # then what /capital etc. set
     state.bus.stopped_day = read_stopped_day(ctx.data_dir)    # a /stop survives a restart
     write_service_off(ctx.data_dir, False)                    # nssm start after /shutdown
-    holidays = load_holidays() if holidays is None else holidays
+    base_holidays = load_holidays() if holidays is None else holidays
+
+    def closed_days() -> frozenset[date]:
+        return active_holidays(ctx.data_dir, base_holidays)
+
     mode = configured_mode_label(ctx.settings)
     if ctx.settings.live_mode != "paper":
         mode += f" [DRY_RUN {source_text(ctx.settings, ctx.data_dir)}]"
@@ -920,12 +972,18 @@ def serve_loop(
         while not should_stop(ctx.data_dir, state):
             drain_commands(ctx, alerts, state, reply, clock.now())
             now = clock.now()
-            start_at = next_session_start(now, start=SESSION_START, holidays=holidays)
+            start_at = next_session_start(now, start=SESSION_START, holidays=closed_days())
             if now < start_at:
                 log.info("Next session at %s", start_at.isoformat())
                 while clock.now() < start_at and not should_stop(ctx.data_dir, state):
                     drain_commands(ctx, alerts, state, reply, clock.now())
-                    remaining = (start_at - clock.now()).total_seconds()
+                    now = clock.now()
+                    start_at = next_session_start(
+                        now, start=SESSION_START, holidays=closed_days()
+                    )
+                    if now >= start_at:
+                        break
+                    remaining = (start_at - now).total_seconds()
                     sleep(max(min(remaining, idle_step_sec), 0.1))
                 if should_stop(ctx.data_dir, state):
                     break

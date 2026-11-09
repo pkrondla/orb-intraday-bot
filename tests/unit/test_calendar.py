@@ -25,6 +25,12 @@ def test_holidays_file_loads_and_skips() -> None:
     assert date(2026, 10, 2) in holidays          # Gandhi Jayanti
     assert not is_trading_day(date(2026, 10, 2), holidays)
     assert next_trading_day(date(2026, 10, 2), holidays) == date(2026, 10, 5)  # Mon after weekend
+    # NSE: 9 Nov 2026 is a normal Monday. Balipratipada is Tuesday 10 Nov.
+    assert date(2026, 11, 9) not in holidays
+    assert is_trading_day(date(2026, 11, 9), holidays)
+    assert date(2026, 11, 10) in holidays
+    assert not is_trading_day(date(2026, 11, 10), holidays)
+    assert next_trading_day(date(2026, 11, 10), holidays) == date(2026, 11, 11)
 
 
 def test_next_session_start_same_day_before_open() -> None:

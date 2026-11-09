@@ -163,6 +163,25 @@ def test_previous_session_picks_latest_day_before_today() -> None:
     assert [c.start.strftime("%H:%M") for c in candles] == ["09:15", "15:27"]
 
 
+def test_previous_session_skips_a_weekend_muhurat_day() -> None:
+    client = FakeClient()
+    clock = FixedClock(at(10, 0, date(2026, 11, 9)))
+    md = GrowwMarketData(client, InstrumentConfig(), clock)
+
+    def candles(**kw: Any) -> dict[str, Any]:
+        return {"candles": [
+            ["2026-11-06T09:15:00", 100.0, 105.0, 99.0, 104.0, 10, None],
+            ["2026-11-06T15:27:00", 104.0, 106.0, 103.0, 105.0, 10, None],
+            ["2026-11-08T14:03:00", None, None, None, None, 2600, None],
+            ["2026-11-08T14:21:00", 200.0, 201.0, 199.0, 200.5, 50, None],
+        ]}
+
+    client.get_historical_candles = candles  # type: ignore[method-assign]
+    day, candles_out = md.previous_session(md.futures_contract(), date(2026, 11, 9))
+    assert day == date(2026, 11, 6)
+    assert [c.start.strftime("%H:%M") for c in candles_out] == ["09:15", "15:27"]
+
+
 def test_previous_session_without_data_raises() -> None:
     md, client = make_md()
     client.get_historical_candles = lambda **kw: {"candles": []}  # type: ignore[method-assign]

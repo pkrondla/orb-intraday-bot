@@ -18,7 +18,8 @@ from orb_intraday_bot.app.context import AppContext, load_context
 from orb_intraday_bot.app.serve import service_off_path
 from orb_intraday_bot.core.clock import IST, Clock, SystemClock
 from orb_intraday_bot.runtime.alerts import Alerts
-from orb_intraday_bot.runtime.calendar import is_trading_day, load_holidays
+from orb_intraday_bot.runtime.calendar import is_trading_day
+from orb_intraday_bot.runtime.holiday_overrides import active_holidays
 from orb_intraday_bot.runtime.monitor import ACTIVE_STATUSES, ALIVE_WITHIN_SEC, read_heartbeat
 from orb_intraday_bot.runtime.notify import Notifier, build_notifier
 
@@ -57,7 +58,7 @@ def check_once(
 ) -> datetime | None:
     """Return the new last_alerted_at (or the previous one if nothing was sent)."""
     day = now.astimezone(IST).date()
-    closed = holidays if holidays is not None else load_holidays()
+    closed = holidays if holidays is not None else active_holidays(ctx.data_dir)
     if not is_trading_day(day, closed) or not in_market_hours(now):
         return last_alerted_at
 
@@ -120,13 +121,12 @@ def watchdog_loop(
     sleep = sleep or time.sleep
     notifier = notifier or build_notifier(ctx.settings, async_outbox=False)
     alerts = Alerts(notifier)
-    holidays = load_holidays()
     last_alerted: datetime | None = None
     iterations = 0
     try:
         while True:
             last_alerted = check_once(
-                ctx, alerts, clock.now(), holidays=holidays, ping=ping or _urllib_ping,
+                ctx, alerts, clock.now(), ping=ping or _urllib_ping,
                 last_alerted_at=last_alerted,
             )
             iterations += 1

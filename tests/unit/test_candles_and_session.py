@@ -72,7 +72,17 @@ def test_malformed_rows_raise() -> None:
     with pytest.raises(CandleDataError):
         parse_candle_rows([["not-a-time", 1.0, 2.0, 0.5, 1.5, 1, None]])
     with pytest.raises(CandleDataError):
-        parse_candle_rows([["2026-10-15T09:15:00", None, 2.0, 0.5, 1.5, 1, None]])
+        parse_candle_rows([["2026-10-15T09:15:00", "x", 2.0, 0.5, 1.5, 1, None]])
+
+
+def test_a_row_with_no_prices_is_skipped() -> None:
+    """Muhurat block-deal prints can carry volume and no open/high/low/close."""
+    rows = [
+        ["2026-11-06T15:27:00", 104.0, 106.0, 103.0, 105.0, 10, None],
+        ["2026-11-08T14:03:00", None, None, None, None, 2600, None],
+    ]
+    candles = parse_candle_rows(rows)
+    assert [c.start.strftime("%Y-%m-%d %H:%M") for c in candles] == ["2026-11-06 15:27"]
 
 
 def test_session_has_125_candles() -> None:

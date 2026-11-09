@@ -19,7 +19,7 @@ Telegram commands (authorized chat only). `/help` lists them.
 |---|---|
 | Status | `/status` (heartbeat, order mode, today's trading state, risk), `/mode`, `/version`, `/risk`, `/funds`, `/log [n]` |
 | Today | `/today`, `/pnl [day\|week\|month]`, `/positions`, `/progress` (stops, targets and broker stop per position), `/signals`, `/orders` (with entry-versus-plan slippage), `/levels`, `/report` |
-| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/shutdown`, `/dryrun [on\|off]`, `/limits`, `/capital <amount>`, `/riskpct <percent>`, `/dailyloss <percent>`, `/maxlots <n>` |
+| Control | `/stop`, `/start`, `/exit <symbol>`, `/flatten`, `/rearm`, `/reconcile`, `/clearhalt`, `/restart`, `/shutdown`, `/dryrun [on\|off]`, `/limits`, `/capital <amount>`, `/riskpct <percent>`, `/dailyloss <percent>`, `/maxlots <n>`, `/holidays`, `/holiday remove <YYYY-MM-DD>` |
 
 - `/stop`: no new entries for the rest of today (open positions are still managed). It ends by
   itself at midnight and survives a restart. `/start` allows entries again the same day.
@@ -56,6 +56,11 @@ Telegram commands (authorized chat only). `/help` lists them.
   loss limit 0.1% to 10%, lots 1 to 50. If the new daily loss limit is already below today's loss, the kill
   switch trips and positions are flattened. The lot count is "risk budget / (stop points x lot size)",
   capped by `/maxlots`, so raise both to trade more than one lot.
+- `/holidays` lists the weekday holidays still in force (the file in `config/holidays.yaml` minus
+  any date removed from Telegram) and when the next session is. Weekends are always closed.
+  `/holiday remove 2026-11-09` treats that date as a trading day. The choice is saved in
+  `data/HOLIDAYS_REMOVED.json` and kept across a restart and a deploy. If the bot is waiting
+  because of that date, the session starts on the next check while the market window is open.
 - `/log` shows the last lines of today's log with tokens and secrets masked.
 - Every control command leaves an `operator_command` line in the JSONL log.
 

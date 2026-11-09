@@ -9,6 +9,7 @@ Verified against the live API (Oct 2026):
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -16,6 +17,8 @@ from typing import Any
 from orb_intraday_bot.core.clock import CANDLE_MINUTES, IST
 from orb_intraday_bot.core.models import Candle
 from orb_intraday_bot.data.session import in_session
+
+log = logging.getLogger("orb.candles")
 
 
 class CandleDataError(ValueError):
@@ -58,6 +61,11 @@ def parse_candle_rows(
         if session_only and not in_session(start):
             continue
         if now is not None and start + timedelta(minutes=CANDLE_MINUTES) > now:
+            continue
+        if any(row[i] is None for i in range(1, 5)):
+            # A special session (Muhurat block deal) can print volume with no prices.
+            # One such row must not throw away the rest of the lookback.
+            log.warning("Skipping candle with no prices: %s", list(row))
             continue
         volume = float(row[5]) if len(row) > 5 and row[5] is not None else 0.0
         oi = float(row[6]) if len(row) > 6 and row[6] is not None else None

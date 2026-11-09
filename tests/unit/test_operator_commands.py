@@ -124,6 +124,7 @@ def test_the_help_asks_for_no_codes_and_explains_each_command() -> None:
         "/start", "/exit", "/flatten", "/rearm", "/reconcile", "/clearhalt", "/restart",
         "/shutdown",
         "/help", "/dryrun", "/limits", "/capital", "/riskpct", "/dailyloss", "/maxlots",
+        "/holidays", "/holiday",
     ):
         assert " - " in lines[word]                       # every command has its purpose
     assert "code" not in _HELP.lower()

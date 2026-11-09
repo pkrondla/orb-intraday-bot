@@ -75,6 +75,9 @@ _HELP = (
     "/maxlots <n> - most lots in one trade (/limits reset restores the defaults)\n"
     "/dryrun [on|off] - show or switch DRY_RUN: off = REAL orders, on = no orders reach the "
     "broker (restarts the bot; only with no open position)\n"
+    "/holidays - list weekday holidays and any date removed by Telegram\n"
+    "/holiday remove <YYYY-MM-DD> - treat that date as a trading day "
+    "(kept across restart and deploy)\n"
     "/help - this list"
 )
 
@@ -109,6 +112,8 @@ class CommandKind(StrEnum):
     DAILYLOSS = "dailyloss"
     MAXLOTS = "maxlots"
     FLATTEN = "flatten"
+    HOLIDAYS = "holidays"
+    HOLIDAY = "holiday"
     HELP = "help"
     UNKNOWN = "unknown"
 
@@ -167,11 +172,15 @@ def parse_command(text: str) -> Command:
         "start": CommandKind.START_TODAY,
         "resume": CommandKind.START_TODAY,
         "flatten": CommandKind.FLATTEN,
+        "holidays": CommandKind.HOLIDAYS,
+        "holiday": CommandKind.HOLIDAY,
         "help": CommandKind.HELP,
     }
     kind = mapping.get(verb, CommandKind.UNKNOWN)
     if kind is CommandKind.STOP_TODAY and arg.lower() in {"service", "bot"}:
         return Command(kind=CommandKind.SHUTDOWN, arg="")
+    if kind is CommandKind.HOLIDAYS and arg.lower().startswith("remove"):
+        return Command(kind=CommandKind.HOLIDAY, arg=arg)
     return Command(kind=kind, arg=arg)
 
 

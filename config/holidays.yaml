@@ -16,7 +16,7 @@ holidays:
   - "2026-09-14"   # Ganesh Chaturthi (approx; confirm)
   - "2026-10-02"   # Gandhi Jayanti
   - "2026-10-20"   # Dussehra
-  - "2026-11-08"   # Diwali (Laxmi Pujan) - muhurat trading possible; treat as closed for this bot
-  - "2026-11-09"   # Diwali Balipratipada
+  - "2026-11-08"   # Diwali Laxmi Pujan (Sunday); muhurat only, closed for this bot
+  - "2026-11-10"   # Diwali Balipratipada (NSE holiday; 9 Nov is a normal session)
   - "2026-11-24"   # Gurunanak Jayanti
   - "2026-12-25"   # Christmas

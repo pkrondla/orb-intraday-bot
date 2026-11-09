@@ -9,12 +9,13 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Iterable, Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from orb_intraday_bot import __version__
 from orb_intraday_bot.config.fingerprint import fingerprint
 from orb_intraday_bot.config.settings import Settings, StrategyConfig
+from orb_intraday_bot.core.clock import IST
 from orb_intraday_bot.indicators.pivots import SessionLevels
 from orb_intraday_bot.paper.models import Position
 from orb_intraday_bot.paper.report import summarize
@@ -24,6 +25,7 @@ from orb_intraday_bot.runtime.arming import (
     describe_order_mode,
     resolve_mode,
 )
+from orb_intraday_bot.runtime.calendar import is_trading_day, next_session_start
 from orb_intraday_bot.runtime.limit_overrides import KNOBS, LimitControls, format_value
 from orb_intraday_bot.storage.store import TradeStore
 
@@ -115,6 +117,63 @@ def mode_text(
         f"square-off {limits.square_off_time}",
     ]
     return "\n".join(lines)
+
+
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_WEEKDAYS_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def holidays_text(
+    in_force: frozenset[date],
+    removed: frozenset[date],
+    notes: dict[date, str],
+    now: datetime,
+) -> str:
+    """What `/holidays` replies. Weekends are closed whether or not they are listed."""
+    today = now.astimezone(IST).date()
+    trading = is_trading_day(today, in_force)
+    start = next_session_start(now, holidays=in_force)
+    nxt = "now (market window is open)" if start == now else f"{start:%Y-%m-%d %H:%M} IST"
+    lines = [
+        f"Today {today.isoformat()} {_WEEKDAYS[today.weekday()]}: "
+        + ("trading day" if trading else "closed"),
+        f"Next session: {nxt}",
+        "Holidays in force (weekends are always closed):",
+    ]
+    if not in_force:
+        lines.append("(none)")
+    else:
+        for day in sorted(in_force):
+            note = notes.get(day, "")
+            label = f"- {day.isoformat()} {_WEEKDAYS_SHORT[day.weekday()]}"
+            lines.append(f"{label}  {note}" if note else label)
+    if removed:
+        lines.append("Removed by Telegram (kept across restart and deploy):")
+        for day in sorted(removed):
+            lines.append(f"- {day.isoformat()} {_WEEKDAYS_SHORT[day.weekday()]}")
+    return "\n".join(lines)
+
+
+def holiday_removed_text(
+    day: date,
+    now: datetime,
+    in_force: frozenset[date],
+    *,
+    session_running: bool,
+) -> str:
+    """What `/holiday remove` replies after the date is taken out of the list."""
+    start = next_session_start(now, holidays=in_force)
+    if session_running:
+        follow = "This session keeps running. Later days use the new calendar."
+    elif start == now:
+        follow = "The session starts on the next check."
+    else:
+        follow = f"Next session: {start:%Y-%m-%d %H:%M} IST."
+    return (
+        f"Removed {day.isoformat()} ({_WEEKDAYS[day.weekday()]}). "
+        f"The bot treats it as a trading day from now. {follow} "
+        "Saved on this host; a restart or deploy keeps it."
+    )
 
 
 def version_text(cfg: StrategyConfig) -> str:

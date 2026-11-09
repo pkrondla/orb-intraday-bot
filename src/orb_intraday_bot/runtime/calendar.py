@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import yaml
 from orb_intraday_bot.core.clock import IST
 
 _DEFAULT_HOLIDAYS = Path(__file__).resolve().parents[3] / "config" / "holidays.yaml"
+_NOTE = re.compile(r'^\s*-\s*"(\d{4}-\d{2}-\d{2})"\s*(?:#\s*(.*))?$')
 
 
 def load_holidays(path: Path | None = None) -> frozenset[date]:
@@ -21,6 +23,20 @@ def load_holidays(path: Path | None = None) -> frozenset[date]:
     for item in raw.get("holidays") or []:
         days.add(date.fromisoformat(str(item)))
     return frozenset(days)
+
+
+def load_holiday_notes(path: Path | None = None) -> dict[date, str]:
+    """The `# comment` on each holiday line, for the operator's `/holidays` list."""
+    target = path or _DEFAULT_HOLIDAYS
+    notes: dict[date, str] = {}
+    if not target.exists():
+        return notes
+    for line in target.read_text(encoding="utf-8").splitlines():
+        match = _NOTE.match(line)
+        if match is None:
+            continue
+        notes[date.fromisoformat(match.group(1))] = (match.group(2) or "").strip()
+    return notes
 
 
 def is_trading_day(day: date, holidays: frozenset[date] | None = None) -> bool:

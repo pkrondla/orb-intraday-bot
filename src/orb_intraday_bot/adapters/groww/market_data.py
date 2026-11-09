@@ -28,6 +28,7 @@ from orb_intraday_bot.options.chain import (
     parse_option_chain,
     parse_option_contracts,
 )
+from orb_intraday_bot.runtime.calendar import is_trading_day, load_holidays
 
 _FMT = "%Y-%m-%d %H:%M:%S"
 _MAX_DAYS_PER_REQUEST = 28   # Groww allows 30 days of 3-minute candles per request
@@ -115,11 +116,13 @@ class GrowwMarketData:
         by_day: dict[date, list[Candle]] = defaultdict(list)
         for candle in self.fetch_candles(contract, start, end):
             by_day[candle.start.date()].append(candle)
-        if not by_day:
+        closed = load_holidays()
+        trading = [day for day in by_day if is_trading_day(day, closed)]
+        if not trading:
             raise NoSessionDataError(
                 f"No session candles in the {lookback_days} days before {today}"
             )
-        day = max(by_day)
+        day = max(trading)
         return day, by_day[day]
 
     # -- the exchange's own daily numbers (what TradingView's daily bar shows) ------------
