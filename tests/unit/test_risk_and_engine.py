@@ -257,25 +257,24 @@ def test_target_is_capped_at_r2_for_trap_setups() -> None:
     assert t.t2 == 130 and "R3" in t.t2_basis
 
 
-def test_orl_on_s2_is_one_magnet() -> None:
-    # 28 Oct 2026: Case 2 short at 22671, ORL 22635 sitting on S2.
+def test_case2_uses_the_pivot_because_the_notes_name_no_target() -> None:
     sig = make(
         setup=Setup.FOLLOWUP_CASE_2, direction=Direction.SHORT, entry=75,
         target_ref="ORL", stop_level=None, stop_on="none", level_name="ORH", aggressive=True,
     )
     t = plan_targets(sig, WIDE, 110.0, 62.0, STOPS, zone=Zone.BEARISH)
-    assert t.t1 == 62 and "≈ S2" in t.t1_basis
-    assert t.t2 == 40 and "S3" in t.t2_basis           # 62 − 48 = 14; S3 40 is nearer
-
-
-def test_case2_short_caps_at_s2_when_orl_is_well_beyond() -> None:
-    sig = make(
-        setup=Setup.FOLLOWUP_CASE_2, direction=Direction.SHORT, entry=95,
-        target_ref="ORL", stop_level=None, stop_on="none", level_name="ORH", aggressive=True,
-    )
-    t = plan_targets(sig, WIDE, 110.0, 50.0, STOPS, zone=Zone.BEARISH)
-    assert t.t1 == 60 and "capped at S2" in t.t1_basis
+    assert t.t1 == 60 and t.t1_basis == "S2"
     assert t.t2 == 40 and "S3" in t.t2_basis
+
+
+def test_neutral_zone_trap_keeps_the_notes_target() -> None:
+    sig = make(
+        setup=Setup.TRAP_REVERSE_RETEST, entry=22650.0, stop_level=22620.0,
+        target_ref="ORH", level_name="ORL",
+    )
+    t = plan_targets(sig, OCT26, 22700.0, 22444.6, STOPS, zone=Zone.NEUTRAL)
+    assert t.t1 == 22700.0 and t.t1_basis == "ORH"
+    assert t.t2 == pytest.approx(22807.0666, abs=0.05) and "R1" in t.t2_basis
 
 
 def test_orh_target_below_entry_is_rejected() -> None:

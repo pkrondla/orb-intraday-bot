@@ -130,7 +130,7 @@ Two or more setups in the same direction mark a trending day.
 
 | Zone | Rule |
 |---|---|
-| R1 to P to S1 (neutral) | No aggressive trades (Case 1/2, consolidation). Standard entries are allowed, in scalp and run mode. **T1** is the nearest pivot still inside the zone (P, else R1 / S1), at least 10 points away. R2 / S2 are not aims in this zone. |
+| R1 to P to S1 (neutral) | No aggressive trades (Case 1/2, consolidation). Standard entries are allowed. When the notes name a target, that target is used. Otherwise **T1** is the nearest pivot still inside the zone (P, else R1 / S1), at least 10 points away, and R2 / S2 are not aims. |
 | Above R1 | Bullish bias (shown on the report). Longs and shorts are both allowed; entries still come from the OR rules, not from a pivot bounce. |
 | R1 to R2 | Standard bullish area. Aggressive entries are allowed. |
 | Below S1 | Bearish bias (shown on the report). Longs and shorts are both allowed; entries still come from the OR rules. |
@@ -166,15 +166,16 @@ The notes give one Target per setup. That is T1. T2 is a one-lot runner: **T1 ±
 
 | Setup | T1 | T2 |
 |---|---|---|
-| Bull trap / Case 1 / Case 2 short | ORL | T1 − OR-range, or nearer pivot |
-| Bear trap / Case 1 / Case 2 long | ORH | T1 + OR-range, or nearer pivot |
+| Bull trap short | ORL | T1 − OR-range, or nearer pivot |
+| Bear trap long | ORH | T1 + OR-range, or nearer pivot |
+| Case 1 / Case 2 | The notes name no target, so the pivot: S2 (short) or R2 (long), or the neutral-zone pivot | T1 ± OR-range, or nearer pivot |
 | Consolidation breakout | OR range projected from ORH or ORL, or the nearer pivot | T1 ± OR-range, or next nearer pivot |
 | ORB and the rest | R2 (long) or S2 (short). A broken R2 or S2: the next pivot, or the one after it when the next is inside 1R, capped at R4 or S4. | T1 ± OR-range, or nearer of R3/R4 (S3/S4) |
 | 2HH/3HH short above ORH, or below ORL | Nearest pivot at least 35 points in front | Next pivot beyond T1 |
 | 2LL/3LL long below ORL, or above ORH | Nearest pivot at least 35 points in front | Next pivot beyond T1 |
 | 2HH/3HH short inside OR | Nearest of ORL and the pivots below, at least 35 points away | Next pivot beyond T1 |
 | 2LL/3LL long inside OR | Nearest of ORH and the pivots above, at least 35 points away | Next pivot beyond T1 |
-| Neutral zone (any standard setup) | Nearest pivot still inside R1–S1 (P, else R1 / S1) | T1 ± OR-range, or nearer in-zone pivot, capped at R1/S1 |
+| Neutral zone, when the notes name no target | Nearest pivot still inside R1–S1 (P, else R1 / S1) | T1 ± OR-range, or nearer in-zone pivot, capped at R1/S1 |
 
 T1 is capped by the mandatory exits in Section 4. ORL sitting on S2 (or ORH on R2) is one magnet. The runner may go past R2/S2 because T1 already booked the notes Target.
 
@@ -277,7 +278,7 @@ These are intentional, because the notes win:
    - A retest is a candle whose low comes within the tolerance of the level (or below it) while it does not close back inside. Failure (close back inside) has no tolerance.
    - The notes say "retests ORH and makes high to previous swing/candle". The swing rule and the 1-point retest tolerance are assumptions. The looser "previous candle high is enough" reading is not used.
    - Bull/bear trap pullback: the most recent green (red) candle after the sign; a gap through its low (high) fills at the open.
-   - Case 1 and Case 2 aggressive entries use the opposite OR level as T1 (the notes give the target only for the trap confirmation entry).
+   - Case 1 and Case 2 have no target in the notes (the target is given only for the trap confirmation). Their T1 is the pivot.
    - R2/S2 breakouts have no trap or Case 1/2 follow-up (the notes say not to trade rejections from R2/S2).
 8. Phase 4 detection details (all candle-close based, all config under `whipsaw`, `structure`, `fake_break`, `consolidation`):
    - **Additional whipsaw:** starts after an ORB confirmation (ORH/ORL only) or a trap's reverse-retest entry. A rejection is a candle whose low (high for shorts) comes within the retest tolerance of the level; consecutive touching candles count once. The ORB version is cancelled by a close beyond the level, the trap version by price trading through it. After 2 rejections, the entry is the break of the last rejection candle's high (low). One entry per parent. Aggressive Case 1/2 entries do not start whipsaw tracking.
@@ -291,9 +292,9 @@ These are intentional, because the notes win:
    - **Touch stops (traps, structure, fake breaks)** still use the level when it is closer than 35 points, as in section 5, so their stop and lot sizing use the same distance.
    - **T1:** from the setup's target reference (section 5 table), except in the neutral zone (below) and for 2HH/3HH/2LL/3LL (section 5: nearest line at least 35 points in front, T2 the next pivot). 1 lot closes the whole position; 2+ lots leave a one-lot runner for T2. A trade entered below R2 has T1 at R2. A trade on a broken R2, or entered beyond R2, has T1 at the next pivot in front. When that pivot is closer than 1R (the 35-point hard stop), T1 is the pivot after it. R4 still caps a long and S4 a short. Entry beyond R4 (S4) is rejected. A target closer than 10 points is rejected. After the plan, a T1 closer than that trade's hard stop (its 1R) is skipped. Exactly 1R is taken. 1R is the futures stop distance, 35 points or the nearer touch level, not the option-rupee ratio. T1 also fires `t2_proximity_points` in front of the level (default 3).
    - **T2:** T1 ± OR-range, or the nearer pivot beyond T1, capped at R4/S4 (R5/S5 when T1 is already R4/S4). No room → T2 = T1.
-   - **Neutral-zone T1:** nearest pivot still inside R1–S1 (P, else R1 / S1), at least 10 points away. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22621 (P). Neutral T2 is capped at R1/S1.
+   - **Neutral-zone T1:** when the notes name no target, the nearest pivot still inside R1–S1 (P, else R1 / S1), at least 10 points away. R2/S2 are not aims. A 3LL long at 22546.4 with ORH 22575 / P 22621 / R2 23037 becomes T1 22621 (P). Neutral T2 is capped at R1/S1. A notes target is kept in this zone: a bear trap long stays on ORH.
    - **Consolidation T1:** the nearer of the OR-range projection and the nearest pivot at least 10 points away.
-   - **Trap / Case 1/2 T1** is the opposite OR, capped at R2/S2. ORL ≈ S2 or ORH ≈ R2 (within 10 points) is one magnet. The 28 Oct 2026 Case 2 short at 22671 with ORL 22635 sitting on S2 is T1 ORL≈S2.
+   - **Trap T1** is the opposite OR, capped at R2/S2. ORL ≈ S2 or ORH ≈ R2 (within 10 points) is one magnet. Case 1/2 do not use that OR level; the notes do not name their target, so T1 is the pivot.
    - **Broker crash net:** Groww's CE/PE trigger is `fill − 35 × max(|delta|, 1.0) − 10` option points, never tighter than the plan SL. 29 Oct 2026: a 2LL long's 35 × 0.47 net filled at −19.5 futures points. All strategy exits fire on futures.
    - **Zone filter:** pivots are reference. Longs below S1 and shorts above R1 are taken. The only hard block is aggressive entries (Case 1/2, consolidation) in the neutral zone. The zone is read from the signal candle's close. Without previous-session pivots, the zone is neutral and pivot targets fail.
    - **One trade per sign.** A signal blocked by the zone filter does not use up its sign, so the standard trigger of the same sign can still be taken.

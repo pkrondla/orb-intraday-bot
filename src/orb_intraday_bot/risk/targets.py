@@ -6,7 +6,7 @@ T1 comes from the signal's `target_ref`:
 |--------------------------|---------------------------------------------------------------------|
 | R2 / S2                  | that pivot. A fill already beyond it uses the next pivot (see below) |
 | R4 / S4                  | the next pivot in front; the one after it when the next is inside 1R |
-| ORH / ORL                | that opening-range level (trap / Case 1/2)                           |
+| ORH / ORL                | that opening-range level (bear trap / bull trap)                     |
 | OR_PROJECTION_OR_PIVOT   | the nearer of the signal's OR-range projection and the next pivot    |
 | RANGE_OPPOSITE_END       | the signal's own price (opposite end of the consolidation)           |
 
@@ -28,8 +28,9 @@ T1 is the pivot after it. R4 (S4) still closes the trade, so T1 is never beyond 
 An entry beyond R4 (S4) has no room and is rejected. The runner may go past R2/S2
 because T1 already booked the target.
 
-Neutral zone (R1 to S1): T1 is the nearest pivot still inside the zone (P, else R1 / S1).
-R2 / S2 are not aims.
+Neutral zone (R1 to S1): a setup whose notes name a target keeps that target. The others
+take the nearest pivot still inside the zone (P, else R1 / S1). R2 / S2 are not aims
+for those pivot targets.
 
 Both levels fire when the futures extreme comes within `t2_proximity_points` (default 3).
 
@@ -48,6 +49,14 @@ from orb_intraday_bot.core.signals import Setup, SetupSignal
 from orb_intraday_bot.core.ticks import futures_quote
 from orb_intraday_bot.indicators.pivots import Pivots
 from orb_intraday_bot.risk.stops import PlanError
+
+# The notes name these targets. Anything else is a pivot target.
+_NOTES_TARGET_SETUPS = frozenset({
+    Setup.TRAP_REVERSE_RETEST,      # bear trap ORH, bull trap ORL
+    Setup.CONSOLIDATION_BREAKOUT,   # OR-range projection or the nearer pivot
+    Setup.FAKE_BREAK,               # opposite end of the consolidation
+    Setup.PIVOT_BREAKOUT,           # R4 / S4, then the next-pivot rule
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +81,7 @@ def plan_targets(
     _ = t1_max_points  # retired: T1 is the notes target, not a pulled-in scalp
     if signal.setup is Setup.STRUCTURE_WHIPSAW:
         return _structure_targets(signal, pivots, orh, orl, stops)
-    if zone is Zone.NEUTRAL:
+    if zone is Zone.NEUTRAL and signal.setup not in _NOTES_TARGET_SETUPS:
         t1_plan = _neutral_t1(signal, pivots, stops)
         return _attach_runner(
             entry=signal.entry_price, t1=t1_plan.t1, t1_label=t1_plan.t1_basis,
@@ -91,6 +100,10 @@ def plan_targets(
         return levels[name]
 
     ref = signal.target_ref
+    # Case 1/2 and a trap whipsaw carry the opposite OR level, which the notes do not
+    # name as their target. Their T1 is the pivot.
+    if signal.setup not in _NOTES_TARGET_SETUPS and ref in ("ORH", "ORL"):
+        ref = "R2" if long else "S2"
     next_pivot = signal.setup is Setup.PIVOT_BREAKOUT
     if ref in ("R2", "S2", "R4", "S4"):
         assert ref is not None

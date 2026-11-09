@@ -6,6 +6,18 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-09
+
+### Changed
+- A target named in the notes is used as T1, including in the neutral zone.
+  A bear trap long targets ORH and a bull trap short targets ORL. Consolidation
+  keeps the nearer of the OR projection and a pivot. A fake break keeps the
+  opposite end of the range. Case 1, Case 2, ORB, and a whipsaw have no notes
+  target, so T1 stays a pivot.
+- Golden replay: 545 signals unchanged. Trades 202 → 209. Fill-points 2103.7 →
+  1414.5, charges 23889.28 → 24329.22. 28 sessions move. Lot-weighted futures
+  points 1973.6 → 1265.3.
+
 ## [0.29.0] - 2026-11-09
 
 ### Changed
