@@ -1,6 +1,6 @@
 """A confirmed ORB replaces an opposite Case 1/2 on the same level.
 
-ORH 22810 / ORL 22795. The 09:24 close back inside is a Case 1 short. A later close
+ORH 22810 / ORL 22770. The 09:24 close back inside is a Case 1 short. A later close
 back above ORH is only a new sign. The short is closed when that breakout confirms,
 and the long is opened on that candle. The 35-point stop stays until then.
 """
@@ -36,8 +36,8 @@ CFG = StrategyConfig(
 # 09:15-09:18 fix the range. 09:21 signs ORH, 09:24 fails (Case 1 short).
 # 09:30 is a new sign only. 09:33 retests. 09:36 confirms the long.
 SEQUENCE = [
-    (22800, 22810, 22795, 22805),
-    (22805, 22808, 22798, 22800),
+    (22800, 22810, 22770, 22805),
+    (22805, 22808, 22775, 22800),
     (22808, 22812, 22807, 22811),
     (22811, 22811.5, 22808, 22809),
     (22809, 22809.8, 22806, 22807),

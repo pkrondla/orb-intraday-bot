@@ -14,7 +14,7 @@ from orb_intraday_bot.core.models import Direction, Zone
 from orb_intraday_bot.core.signals import Setup, SetupSignal, StopOn
 from orb_intraday_bot.engine.signal_engine import SignalEngine
 from orb_intraday_bot.engine.zone_filter import zone_block_reason
-from orb_intraday_bot.indicators.pivots import traditional_pivots
+from orb_intraday_bot.indicators.pivots import Pivots, traditional_pivots
 from orb_intraday_bot.risk.sizing import lots_for, risk_budget_inr
 from orb_intraday_bot.risk.stops import PlanError, plan_stop
 from orb_intraday_bot.risk.targets import plan_targets, t2_trigger_price
@@ -26,6 +26,12 @@ NARROW = traditional_pivots(110, 90, 100)
 WIDE = traditional_pivots(120, 80, 100)
 # R2 250, R3 300, R4 350, R5 400. The step is 50, so R3 can sit beyond 1R.
 FAR = traditional_pivots(200, 100, 150)
+# Neutral zone is S1 20 to R1 180, with only P between them. A long from 60
+# has T1 at P (40 pts), which clears the 35-point stop.
+GAP = Pivots(
+    p=100, r1=180, r2=220, r3=260, r4=300, r5=340,
+    s1=20, s2=0, s3=-40, s4=-80, s5=-120,
+)
 STOPS = StopsConfig()    # 35 hard, 10 floor
 
 
@@ -472,17 +478,32 @@ def bar(close: float):  # type: ignore[no-untyped-def]
 
 
 # Wide pivots: neutral zone is 80..120; bullish above 120; bearish below 80
-LONG_ORB = make(entry=125, stop_level=110, level=110, target_ref="R2", sign="orb")
+# FAR pivots put R2 40 pts ahead of 210, so the 35-pt stop has room.
+LONG_ORB = make(entry=210, stop_level=200, level=200, target_ref="R2", sign="orb")
 
 
 def test_engine_accepts_a_valid_signal_and_builds_the_plan() -> None:
-    res = engine().evaluate(bar(125), [LONG_ORB], 110, 95)
+    res = engine(pivots=FAR).evaluate(bar(210), [LONG_ORB], 200, 150)
     assert res.zone is Zone.BULLISH and res.rejected == []
     (trade,) = res.accepted
-    assert trade.stop.stop_points == 35 and trade.targets.t1 == 140
-    assert trade.targets.t2 == 155
-    assert trade.stop.price_stop == 90 and trade.stop.close_exit_level == 110
+    assert trade.stop.stop_points == 35 and trade.targets.t1 == 250
+    assert trade.targets.t2 == 300
+    assert trade.stop.price_stop == 175 and trade.stop.close_exit_level == 200
     assert trade.risk_budget_inr == 5000
+
+
+def test_engine_skips_a_target_under_1r() -> None:
+    # Bullish, T1 is R2 at 140. From 110 that is 30 pts, inside the 35-pt stop.
+    short_of = make(entry=110, stop_level=100, level=100, target_ref="R2", sign="near")
+    res = engine().evaluate(bar(130), [short_of], 110, 95)
+    assert res.accepted == []
+    assert res.rejected[0].stage == "plan" and "under 1R" in res.rejected[0].reason
+
+
+def test_engine_keeps_a_target_at_exactly_1r() -> None:
+    exact = make(entry=105, stop_level=90, level=90, target_ref="R2", sign="exact")
+    res = engine().evaluate(bar(130), [exact], 110, 95)
+    assert len(res.accepted) == 1 and res.accepted[0].targets.t1_points == 35
 
 
 def test_engine_applies_neutral_zone_targets() -> None:
@@ -529,15 +550,15 @@ def test_blocked_aggressive_signal_does_not_use_up_its_sign() -> None:
 
 
 def test_one_trade_per_sign_id() -> None:
-    eng = engine()
-    assert len(eng.evaluate(bar(125), [LONG_ORB], 110, 95).accepted) == 1
-    res = eng.evaluate(bar(126), [LONG_ORB], 110, 95)
+    eng = engine(pivots=FAR)
+    assert len(eng.evaluate(bar(210), [LONG_ORB], 200, 150).accepted) == 1
+    res = eng.evaluate(bar(211), [LONG_ORB], 200, 150)
     assert res.accepted == [] and res.rejected[0].reason == "sign already traded"
 
 
 def test_plan_failure_is_reported() -> None:
-    bad = make(entry=125, target_ref="R2", sign="x", stop_level=110)
-    res = engine().evaluate(bar(125), [bad], 110, 95, ())            # fine
+    bad = make(entry=105, target_ref="R2", sign="x", stop_level=90)
+    res = engine().evaluate(bar(130), [bad], 110, 95, ())            # T1 is exactly 1R
     assert len(res.accepted) == 1
     too_close = make(entry=138, sign="y")                            # R2 (140) only 2 away
     res = engine().evaluate(bar(138), [too_close], 110, 95)
@@ -545,21 +566,22 @@ def test_plan_failure_is_reported() -> None:
 
 
 def test_engine_still_takes_orb_when_the_level_is_far() -> None:
-    far = make(entry=160, stop_level=110, level=110, sign="far")
-    res = engine().evaluate(bar(160), [far], 110, 95)
+    far = make(entry=210, stop_level=100, level=100, sign="far")
+    res = engine(pivots=FAR).evaluate(bar(210), [far], 240, 180)
     assert len(res.accepted) == 1
-    assert res.accepted[0].stop.price_stop == 125
-    assert res.accepted[0].stop.close_exit_level == 110
+    assert res.accepted[0].stop.price_stop == 175
+    assert res.accepted[0].stop.close_exit_level == 100
 
 
 def test_priority_resolves_a_same_candle_conflict() -> None:
-    long_orb = make(entry=100, stop_level=90, level=90, target_ref="R2", sign="orb",
+    # Entry 60, neutral T1 is P at 100 (40 pts, past 1R), so the ORB reaches the arbiter.
+    long_orb = make(entry=60, stop_level=40, level=40, target_ref="R2", sign="orb",
                     level_name="ORH")
     short_struct = make(setup=Setup.STRUCTURE_WHIPSAW, direction=Direction.SHORT, entry=100,
                         stop_level=110, stop_on="touch", target_ref="S2", sign="st",
                         level_name="2HH", level=110)
     for order in ([long_orb, short_struct], [short_struct, long_orb]):
-        res = engine().evaluate(bar(100), order, 110, 95)             # neutral zone
+        res = engine(pivots=GAP).evaluate(bar(100), order, 110, 95)   # neutral zone
         assert [t.signal.sign_id for t in res.accepted] == ["orb"]
         assert res.rejected[0].stage == "arbiter" and "conflicts" in res.rejected[0].reason
 
@@ -567,25 +589,25 @@ def test_priority_resolves_a_same_candle_conflict() -> None:
 def test_priority_order_among_same_direction_signals() -> None:
     a = make(setup=Setup.STRUCTURE_WHIPSAW, entry=100, stop_level=90, stop_on="touch",
              target_ref="R2", sign="st", level_name="2LL", level=90)
-    b = make(entry=100, stop_level=90, level=90, target_ref="R2", sign="orb")
-    res = engine().evaluate(bar(100), [a, b], 110, 95)
+    b = make(entry=60, stop_level=40, level=40, target_ref="R2", sign="orb")
+    res = engine(pivots=GAP).evaluate(bar(100), [a, b], 110, 95)
     assert [t.signal.sign_id for t in res.accepted] == ["orb", "st"]   # both long: both taken
 
 
 def test_opposite_open_position_blocks_unless_allowed() -> None:
-    sig = make(entry=100, stop_level=90, level=90, target_ref="R2", sign="orb")
-    res = engine().evaluate(bar(100), [sig], 110, 95, [Direction.SHORT])
+    sig = make(entry=60, stop_level=40, level=40, target_ref="R2", sign="orb")
+    res = engine(pivots=GAP).evaluate(bar(100), [sig], 110, 95, [Direction.SHORT])
     assert res.accepted == [] and "SHORT position is open" in res.rejected[0].reason
     cfg = StrategyConfig(arbiter=ArbiterConfig(allow_opposite_positions=True))
-    res = engine(cfg).evaluate(bar(100), [sig], 110, 95, [Direction.SHORT])
+    res = engine(cfg, pivots=GAP).evaluate(bar(100), [sig], 110, 95, [Direction.SHORT])
     assert len(res.accepted) == 1
 
 
 def test_maximum_open_positions() -> None:
-    sig = make(entry=100, stop_level=90, level=90, target_ref="R2", sign="orb")
-    res = engine().evaluate(bar(100), [sig], 110, 95, [Direction.LONG] * 5)
+    sig = make(entry=60, stop_level=40, level=40, target_ref="R2", sign="orb")
+    res = engine(pivots=GAP).evaluate(bar(100), [sig], 110, 95, [Direction.LONG] * 5)
     assert "maximum 5 open positions" in res.rejected[0].reason
-    res = engine().evaluate(bar(100), [sig], 110, 95, [Direction.LONG] * 4)
+    res = engine(pivots=GAP).evaluate(bar(100), [sig], 110, 95, [Direction.LONG] * 4)
     assert len(res.accepted) == 1
 
 
@@ -593,7 +615,7 @@ def test_daily_trade_limits() -> None:
     cfg = StrategyConfig(
         arbiter=ArbiterConfig(max_trades_per_day=2, max_structure_trades_per_day=1)
     )
-    eng = engine(cfg)
+    eng = engine(cfg, pivots=GAP)
 
     def structure(n: int) -> SetupSignal:
         return make(setup=Setup.STRUCTURE_WHIPSAW, entry=100, stop_level=90, stop_on="touch",
@@ -602,9 +624,9 @@ def test_daily_trade_limits() -> None:
     assert len(eng.evaluate(bar(100), [structure(1)], None, None).accepted) == 1
     res = eng.evaluate(bar(100), [structure(2)], None, None)
     assert "2LL/3LL/2HH/3HH" in res.rejected[0].reason
-    orb = make(entry=100, stop_level=90, level=90, target_ref="R2", sign="orb")
+    orb = make(entry=60, stop_level=40, level=40, target_ref="R2", sign="orb")
     assert len(eng.evaluate(bar(100), [orb], None, None).accepted) == 1
-    third = make(entry=100, stop_level=90, level=90, target_ref="R2", sign="orb2")
+    third = make(entry=60, stop_level=40, level=40, target_ref="R2", sign="orb2")
     res = eng.evaluate(bar(100), [third], None, None)
     assert "daily limit of 2 trades" in res.rejected[0].reason
 

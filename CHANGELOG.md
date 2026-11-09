@@ -6,6 +6,18 @@ change to a rule, a stop, a target or sizing is at least a MINOR release.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-09
+
+### Changed
+- A trade is skipped when the futures distance to T1 is under that trade's 1R.
+  1R is the hard stop: 35 points, or the nearer touch level. Exactly 1R is taken.
+  The option ratio on the card is not used. The whole trade is skipped, before
+  any order.
+- Golden replay: 545 signals unchanged. Trades 230 → 202. Fill-points 2798.9 →
+  2418.0, charges 25980.87 → 23998.25. 71 signals are rejected because T1 is
+  under 1R. 52 of the old trades no longer open; 24 later trades take the freed
+  slots. 30 sessions move. Lot-weighted futures points 3431.0 → 2284.8.
+
 ## [0.27.0] - 2026-11-07
 
 ### Changed

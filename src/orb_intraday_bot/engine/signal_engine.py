@@ -5,7 +5,8 @@ Per candle, for each candidate signal (from `SetupDetector`):
 1. one trade per sign: skipped if its `sign_id` was already traded (a blocked signal does not use
    up its sign, so the standard trigger of the same sign can still come later)
 2. zone filter (hard rules)
-3. stop plan and target plan (rejects signals with no room, a bad stop level, no pivots, ...)
+3. stop plan and target plan (rejects signals with no room, a bad stop level, no pivots,
+   or a T1 closer than that trade's 1R)
 4. arbitration among the survivors, highest priority first:
    - a lower-priority signal in the opposite direction on the same candle is dropped
    - an open position in the opposite direction blocks a new trade (unless allowed by config)
@@ -137,6 +138,12 @@ class SignalEngine:
                 )
             except PlanError as exc:
                 result.rejected.append(Rejection(sig, "plan", str(exc)))
+                continue
+            if targets.t1_points + 1e-9 < stop.stop_points:
+                result.rejected.append(Rejection(
+                    sig, "plan",
+                    f"T1 is {targets.t1_points:.1f} pts, under 1R of {stop.stop_points:.1f}",
+                ))
                 continue
             survivors.append(
                 PlannedTrade(sig, zone, stop, targets, risk_budget_inr(self._cfg.sizing))
